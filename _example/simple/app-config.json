@@ -1,0 +1,49 @@
+{
+  "app": {
+    "name": "MyApp",
+    "display_name": "My Application",
+    "description": "A desktop application built with Velo",
+    "version": "1.0.0",
+    "author": "Author",
+    "icon": "assets/appicon.png"
+  },
+  "binary": {
+    "project_name": "myapp"
+  },
+  "platforms": {
+    "macos": {
+      "bundle_id": "com.example.myapp",
+      "icon_file": "assets/appicon.png",
+      "min_system_version": "10.13",
+      "category": "public.app-category.utilities",
+      "entitlements": {
+        "network_client": true
+      }
+    },
+    "windows": {
+      "company_name": "Example Inc",
+      "product_name": "My Application",
+      "file_description": "My Application Desktop Client",
+      "internal_name": "MyApp",
+      "original_filename": "MyApp.exe",
+      "icon_files": {
+        "png": "assets/appicon.png",
+        "png16": "assets/appicon.png"
+      }
+    },
+    "linux": {
+      "icon_file": "assets/appicon.png",
+      "desktop_entry": {
+        "categories": "Utility;",
+        "keywords": "app;velo;"
+      }
+    }
+  },
+  "build": {
+    "config_files": [],
+    "exclude_files": []
+  },
+  "release": {
+    "footer": "Built with Velo"
+  }
+}

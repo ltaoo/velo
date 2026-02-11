@@ -1,0 +1,349 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare Build Assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Generate build configs and icons
+        run: go run ./cmd/velogen -icons
+
+      - name: Verify generated configs
+        run: |
+          echo "=== .build directory ==="
+          ls -la .build/
+          echo "=== .goreleaser.yaml ==="
+          head -20 .build/.goreleaser.yaml
+
+      - name: Generate Windows resources (.syso)
+        run: go run github.com/tc-hib/go-winres@latest make --in .build/winres/winres.json --arch amd64
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-assets
+          include-hidden-files: true
+          path: |
+            build/
+            .build/
+            *.syso
+            assets/
+
+  # TODO: Windows build temporarily disabled
+  # build-windows:
+  #   name: Build Windows
+  #   needs: prepare
+  #   runs-on: windows-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.23'
+
+  #     - name: Download build artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: build-assets
+
+  #     - name: Regenerate configs
+  #       shell: bash
+  #       run: go run ./cmd/velogen
+
+  #     - name: Set up MinGW
+  #       uses: msys2/setup-msys2@v2
+  #       with:
+  #         msystem: MINGW64
+  #         update: true
+  #         install: mingw-w64-x86_64-gcc
+
+  #     - name: Add MinGW to PATH
+  #       run: |
+  #         echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+  #     - name: Install WebView2 SDK
+  #       run: |
+  #         Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2210.55" -OutFile webview2.zip
+  #         Expand-Archive -Path webview2.zip -DestinationPath webview2
+  #         Copy-Item -Path "webview2\build\native\include\*" -Destination "C:\msys64\mingw64\include\" -Recurse -Force
+  #         Copy-Item -Path "webview2\build\native\x64\*" -Destination "C:\msys64\mingw64\lib\" -Recurse -Force
+
+  #     - name: Build Windows with GoReleaser
+  #       uses: goreleaser/goreleaser-action@v6
+  #       with:
+  #         distribution: goreleaser
+  #         version: latest
+  #         args: build --single-target --snapshot --clean -f .build/.goreleaser.yaml --id windows
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #         CGO_ENABLED: 1
+
+  #     - name: Upload Windows artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: windows-build
+  #         path: |
+  #           dist/*windows*.zip
+
+  build-linux:
+    name: Build Linux
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-assets
+
+      - name: Regenerate configs
+        run: go run ./cmd/velogen
+
+      - name: Build Linux with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --snapshot --clean -f .build/.goreleaser.yaml --id linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            dist/*linux*.tar.gz
+
+  build-macos:
+    name: Build macOS
+    needs: prepare
+    runs-on: macos-latest
+    env:
+      MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+      MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+      NOTARY_PRIVATE_KEY: ${{ secrets.NOTARY_PRIVATE_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-assets
+
+      - name: Generate configs and macOS icons
+        run: go run ./cmd/velogen -icons
+
+      - name: Install rcodesign
+        run: |
+          set -e
+          ARCH="$(uname -m)"
+          if [ "$ARCH" = "arm64" ]; then
+            URL="https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-aarch64-apple-darwin.tar.gz"
+          else
+            URL="https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-x86_64-apple-darwin.tar.gz"
+          fi
+          curl -L -o rcodesign.tar.gz "$URL"
+          tar -xvf rcodesign.tar.gz
+          mv apple-codesign-0.22.0-*/rcodesign /usr/local/bin/
+          rm -rf rcodesign.tar.gz apple-codesign-0.22.0-*
+
+      - name: Prepare secrets
+        run: |
+          echo "${{ secrets.MAC_CERT_P12 }}" | base64 --decode > cert.p12
+          echo "${{ secrets.NOTARY_PRIVATE_KEY }}" | base64 --decode > AuthKey.p8
+
+      - name: Set entitlements path
+        run: |
+          echo "MAC_ENTITLEMENTS_PATH=$(pwd)/.build/entitlements.plist" >> "$GITHUB_ENV"
+
+      - name: Build macOS with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --snapshot --clean -f .build/.goreleaser.yaml --id macos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAC_CERT_P12_FILE: cert.p12
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          MAC_ENTITLEMENTS_PATH: ${{ env.MAC_ENTITLEMENTS_PATH }}
+
+      - name: Create API key JSON for notarization
+        run: |
+          rcodesign encode-app-store-connect-api-key \
+            "${{ secrets.NOTARY_ISSUER_ID }}" \
+            "${{ secrets.NOTARY_KEY_ID }}" \
+            AuthKey.p8 \
+            > api-key.json
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build macOS .app bundles and create DMG/ZIP
+        run: |
+          set -e
+          APP_NAME=$(jq -r '.app.name' app-config.json)
+          ICON_FILE=$(jq -r '.platforms.macos.icon_file' app-config.json)
+
+          for binary in dist/*darwin*/${APP_NAME}; do
+            if [ -f "$binary" ]; then
+              dir=$(dirname "$binary")
+              arch=$(basename "$dir" | sed -E 's/.*darwin_(amd64|arm64).*/\1/')
+              if [ "$arch" = "amd64" ]; then arch_name="x86_64"; else arch_name="arm64"; fi
+
+              temp_app_dir="dist/temp_${arch_name}"
+              mkdir -p "$temp_app_dir"
+              appdir="$temp_app_dir/${APP_NAME}.app"
+              rm -rf "$appdir"
+              mkdir -p "$appdir/Contents/MacOS" "$appdir/Contents/Resources"
+              cp "$binary" "$appdir/Contents/MacOS/${APP_NAME}"
+
+              sed -e "s/\${VERSION}/${GITHUB_REF_NAME}/g" \
+                  -e "s/\${BUILD_NUMBER}/${GITHUB_RUN_NUMBER}/g" \
+                  .build/Info.plist.template > "$appdir/Contents/Info.plist"
+
+              if [ -f "${ICON_FILE}" ]; then
+                cp "${ICON_FILE}" "$appdir/Contents/Resources/$(basename "${ICON_FILE}")"
+              fi
+
+              rcodesign sign --p12-file cert.p12 --p12-password "${MAC_CERT_PASSWORD}" --code-signature-flags runtime "$appdir"
+              codesign -vvv --deep --strict "$appdir" || echo "⚠️  Signature verification failed"
+
+              zip_name="${APP_NAME}_darwin_${arch_name}.zip"
+              (cd "$temp_app_dir" && zip -r "../$zip_name" "${APP_NAME}.app")
+
+              APP_NAME="$APP_NAME" \
+              VERSION="${GITHUB_REF_NAME}" \
+              ARCH="$arch_name" \
+              APP_PATH="$appdir" \
+              OUTPUT_DIR="dist" \
+              ./scripts/create_dmg.sh
+
+              rm -rf "$temp_app_dir"
+            fi
+          done
+
+      - name: Sign macOS DMG files
+        run: |
+          set -e
+          for file in dist/*.dmg; do
+            if [ -f "$file" ]; then
+              rcodesign sign \
+                --p12-file cert.p12 \
+                --p12-password "${MAC_CERT_PASSWORD}" \
+                --code-signature-flags runtime \
+                "$file"
+            fi
+          done
+
+      - name: Notarize macOS DMG files
+        run: |
+          for file in dist/*.dmg; do
+            if [ -f "$file" ]; then
+              rcodesign notary-submit \
+                --api-key-path api-key.json \
+                --wait \
+                "$file"
+            fi
+          done
+
+      - name: Staple notarization tickets to DMG files
+        run: |
+          set -e
+          for dmgfile in dist/*.dmg; do
+            if [ -f "$dmgfile" ]; then
+              rcodesign staple "$dmgfile"
+            fi
+          done
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            dist/*.dmg
+            dist/*.zip
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build-logs
+          path: |
+            dist/**/*.log
+
+  release:
+    name: Create Release
+    # TODO: Re-add build-windows when Windows build is re-enabled
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.dmg" \) -exec cp {} release-assets/ \;
+          ls -lh release-assets/
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: release-assets/*

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velo Simple Example</title>
+  <link rel="icon" type="image/svg+xml" href="/public/wails.png" />
+  <link rel="stylesheet" href="/public/index.css">
+  <script src="/public/timeless.core.umd.min.js"></script>
+  <script src="/public/timeless.web.umd.min.js"></script>
+  <script src="/public/veloui.umd.min.js"></script>
+  <script src="/public/tailwindcss.3.4.17.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: ['selector', '[data-theme="dark"]'],
+    }
+  </script>
+  <style>
+    :root {
+      --background: #ededed;
+      --foreground: #171717;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #fff;
+      --BG-3: #f7f7f7;
+      --BG-4: #4c4c4c;
+      --BG-5: #fff;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-0_5: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.55);
+      --FG-2: rgba(0, 0, 0, 0.3);
+      --FG-3: rgba(0, 0, 0, 0.1);
+      --FG-4: rgba(0, 0, 0, 0.15);
+      --FG-5: rgba(0, 0, 0, 0.05);
+      --BG-COLOR-ACTIVE: #ececec;
+      --RED: #fa5151;
+      --GREEN: #07c160;
+      --border: oklch(92.2% 0 0);
+      --hh: 100vh;
+    }
+
+    [data-theme="dark"] {
+      --background: #111;
+      --foreground: #f3f4f6;
+      --BG-0: #111;
+      --BG-1: #1e1e1e;
+      --BG-2: #191919;
+      --BG-3: #202020;
+      --BG-4: #404040;
+      --BG-5: #2c2c2c;
+      --FG-0: rgba(255, 255, 255, 0.8);
+      --FG-0_5: rgba(255, 255, 255, 0.6);
+      --FG-1: rgba(255, 255, 255, 0.5);
+      --FG-2: rgba(255, 255, 255, 0.3);
+      --FG-3: rgba(255, 255, 255, 0.1);
+      --FG-4: rgba(255, 255, 255, 0.15);
+      --FG-5: rgba(255, 255, 255, 0.1);
+      --BG-COLOR-ACTIVE: #373737;
+      --RED: #fa5151;
+      --GREEN: #07c160;
+      --border: oklch(100% 0 0/.1);
+    }
+  </style>
+</head>
+
+<body>
+  <script>!function () { try { var d = document.documentElement, n = 'data-theme', s = 'setAttribute'; var e = localStorage.getItem('theme'); if ('system' === e || (!e && true)) { var t = '(prefers-color-scheme: dark)', m = window.matchMedia(t); if (m.media !== t || m.matches) { d.style.colorScheme = 'dark'; d[s](n, 'dark') } else { d.style.colorScheme = 'light'; d[s](n, 'light') } } else if (e) { d[s](n, e || '') } if (e === 'light' || e === 'dark') d.style.colorScheme = e } catch (e) { } }()</script>
+  <div id="root"></div>
+  <script type="module" src="/src/components/baseui.js"></script>
+  <script type="module" src="/src/index.js"></script>
+</body>
+
+</html>

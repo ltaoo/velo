@@ -1,0 +1,18 @@
+# Build output
+dist/
+.build/
+*.syso
+/velo*
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
