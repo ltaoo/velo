@@ -3,6 +3,7 @@ dist/
 .build/
 *.syso
 /velo*
+!/velo.go
 
 # Environment
 .env
