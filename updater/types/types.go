@@ -72,6 +72,9 @@ type UpdateSource struct {
 	// ManifestURL is the URL for custom HTTP manifest
 	ManifestURL string `yaml:"manifest_url,omitempty"`
 
+	// SelfURL is the URL for self-hosted update source
+	SelfURL string `yaml:"self_url,omitempty"`
+
 	// Enabled controls whether this source is active
 	Enabled bool `yaml:"enabled"`
 
@@ -263,10 +266,14 @@ type UpdateError struct {
 
 // Error 实现 error 接口
 func (e *UpdateError) Error() string {
+	msg := fmt.Sprintf("[%s] %s", e.Category, e.Message)
 	if e.Cause != nil {
-		return fmt.Sprintf("[%s] %s: %v", e.Category, e.Message, e.Cause)
+		msg += fmt.Sprintf(": %v", e.Cause)
 	}
-	return fmt.Sprintf("[%s] %s", e.Category, e.Message)
+	for k, v := range e.Context {
+		msg += fmt.Sprintf(" [%s=%v]", k, v)
+	}
+	return msg
 }
 
 // Unwrap 实现 errors.Unwrap 接口

@@ -4,6 +4,7 @@
 import { HomePageView } from "../pages/home/index.js";
 import { HomeLayoutView } from "../pages/home/layout.js";
 import { UIExamplePageView } from "../pages/home/example.js";
+import { UpdatePageView } from "../pages/home/update.js";
 import { LoginPageView } from "../pages/login/index.js";
 import { NotFoundPageView } from "../pages/notfound/index.js";
 
@@ -11,6 +12,7 @@ export const views = {
   "root.home_layout": HomeLayoutView,
   "root.home_layout.index": HomePageView,
   "root.home_layout.example": UIExamplePageView,
+  "root.home_layout.update": UpdatePageView,
   "root.login": LoginPageView,
   "root.notfound": NotFoundPageView,
 };

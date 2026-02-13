@@ -12,7 +12,11 @@ export function HomePageView(props) {
   };
 
   return Flex({ class: "page w-full h-full" }, [
-    View({ class: "p-4 pr-0 w-[240px]" }, []),
+    View({ class: "p-4 pr-0 w-[240px]" }, [
+      View({ class: "text-sm text-[var(--FG-1)]" }, [
+        Txt(computed({ version: vm$.version }, (s) => s.version ? "版本: " + s.version : "")),
+      ]),
+    ]),
     View({ class: "p-4 flex-1 w-0" }, []),
     View({ class: "p-4 pl-0 w-[260px]" }, []),
     // Popper({ store: ui.popover$ }, [

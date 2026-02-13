@@ -138,6 +138,9 @@ type UpdateSource struct {
 	// ManifestURL is the URL for custom HTTP manifest
 	ManifestURL string `yaml:"manifest_url,omitempty"`
 
+	// SelfURL is the URL for self-hosted update source
+	SelfURL string `yaml:"self_url,omitempty"`
+
 	// Enabled controls whether this source is active
 	Enabled bool `yaml:"enabled"`
 }

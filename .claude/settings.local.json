@@ -6,7 +6,15 @@
       "Bash(go vet:*)",
       "Bash(go mod tidy:*)",
       "Bash(go run:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(xargs -I{} sh -c 'echo \"\"=== {} ===\"\" && cat \"\"{}\"\"')",
+      "Bash(test:*)",
+      "Bash(export:*)",
+      "Bash(go version:*)",
+      "Bash(brew install:*)",
+      "Bash(ls:*)",
+      "Bash(open:*)",
+      "Bash(./velo build:*)"
     ]
   }
 }

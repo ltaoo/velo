@@ -45,5 +45,21 @@
   },
   "release": {
     "footer": "Built with Velo"
+  },
+  "update": {
+    "enabled": true,
+    "check_frequency": "startup",
+    "channel": "stable",
+    "auto_download": false,
+    "timeout": 300,
+    "sources": [
+      {
+        "type": "http",
+        "priority": 1,
+        "enabled": true,
+        "need_check_checksum": false,
+        "manifest_url": "http://111.229.247.226:5555/api/public/dl/3nfqWk9Y?inline=true"
+      }
+    ]
   }
 }

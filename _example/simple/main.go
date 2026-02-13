@@ -4,15 +4,16 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/ltaoo/velo"
+	veloerr "github.com/ltaoo/velo/error"
 	"github.com/ltaoo/velo/file"
 	updater "github.com/ltaoo/velo/updater/api"
-	uconfig "github.com/ltaoo/velo/updater/config"
 	utypes "github.com/ltaoo/velo/updater/types"
 	uversion "github.com/ltaoo/velo/updater/version"
 
@@ -22,10 +23,39 @@ import (
 //go:embed frontend
 var frontend_folder embed.FS
 
-var Version = "(dev)"
+//go:embed app-config.json
+var appConfigData []byte
+
+var Version = "1.0.0"
+var Mode = "dev"
+
+func setupLogger() *zerolog.Logger {
+	homeDir, _ := os.UserHomeDir()
+	logDir := filepath.Join(homeDir, ".myapp")
+	os.MkdirAll(logDir, 0755)
+	logFile, err := os.OpenFile(filepath.Join(logDir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+
+	var writer io.Writer
+	if err != nil {
+		writer = zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	} else if Mode == "release" {
+		writer = logFile
+	} else {
+		writer = io.MultiWriter(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}, logFile)
+	}
+	logger := zerolog.New(writer).With().Timestamp().Logger()
+	return &logger
+}
+
+func fatal(logger *zerolog.Logger, msg string) {
+	logger.Error().Msg(msg)
+	veloerr.ShowErrorDialog(msg)
+	os.Exit(1)
+}
 
 func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
-	updateConfig := uconfig.DefaultUpdaterConfig()
+	appCfg := velo.LoadAppConfig(appConfigData)
+	updateConfig := appCfg.Update.ToUpdaterConfig()
 	versionInfo := uversion.ParseVersionInfo(Version, updateConfig)
 	if !versionInfo.UpdateMode.IsEnabled() {
 		return nil, fmt.Errorf("auto-update is disabled (mode: %s)", versionInfo.UpdateMode)
@@ -67,25 +97,15 @@ func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
 }
 
 func main() {
-	writer := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-	logger := zerolog.New(writer).With().Timestamp().Logger()
-	logger.Info().Msgf("Version: %s, OS: %s/%s", Version, runtime.GOOS, runtime.GOARCH)
+	logger := setupLogger()
+	logger.Info().Msgf("Version: %s, Mode: %s, OS: %s/%s", Version, Mode, runtime.GOOS, runtime.GOARCH)
 
-	app_updater, err := initUpdater(&logger)
+	app_updater, err := initUpdater(logger)
 	if err != nil {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.Fatal().Err(err).Msg("failed to get current working directory")
-	}
-	frontendDir := filepath.Join(cwd, "frontend")
-	if _, err := os.Stat(filepath.Join(frontendDir, "index.html")); os.IsNotExist(err) {
-		logger.Warn().Msgf("frontend/index.html not found in %s", frontendDir)
-	}
-
-	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, FrontendDir: frontendDir, FrontendFS: frontend_folder}
+	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, FrontendFS: frontend_folder}
 	b := velo.NewApp(&opt)
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"message": "pong"})
@@ -102,13 +122,13 @@ func main() {
 	})
 	b.Get("/api/update/check", func(c *velo.BoxContext) interface{} {
 		if app_updater == nil {
-			return c.Ok(velo.H{"hasUpdate": false, "currentVersion": Version, "error": "Updater not initialized"})
+			return c.Error("Updater not initialized")
 		}
 		ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 		defer cancel()
 		releaseInfo, err := app_updater.CheckForUpdatesForce(ctx)
 		if err != nil {
-			return c.Ok(velo.H{"hasUpdate": false, "currentVersion": Version, "error": err.Error()})
+			return c.Error(err.Error())
 		}
 		if releaseInfo != nil && releaseInfo.IsNewer {
 			return c.Ok(velo.H{"hasUpdate": true, "version": releaseInfo.Version, "currentVersion": Version, "releaseNotes": releaseInfo.ReleaseNotes})
@@ -127,7 +147,15 @@ func main() {
 		if releaseInfo == nil || !releaseInfo.IsNewer {
 			return c.Ok(velo.H{"success": false, "error": "No update available"})
 		}
-		updatePath, err := app_updater.DownloadUpdate(ctx, releaseInfo, nil)
+		updatePath, err := app_updater.DownloadUpdate(ctx, releaseInfo, func(progress utypes.DownloadProgress) {
+			b.SendMessage(velo.H{
+				"type":            "download_progress",
+				"bytesDownloaded": progress.BytesDownloaded,
+				"totalBytes":      progress.TotalBytes,
+				"percentage":      progress.Percentage,
+				"speed":           progress.Speed,
+			})
+		})
 		if err != nil {
 			return c.Ok(velo.H{"success": false, "error": err.Error()})
 		}

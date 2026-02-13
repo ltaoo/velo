@@ -1,7 +1,9 @@
 export function HomePageViewModel(props) {
-  // let _memos = JSON.parse(localStorage.getItem("memos") || "[]");
-  const vm = {};
-  return {
-    vm,
-  };
+  const version = ref("");
+  invoke("/api/app", { method: "GET" }).then((r) => {
+    if (r && r.data) {
+      version.value = r.data.version;
+    }
+  });
+  return { version };
 }

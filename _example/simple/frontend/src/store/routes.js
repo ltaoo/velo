@@ -18,6 +18,10 @@ const configure = {
             title: "组件示例",
             pathname: "/home/ui",
           },
+          update: {
+            title: "检查更新",
+            pathname: "/home/update",
+          },
         },
         options: {
           require: [],
