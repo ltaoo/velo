@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/ltaoo/velo/updater/types"
 )
 
 type AppSection struct {
@@ -83,8 +85,60 @@ type BinarySection struct {
 	ProjectName string `json:"project_name"`
 }
 
+type UpdateSourceConfig struct {
+	Type              string `json:"type"`
+	Priority          int    `json:"priority"`
+	Enabled           bool   `json:"enabled"`
+	NeedCheckChecksum bool   `json:"need_check_checksum"`
+	GitHubRepo        string `json:"github_repo,omitempty"`
+	GitHubToken       string `json:"github_token,omitempty"`
+	ManifestURL       string `json:"manifest_url,omitempty"`
+	SelfURL           string `json:"self_url,omitempty"`
+}
+
+type UpdateSection struct {
+	Enabled        bool                 `json:"enabled"`
+	CheckFrequency string               `json:"check_frequency"`
+	Channel        string               `json:"channel"`
+	AutoDownload   bool                 `json:"auto_download"`
+	Timeout        int                  `json:"timeout"`
+	Sources        []UpdateSourceConfig `json:"sources"`
+}
+
+func (u *UpdateSection) ToUpdaterConfig() *types.UpdateConfig {
+	cfg := &types.UpdateConfig{
+		Enabled:        u.Enabled,
+		CheckFrequency: u.CheckFrequency,
+		Channel:        u.Channel,
+		AutoDownload:   u.AutoDownload,
+		Timeout:        u.Timeout,
+	}
+	if cfg.CheckFrequency == "" {
+		cfg.CheckFrequency = "startup"
+	}
+	if cfg.Channel == "" {
+		cfg.Channel = "stable"
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 300
+	}
+	for _, s := range u.Sources {
+		cfg.Sources = append(cfg.Sources, types.UpdateSource{
+			Type:              s.Type,
+			Priority:          s.Priority,
+			Enabled:           s.Enabled,
+			NeedCheckChecksum: s.NeedCheckChecksum,
+			GitHubRepo:        s.GitHubRepo,
+			GitHubToken:       s.GitHubToken,
+			ManifestURL:       s.ManifestURL,
+			SelfURL:           s.SelfURL,
+		})
+	}
+	return cfg
+}
+
 type Config struct {
-	App       AppSection `json:"app"`
+	App       AppSection    `json:"app"`
 	Binary    BinarySection `json:"binary"`
 	Platforms struct {
 		MacOS   MacOSSection   `json:"macos"`
@@ -93,6 +147,7 @@ type Config struct {
 	} `json:"platforms"`
 	Build   BuildSection   `json:"build"`
 	Release ReleaseSection `json:"release"`
+	Update  UpdateSection  `json:"update"`
 }
 
 func Load(path string) (*Config, error) {

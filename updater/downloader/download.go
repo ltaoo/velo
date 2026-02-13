@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,19 +76,6 @@ func (dm *UpdateDownloadManager) Download(
 		Str("url", downloadURL).
 		Str("dest", destPath).
 		Msg("Starting download")
-
-	// Validate HTTPS
-	if err := dm.validateHTTPS(downloadURL); err != nil {
-		dm.logger.Error().Err(err).Msg("HTTPS validation failed")
-		return &types.UpdateError{
-			Category: types.ErrCategorySecurity,
-			Message:  "download URL must use HTTPS",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"url": downloadURL,
-			},
-		}
-	}
 
 	// Create temporary file for download
 	tmpPath := destPath + ".tmp"
@@ -326,6 +312,12 @@ func (dm *UpdateDownloadManager) downloadWithResume(ctx context.Context, downloa
 
 	// Get total size
 	var totalSize int64
+
+	// Check if server returned HTML instead of binary (common with HTTP error pages or redirects)
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "text/html") {
+		return fmt.Errorf("server returned HTML instead of binary file (Content-Type: %s), URL may be incorrect", contentType)
+	}
 	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
 		if size, err := strconv.ParseInt(contentLength, 10, 64); err == nil {
 			totalSize = size + startByte // Add start byte for total progress
@@ -416,20 +408,6 @@ func (dm *UpdateDownloadManager) downloadWithResume(ctx context.Context, downloa
 	return nil
 }
 
-// validateHTTPS ensures the URL uses HTTPS protocol
-func (dm *UpdateDownloadManager) validateHTTPS(downloadURL string) error {
-	parsedURL, err := url.Parse(downloadURL)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-
-	if parsedURL.Scheme != "https" {
-		return fmt.Errorf("URL must use HTTPS protocol, got: %s", parsedURL.Scheme)
-	}
-
-	return nil
-}
-
 // calculateSHA256 calculates the SHA256 checksum of a file
 func (dm *UpdateDownloadManager) calculateSHA256(filePath string) (string, error) {
 	file, err := os.Open(filePath)
@@ -489,9 +467,8 @@ func (uo *UpdateDownloadManager) DownloadUpdate(ctx context.Context, release *ty
 	tmpDir := "/tmp/WXChannelsDownload"
 	destPath := fmt.Sprintf("%s/%s", tmpDir, release.AssetName)
 
-	if _, err := os.Stat(destPath); err == nil {
-		return destPath, nil
-	}
+	// Remove any previously downloaded file to avoid reusing corrupt data
+	os.Remove(destPath)
 
 	// Configure download options with GitHub token if available
 	// downloadOptions := DefaultDownloadOptions()

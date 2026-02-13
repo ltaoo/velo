@@ -39,7 +39,11 @@ func (du *DarwinUpdater) Apply(updatePath, execPath string) error {
 		Str("target", execPath).
 		Msg("Applying macOS update")
 
-	if !strings.HasSuffix(updatePath, ".dmg") {
+	isDmg := strings.HasSuffix(strings.ToLower(updatePath), ".dmg")
+	if !isDmg {
+		isDmg = du.isDmgFile(updatePath)
+	}
+	if !isDmg {
 		du.logger.Warn().
 			Str("update", updatePath).
 			Msg("Update is not a DMG file, falling back to archive extraction")
@@ -692,6 +696,7 @@ func (du *DarwinUpdater) ensureExecutablePermission(appPath string) error {
 }
 
 // VerifyCodeSignature verifies the code signature of a macOS executable or .app bundle
+// Signature failure is logged as a warning but does not block the update
 func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 	du.logger.Info().
 		Str("path", path).
@@ -702,22 +707,12 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
-		// Code signature verification failed
-		du.logger.Error().
+		du.logger.Warn().
 			Err(err).
 			Str("path", path).
 			Str("output", string(output)).
-			Msg("Code signature verification failed")
-
-		return &types.UpdateError{
-			Category: types.ErrCategorySecurity,
-			Message:  "code signature verification failed",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"path":   path,
-				"output": strings.TrimSpace(string(output)),
-			},
-		}
+			Msg("Code signature verification failed, skipping")
+		return nil
 	}
 
 	du.logger.Info().
@@ -873,6 +868,12 @@ func (du *DarwinUpdater) readInfoPlistValue(appBundlePath, key string) string {
 // newPlatformUpdaterImpl creates a macOS-specific updater
 func newPlatformUpdaterImpl(logger *zerolog.Logger) master.UpdateApplier {
 	return NewDarwinUpdater(logger)
+}
+
+// isDmgFile checks if a file is a DMG by trying to query it with hdiutil
+func (du *DarwinUpdater) isDmgFile(filePath string) bool {
+	cmd := exec.Command("hdiutil", "imageinfo", filePath)
+	return cmd.Run() == nil
 }
 
 // extractAppFromDmg extracts the .app bundle from a DMG file

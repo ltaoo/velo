@@ -70,11 +70,12 @@ func NewUpdateChecker(config *types.UpdateConfig, currentVersion string, cacheMa
 			}
 
 		case "http":
-			if source.ManifestURL == "" {
+			manifestURL := source.ManifestURL
+			if manifestURL == "" {
 				logger.Warn().Msg("HTTP source missing manifest URL, skipping")
 				continue
 			}
-			checker = NewHTTPVersionChecker(source.ManifestURL, logger)
+			checker = NewHTTPVersionChecker(manifestURL, logger)
 
 		default:
 			logger.Warn().

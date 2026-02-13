@@ -125,7 +125,7 @@ var buildTargets = map[string][]target{
 	"linux":   {{goos: "linux", goarch: "amd64", cgo: "0"}, {goos: "linux", goarch: "arm64", cgo: "0"}},
 }
 
-func runBuild(projectPath, platform, outDir string) error {
+func runBuild(projectPath, platform, outDir, versionOverride string) error {
 	projectPath, err := filepath.Abs(projectPath)
 	if err != nil {
 		return err
@@ -184,7 +184,22 @@ func runBuild(projectPath, platform, outDir string) error {
 	}
 
 	appName := cfg.App.Name
-	version := cfg.App.Version
+	var version string
+	switch {
+	case versionOverride != "":
+		version = versionOverride
+		fmt.Printf("version: %s (from -version flag)\n", version)
+	default:
+		cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+		cmd.Dir = projectPath
+		if out, err := cmd.Output(); err == nil {
+			version = strings.TrimPrefix(strings.TrimSpace(string(out)), "v")
+			fmt.Printf("version: %s (from git tag)\n", version)
+		} else {
+			version = cfg.App.Version
+			fmt.Printf("version: %s (from app-config.json)\n", version)
+		}
+	}
 
 	// Load macOS signing credentials if available
 	var creds *darwinCreds
@@ -226,7 +241,7 @@ func runBuild(projectPath, platform, outDir string) error {
 				return err
 			}
 
-			ldflags := "-s -w -X main.Mode=release"
+			ldflags := fmt.Sprintf("-s -w -X main.Mode=release -X main.Version=%s", version)
 			if t.goos == "windows" {
 				ldflags += " -H windowsgui"
 			}
@@ -255,18 +270,27 @@ func runBuild(projectPath, platform, outDir string) error {
 
 			fmt.Printf("  ✓ %s/%s\n", t.goos, t.goarch)
 
-			// Step 4: macOS .app bundle
+			// Step 4: macOS .app bundle + DMG
 			if t.goos == "darwin" {
 				if err := createDarwinApp(cfg, buildDir, distDir, outputPath, t.goarch, appName, version); err != nil {
 					return fmt.Errorf("creating .app bundle: %w", err)
 				}
+				appDir := filepath.Join(distDir, fmt.Sprintf("%s_%s_%s.app", appName, "darwin", t.goarch))
 				if creds != nil {
-					appDir := filepath.Join(distDir, fmt.Sprintf("%s_%s_%s.app", appName, "darwin", t.goarch))
 					if err := signDarwinApp(creds, appDir, appName, filepath.Join(buildDir, "entitlements.plist")); err != nil {
 						return fmt.Errorf("signing .app: %w", err)
 					}
-					if err := notarizeDarwinApp(creds, appDir); err != nil {
-						return fmt.Errorf("notarizing .app: %w", err)
+				}
+				dmgPath, err := createDarwinDMG(cfg, projectPath, appDir, distDir, appName, version, t.goarch)
+				if err != nil {
+					return fmt.Errorf("creating DMG: %w", err)
+				}
+				if creds != nil {
+					if err := signDarwinDMG(creds, dmgPath); err != nil {
+						return fmt.Errorf("signing DMG: %w", err)
+					}
+					if err := notarizeDarwinDMG(creds, dmgPath); err != nil {
+						return fmt.Errorf("notarizing DMG: %w", err)
 					}
 				}
 			}
@@ -378,21 +402,90 @@ func signDarwinApp(creds *darwinCreds, appDir, appName, entitlementsPath string)
 	return nil
 }
 
-func notarizeDarwinApp(creds *darwinCreds, appDir string) error {
+func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName, version, arch string) (string, error) {
+	fmt.Println("creating DMG...")
+
+	dmgPath := filepath.Join(distDir, fmt.Sprintf("%s_%s_darwin_%s.dmg", appName, version, arch))
+	os.Remove(dmgPath) // remove stale DMG if exists
+
+	dmg := cfg.Platforms.MacOS.DMG
+	winW, winH := dmg.WindowSize.Width, dmg.WindowSize.Height
+	if winW == 0 {
+		winW = 660
+	}
+	if winH == 0 {
+		winH = 400
+	}
+	iconSize := dmg.IconSize
+	if iconSize == 0 {
+		iconSize = 128
+	}
+	appX, appY := dmg.Positions.App.X, dmg.Positions.App.Y
+	if appX == 0 {
+		appX = 180
+	}
+	if appY == 0 {
+		appY = 170
+	}
+	appsX, appsY := dmg.Positions.Applications.X, dmg.Positions.Applications.Y
+	if appsX == 0 {
+		appsX = 480
+	}
+	if appsY == 0 {
+		appsY = 170
+	}
+
+	displayName := cfg.DisplayName()
+	appBundleName := filepath.Base(appDir)
+
+	args := []string{
+		"--volname", displayName,
+		"--window-pos", "200", "120",
+		"--window-size", fmt.Sprintf("%d", winW), fmt.Sprintf("%d", winH),
+		"--icon-size", fmt.Sprintf("%d", iconSize),
+		"--icon", appBundleName, fmt.Sprintf("%d", appX), fmt.Sprintf("%d", appY),
+		"--hide-extension", appBundleName,
+		"--app-drop-link", fmt.Sprintf("%d", appsX), fmt.Sprintf("%d", appsY),
+	}
+
+	// Background image
+	bg := dmg.Background.CustomPath
+	if bg != "" {
+		if !filepath.IsAbs(bg) {
+			bg = filepath.Join(projectPath, bg)
+		}
+		if _, err := os.Stat(bg); err == nil {
+			args = append(args, "--background", bg)
+		}
+	}
+
+	args = append(args, dmgPath, appDir)
+
+	if err := runCmd("create-dmg", args...); err != nil {
+		return "", fmt.Errorf("create-dmg: %w", err)
+	}
+	fmt.Println("  ✓ DMG created")
+	return dmgPath, nil
+}
+
+func signDarwinDMG(creds *darwinCreds, dmgPath string) error {
+	identity := fmt.Sprintf("Developer ID Application: %s (%s)", creds.AppleID, creds.TeamID)
+	fmt.Println("signing DMG...")
+	if err := runCmd("codesign", "--sign", identity, "--timestamp", dmgPath); err != nil {
+		return fmt.Errorf("signing DMG: %w", err)
+	}
+	fmt.Println("  ✓ DMG signed")
+	return nil
+}
+
+func notarizeDarwinDMG(creds *darwinCreds, dmgPath string) error {
 	if creds.P8File == "" || creds.APIKeyID == "" || creds.APIKeyIssuerID == "" {
 		fmt.Println("  skipping notarization (P8_FILE, API_KEY_ID, or API_KEY_ISSUER_ID not set)")
 		return nil
 	}
 
-	// Create a zip for notarization
-	zipPath := appDir + ".zip"
-	if err := runCmd("ditto", "-c", "-k", "--keepParent", appDir, zipPath); err != nil {
-		return fmt.Errorf("creating zip for notarization: %w", err)
-	}
-	defer os.Remove(zipPath)
-
-	fmt.Println("submitting for notarization...")
-	output, err := runCmdOutput("xcrun", "notarytool", "submit", zipPath,
+	fmt.Println("submitting DMG for notarization...")
+	output, err := runCmdOutput("xcrun", "notarytool", "submit", dmgPath,
 		"-k", creds.P8File,
 		"-d", creds.APIKeyID,
 		"-i", creds.APIKeyIssuerID,
@@ -405,14 +498,13 @@ func notarizeDarwinApp(creds *darwinCreds, appDir string) error {
 	if !strings.Contains(output, "status: Accepted") {
 		return fmt.Errorf("notarization was not accepted")
 	}
-	fmt.Println("  ✓ notarized")
+	fmt.Println("  ✓ DMG notarized")
 
-	// Staple
-	fmt.Println("stapling...")
-	if err := runCmd("xcrun", "stapler", "staple", appDir); err != nil {
-		return fmt.Errorf("stapling: %w", err)
+	fmt.Println("stapling DMG...")
+	if err := runCmd("xcrun", "stapler", "staple", dmgPath); err != nil {
+		return fmt.Errorf("stapling DMG: %w", err)
 	}
-	fmt.Println("  ✓ stapled")
+	fmt.Println("  ✓ DMG stapled")
 
 	return nil
 }

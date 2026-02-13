@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ltaoo/velo/asset"
+	"github.com/ltaoo/velo/buildcfg"
 	"github.com/ltaoo/velo/webview"
 )
 
@@ -134,22 +135,33 @@ type AppConfig struct {
 		Name        string `json:"name"`
 		DisplayName string `json:"display_name"`
 	} `json:"app"`
+	Update buildcfg.UpdateSection `json:"update"`
 }
 
-func loadAppConfig() string {
-	data, err := os.ReadFile("app-config.json")
-	if err != nil {
-		return "App"
+func LoadAppConfig(embedded ...[]byte) *AppConfig {
+	var data []byte
+	if len(embedded) > 0 && len(embedded[0]) > 0 {
+		data = embedded[0]
+	} else {
+		var err error
+		data, err = os.ReadFile("app-config.json")
+		if err != nil {
+			return &AppConfig{}
+		}
 	}
 	var cfg AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return "App"
+		return &AppConfig{}
 	}
-	if cfg.App.DisplayName != "" {
-		return cfg.App.DisplayName
+	return &cfg
+}
+
+func (c *AppConfig) displayName() string {
+	if c.App.DisplayName != "" {
+		return c.App.DisplayName
 	}
-	if cfg.App.Name != "" {
-		return cfg.App.Name
+	if c.App.Name != "" {
+		return c.App.Name
 	}
 	return "App"
 }
@@ -189,7 +201,7 @@ func NewApp(o *VeloAppOpt) *Box {
 		post_handlers: make(map[string]Handler),
 		frontendDir:   "frontend",
 		frontendFS:    nil,
-		appName:       loadAppConfig(),
+		appName:       LoadAppConfig().displayName(),
 	}
 	b.mode = o.Mode
 	if o.FrontendDir != "" {
