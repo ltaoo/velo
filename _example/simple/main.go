@@ -76,23 +76,6 @@ func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create updater: %w", err)
 	}
-	if versionInfo.UpdateMode.ShouldCheckAtStartup() {
-		go func() {
-			time.Sleep(2 * time.Second)
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			u.CheckForUpdatesWithCallback(ctx, func(event utypes.UpdateEvent) {
-				switch event.Type {
-				case utypes.EventUpdateAvailable:
-					fmt.Printf("New version available: %s\n", event.ReleaseInfo.Version)
-				case utypes.EventNoUpdateAvailable:
-					fmt.Println("You are running the latest version")
-				case utypes.EventError:
-					fmt.Printf("Update check failed: %v\n", event.Error)
-				}
-			})
-		}()
-	}
 	return u, nil
 }
 
@@ -185,7 +168,7 @@ func main() {
 		return c.Ok(velo.H{"success": true})
 	})
 
-	fmt.Println("starting server on http://127.0.0.1:8080")
+	fmt.Println("starting server...")
 
 	b.NewWebview(&velo.VeloWebviewOpt{
 		Pathname: "/home/index",
