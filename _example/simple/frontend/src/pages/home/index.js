@@ -17,7 +17,8 @@ export function HomePageView(props) {
         Txt(computed({ version: vm$.version }, (s) => s.version ? "版本: " + s.version : "")),
       ]),
     ]),
-    View({ class: "p-4 flex-1 w-0" }, []),
+    View({ class: "p-4 flex-1 w-0" }, [
+    ]),
     View({ class: "p-4 pl-0 w-[260px]" }, []),
     // Popper({ store: ui.popover$ }, [
     //   View({ class: "bg-[#1E1E1E] p-4 rounded-xl shadow-2xl" }, [

@@ -1,5 +1,7 @@
 package tray
 
+func setupNative(t *Tray) {}
+
 func runNative(t *Tray, onReady func(), onExit func()) {
 	// Not implemented
 	if onReady != nil {

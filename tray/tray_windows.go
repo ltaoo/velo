@@ -2,7 +2,7 @@ package tray
 
 /*
 #cgo CXXFLAGS: -std=c++11
-#cgo LDFLAGS: -static
+#cgo LDFLAGS: -static -lgdiplus -lshlwapi
 
 #include <stdlib.h>
 #include "tray_windows.h"
@@ -72,14 +72,28 @@ func buildMenuNative(menu *Menu, parentId int) {
 			isSubmenu = 1
 		}
 
-		C.add_menu_item_win(C.int(item.ID), cLabel, cShortcut, C.int(disabled), C.int(checked), C.int(parentId), C.int(isSubmenu))
+		var cImgData unsafe.Pointer
+		var imgLen int
+		if len(item.Image) > 0 {
+			cImgData = C.CBytes(item.Image)
+			imgLen = len(item.Image)
+		}
+
+		C.add_menu_item_win(C.int(item.ID), cLabel, cShortcut, C.int(disabled), C.int(checked), C.int(parentId), C.int(isSubmenu), (*C.char)(cImgData), C.int(imgLen))
 		C.free(unsafe.Pointer(cLabel))
 		C.free(unsafe.Pointer(cShortcut))
+		if cImgData != nil {
+			C.free(cImgData)
+		}
 
 		if item.SubMenu != nil {
 			buildMenuNative(item.SubMenu, int(item.ID))
 		}
 	}
+}
+
+func setupNative(t *Tray) {
+	go runNative(t, nil, nil)
 }
 
 func quitNative() {

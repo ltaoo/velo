@@ -11,8 +11,11 @@ import (
 	"time"
 
 	"github.com/ltaoo/velo"
+	"github.com/ltaoo/velo/autostart"
 	veloerr "github.com/ltaoo/velo/error"
 	"github.com/ltaoo/velo/file"
+	"github.com/ltaoo/velo/shortcut"
+	"github.com/ltaoo/velo/tray"
 	updater "github.com/ltaoo/velo/updater/api"
 	utypes "github.com/ltaoo/velo/updater/types"
 	uversion "github.com/ltaoo/velo/updater/version"
@@ -25,6 +28,9 @@ var frontend_folder embed.FS
 
 //go:embed app-config.json
 var appConfigData []byte
+
+//go:embed assets/appicon.png
+var appIcon []byte
 
 var Version = "1.0.0"
 var Mode = "dev"
@@ -88,7 +94,7 @@ func main() {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, FrontendFS: frontend_folder}
+	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, FrontendFS: frontend_folder, IconData: appIcon}
 	b := velo.NewApp(&opt)
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"message": "pong"})
@@ -169,6 +175,52 @@ func main() {
 	})
 
 	fmt.Println("starting server...")
+
+	// 注册全局快捷键: Cmd+Shift+M (macOS) / Win+Shift+M (Windows) 显示/隐藏主窗口
+	sm := shortcut.NewManager()
+	sm.Register("MetaLeft+ShiftLeft+KeyM", func() {
+		b.Webview.Show()
+	})
+
+	as := autostart.New("MyApp")
+
+	proxyEnabled := false
+	proxyItem := &tray.MenuItem{Label: "设置系统代理", Click: func(m *tray.MenuItem) {
+		proxyEnabled = !proxyEnabled
+		if proxyEnabled {
+			m.Check()
+		} else {
+			m.Uncheck()
+		}
+	}}
+
+	autoStartItem := &tray.MenuItem{Label: "开机自启动", Checked: as.IsEnabled(), Click: func(m *tray.MenuItem) {
+		if as.IsEnabled() {
+			as.Disable()
+			m.Uncheck()
+		} else {
+			as.Enable()
+			m.Check()
+		}
+	}}
+
+	tray.Setup(&tray.Tray{
+		Icon:    appIcon,
+		Tooltip: "MyApp",
+		Menu: &tray.Menu{
+			Items: []*tray.MenuItem{
+				{Label: "显示主窗口", Click: func(m *tray.MenuItem) {
+					b.Webview.Show()
+				}},
+				proxyItem,
+				autoStartItem,
+				{IsSeparator: true},
+				{Label: "退出", Click: func(m *tray.MenuItem) {
+					tray.Quit()
+				}},
+			},
+		},
+	})
 
 	b.NewWebview(&velo.VeloWebviewOpt{
 		Pathname: "/home/index",

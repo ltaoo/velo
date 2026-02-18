@@ -69,16 +69,32 @@ func GenerateIcons(cfg *Config, baseDir, outDir string) error {
 		fmt.Fprintf(os.Stderr, "warning: icns generation skipped: %v\n", err)
 	}
 
+	// Generate tray icon (44x44 for macOS Retina, also works for Windows)
+	trayIconSrc := cfg.App.TrayIcon
+	if trayIconSrc != "" {
+		if !filepath.IsAbs(trayIconSrc) {
+			trayIconSrc = filepath.Join(baseDir, trayIconSrc)
+		}
+		if tf, err := os.Open(trayIconSrc); err == nil {
+			defer tf.Close()
+			if trayImg, err := png.Decode(tf); err == nil {
+				tray44 := resize.Resize(44, 44, trayImg, resize.Lanczos3)
+				savePNG(filepath.Join(iconsDir, "tray_icon.png"), tray44)
+			}
+		}
+	}
+
 	// Copy to build/ for compatibility
 	buildDir := filepath.Join(baseDir, "build")
 	os.MkdirAll(buildDir, 0755)
 	copies := map[string]string{
-		"icon.ico":      "icon.ico",
-		"icon.ico#2":    "appicon.ico",
-		"icon_256.png":  "icon_256.png",
+		"icon.ico":       "icon.ico",
+		"icon.ico#2":     "appicon.ico",
+		"icon_256.png":   "icon_256.png",
 		"icon_256.png#2": "appicon.png",
-		"icon_16.png":   "icon_16.png",
-		"icon_16.png#2": "icon16.png",
+		"icon_16.png":    "icon_16.png",
+		"icon_16.png#2":  "icon16.png",
+		"tray_icon.png":  "tray_icon.png",
 	}
 	for src, dst := range copies {
 		actual := src
