@@ -1,6 +1,8 @@
 #include "tray_windows.h"
 #include <windows.h>
 #include <shellapi.h>
+#include <shlwapi.h>
+#include <gdiplus.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -8,6 +10,8 @@
 
 #define WM_TRAY_CALLBACK_MESSAGE (WM_USER + 1)
 #define ID_TRAY_ICON 1001
+
+static ULONG_PTR gdiplusToken = 0;
 
 std::wstring Utf8ToWide(const char* str) {
     if (!str) return L"";
@@ -27,7 +31,7 @@ public:
     void Quit();
     void SetIcon(const char* data, int length);
     void SetTooltip(const char* tooltip);
-    void AddMenuItem(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu);
+    void AddMenuItem(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu, const char* imgData, int imgLen);
     void AddSeparator(int parentId);
     
     // Updates
@@ -57,6 +61,11 @@ Tray::~Tray() {
 }
 
 void Tray::Init() {
+    if (!gdiplusToken) {
+        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+        Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+    }
+
     WNDCLASSEXW wc;
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
@@ -118,13 +127,21 @@ void Tray::Quit() {
 }
 
 void Tray::SetIcon(const char* data, int length) {
-    HICON hIcon = CreateIconFromResourceEx((PBYTE)data, length, TRUE, 0x00030000, 0, 0, LR_DEFAULTCOLOR);
-    if (hIcon) {
-        if (nid.hIcon) DestroyIcon(nid.hIcon);
-        nid.hIcon = hIcon;
-        nid.uFlags |= NIF_ICON;
-        Shell_NotifyIconW(NIM_MODIFY, &nid);
+    IStream* stream = SHCreateMemStream((const BYTE*)data, length);
+    if (!stream) return;
+    Gdiplus::Bitmap* bitmap = Gdiplus::Bitmap::FromStream(stream);
+    if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
+        HICON hIcon = NULL;
+        bitmap->GetHICON(&hIcon);
+        if (hIcon) {
+            if (nid.hIcon) DestroyIcon(nid.hIcon);
+            nid.hIcon = hIcon;
+            nid.uFlags |= NIF_ICON;
+            Shell_NotifyIconW(NIM_MODIFY, &nid);
+        }
+        delete bitmap;
     }
+    stream->Release();
 }
 
 void Tray::SetTooltip(const char* tooltip) {
@@ -135,7 +152,7 @@ void Tray::SetTooltip(const char* tooltip) {
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
-void Tray::AddMenuItem(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu) {
+void Tray::AddMenuItem(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu, const char* imgData, int imgLen) {
     HMENU parent = subMenus[parentId];
     if (!parent && parentId == 0) parent = hMenu;
     if (!parent) return;
@@ -156,6 +173,28 @@ void Tray::AddMenuItem(int id, const char* title, const char* shortcut, int disa
         AppendMenuW(parent, flags, (UINT_PTR)hSub, wTitle.c_str());
     } else {
         AppendMenuW(parent, flags, id, wTitle.c_str());
+    }
+
+    if (imgData && imgLen > 0) {
+        IStream* stream = SHCreateMemStream((const BYTE*)imgData, imgLen);
+        if (stream) {
+            Gdiplus::Bitmap* bitmap = Gdiplus::Bitmap::FromStream(stream);
+            if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
+                HBITMAP hBmp = NULL;
+                bitmap->GetHBITMAP(Gdiplus::Color(0, 0, 0, 0), &hBmp);
+                if (hBmp) {
+                    MENUITEMINFOW mii = {};
+                    mii.cbSize = sizeof(mii);
+                    mii.fMask = MIIM_BITMAP;
+                    mii.hbmpItem = hBmp;
+                    UINT itemId = isSubmenu ? (UINT)(UINT_PTR)subMenus[id] : (UINT)id;
+                    BOOL byPos = FALSE;
+                    SetMenuItemInfoW(parent, itemId, byPos, &mii);
+                }
+                delete bitmap;
+            }
+            stream->Release();
+        }
     }
 }
 
@@ -206,8 +245,8 @@ void set_tooltip_win(const char* tooltip) {
     if (g_tray) g_tray->SetTooltip(tooltip);
 }
 
-void add_menu_item_win(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu) {
-    if (g_tray) g_tray->AddMenuItem(id, title, shortcut, disabled, checked, parentId, isSubmenu);
+void add_menu_item_win(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu, const char* imgData, int imgLen) {
+    if (g_tray) g_tray->AddMenuItem(id, title, shortcut, disabled, checked, parentId, isSubmenu, imgData, imgLen);
 }
 
 void add_separator_win(int parentId) {

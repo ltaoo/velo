@@ -10,7 +10,7 @@ void init_tray(void);
 void set_icon(const char* data, int length, int isTemplate);
 void set_title(const char* title);
 void set_tooltip(const char* tooltip);
-void add_menu_item(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId);
+void add_menu_item(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, const char* imgData, int imgLen);
 void add_separator(int parentId);
 void run_loop(void);
 void quit_app(void);
@@ -92,13 +92,53 @@ func buildMenuNative(menu *Menu, parentId int) {
 			checked = 1
 		}
 
-		C.add_menu_item(C.int(item.ID), cLabel, cShortcut, C.int(disabled), C.int(checked), C.int(parentId))
+		var cImgData unsafe.Pointer
+		var imgLen int
+		if len(item.Image) > 0 {
+			cImgData = C.CBytes(item.Image)
+			imgLen = len(item.Image)
+		}
+
+		C.add_menu_item(C.int(item.ID), cLabel, cShortcut, C.int(disabled), C.int(checked), C.int(parentId), (*C.char)(cImgData), C.int(imgLen))
 		C.free(unsafe.Pointer(cLabel))
 		C.free(unsafe.Pointer(cShortcut))
+		if cImgData != nil {
+			C.free(cImgData)
+		}
 
 		if item.SubMenu != nil {
 			buildMenuNative(item.SubMenu, int(item.ID))
 		}
+	}
+}
+
+func setupNative(t *Tray) {
+	C.init_tray()
+
+	if t.Icon != nil {
+		cData := C.CBytes(t.Icon)
+		isTemplate := 0
+		if t.IsTemplate {
+			isTemplate = 1
+		}
+		C.set_icon((*C.char)(cData), C.int(len(t.Icon)), C.int(isTemplate))
+		C.free(cData)
+	}
+
+	if t.Title != "" {
+		cTitle := C.CString(t.Title)
+		C.set_title(cTitle)
+		C.free(unsafe.Pointer(cTitle))
+	}
+
+	if t.Tooltip != "" {
+		cTooltip := C.CString(t.Tooltip)
+		C.set_tooltip(cTooltip)
+		C.free(unsafe.Pointer(cTooltip))
+	}
+
+	if t.Menu != nil {
+		buildMenuNative(t.Menu, 0)
 	}
 }
 

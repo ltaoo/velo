@@ -4,6 +4,7 @@ dist/
 *.syso
 /velo*
 !/velo.go
+_example/simple/build
 
 # Environment
 .env

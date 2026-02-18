@@ -14,7 +14,9 @@
       "Bash(brew install:*)",
       "Bash(ls:*)",
       "Bash(open:*)",
-      "Bash(./velo build:*)"
+      "Bash(./velo build:*)",
+      "Bash(wc:*)",
+      "Bash(/tmp/velo dev:*)"
     ]
   }
 }

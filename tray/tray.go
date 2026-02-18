@@ -44,6 +44,8 @@ type MenuItem struct {
 	Shortcut string
 	// IsSeparator indicates if this item is a separator.
 	IsSeparator bool
+	// Image is the icon image data in PNG format.
+	Image []byte
 	// Click handles the click event.
 	Click func(*MenuItem)
 	// SubMenu defines a submenu for this item.
@@ -53,6 +55,15 @@ type MenuItem struct {
 // NewTray creates a new Tray configuration.
 func NewTray() *Tray {
 	return &Tray{}
+}
+
+// Setup initializes the system tray without starting an event loop.
+// Use this when another event loop (e.g., webview) will drive the application.
+func Setup(t *Tray) {
+	if t.Menu != nil {
+		assignIDs(t.Menu)
+	}
+	setupNative(t)
 }
 
 // Run starts the system tray application.

@@ -11,7 +11,7 @@ var version = "dev"
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: velo <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: build, version")
+		fmt.Fprintln(os.Stderr, "commands: build, dev, version")
 		os.Exit(1)
 	}
 
@@ -31,6 +31,15 @@ func main() {
 		}
 
 		if err := runBuild(projectPath, *platform, *outDir, *versionOverride); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	case "dev":
+		dir := "."
+		if len(os.Args) > 2 {
+			dir = os.Args[2]
+		}
+		if err := runDev(dir); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}

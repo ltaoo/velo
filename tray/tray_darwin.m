@@ -81,10 +81,11 @@ void set_tooltip(const char* tooltip) {
     });
 }
 
-void add_menu_item(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId) {
+void add_menu_item(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, const char* imgData, int imgLen) {
     if (!delegate) return;
     NSString *nsTitle = [NSString stringWithUTF8String:title];
     NSString *nsShortcut = [NSString stringWithUTF8String:shortcut];
+    NSData *nsImgData = (imgData && imgLen > 0) ? [NSData dataWithBytes:imgData length:imgLen] : nil;
 
     dispatch_async(dispatch_get_main_queue(), ^{
         ensure_tray_created();
@@ -120,9 +121,17 @@ void add_menu_item(int id, const char* title, const char* shortcut, int disabled
         item.target = delegate;
         if (disabled) [item setEnabled:NO];
         if (checked) [item setState:NSControlStateValueOn];
-        
+
+        if (nsImgData) {
+            NSImage *image = [[NSImage alloc] initWithData:nsImgData];
+            if (image) {
+                [image setSize:NSMakeSize(16, 16)];
+                item.image = image;
+            }
+        }
+
         [delegate.menuItems setObject:item forKey:@(id)];
-        
+
         NSMenu *parentMenu;
         if (parentId == 0) {
             parentMenu = delegate.statusItem.menu;

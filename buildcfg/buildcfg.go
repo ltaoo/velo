@@ -15,6 +15,7 @@ type AppSection struct {
 	Version     string `json:"version"`
 	Author      string `json:"author"`
 	Icon        string `json:"icon"`
+	TrayIcon    string `json:"tray_icon"`
 }
 
 type MacOSSection struct {

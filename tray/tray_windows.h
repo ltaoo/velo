@@ -8,7 +8,7 @@ extern "C" {
 void init_tray_win();
 void set_icon_win(const char* data, int length);
 void set_tooltip_win(const char* tooltip);
-void add_menu_item_win(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu);
+void add_menu_item_win(int id, const char* title, const char* shortcut, int disabled, int checked, int parentId, int isSubmenu, const char* imgData, int imgLen);
 void add_separator_win(int parentId);
 void run_loop_win();
 void quit_app_win();
