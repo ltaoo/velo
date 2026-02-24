@@ -15,16 +15,37 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
 var (
 	webview_opts *BoxWebviewOptions
+	webviewMap   = make(map[uintptr]*BoxWebviewOptions)
+	pendingOpts  = make(map[string]*BoxWebviewOptions)
+	mapLock      sync.RWMutex
 )
+
+//export GoRegisterWebview
+func GoRegisterWebview(webview unsafe.Pointer, id *C.char) {
+	goID := C.GoString(id)
+	mapLock.Lock()
+	defer mapLock.Unlock()
+	if opts, ok := pendingOpts[goID]; ok {
+		webviewMap[uintptr(webview)] = opts
+		delete(pendingOpts, goID)
+	}
+}
 
 //export GoHandleSchemeTask
 func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.char) {
-	if webview_opts == nil || webview_opts.Mux == nil {
+	mapLock.RLock()
+	opts := webviewMap[uintptr(webview)]
+	mapLock.RUnlock()
+	if opts == nil {
+		opts = webview_opts
+	}
+	if opts == nil || opts.Mux == nil {
 		fmt.Printf("Webview: Scheme Error: Mux is nil\n")
 		return
 	}
@@ -47,7 +68,7 @@ func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.c
 		}
 
 		rw := &schemeResponseWriter{task: task}
-		webview_opts.Mux.ServeHTTP(rw, req)
+		opts.Mux.ServeHTTP(rw, req)
 		rw.Finish()
 		// fmt.Printf("Webview: Scheme Finish: %s\n", goUrl)
 	}()
@@ -138,11 +159,17 @@ func sendMessage(payload string) bool {
 func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 	globalWebview = webview
 	notifyReady()
-	if webview_opts == nil || webview_opts.HandleMessage == nil {
+	mapLock.RLock()
+	opts := webviewMap[uintptr(webview)]
+	mapLock.RUnlock()
+	if opts == nil {
+		opts = webview_opts
+	}
+	if opts == nil || opts.HandleMessage == nil {
 		return
 	}
 	goMsg := C.GoString(msg)
-	id, result := webview_opts.HandleMessage(goMsg)
+	id, result := opts.HandleMessage(goMsg)
 	if id == "" {
 		return
 	}
@@ -159,17 +186,29 @@ func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 
 //export GoHandleDragDrop
 func GoHandleDragDrop(webview unsafe.Pointer, event *C.char, payload *C.char) {
-	if webview_opts == nil || webview_opts.HandleDragDrop == nil {
+	mapLock.RLock()
+	opts := webviewMap[uintptr(webview)]
+	mapLock.RUnlock()
+	if opts == nil {
+		opts = webview_opts
+	}
+	if opts == nil || opts.HandleDragDrop == nil {
 		return
 	}
 	goEvent := C.GoString(event)
 	goPayload := C.GoString(payload)
-	webview_opts.HandleDragDrop(goEvent, goPayload)
+	opts.HandleDragDrop(goEvent, goPayload)
 }
 
 func open_webview(opts *BoxWebviewOptions) {
 	webview_opts = opts
+	mapLock.Lock()
+	pendingOpts[opts.ID] = opts
+	mapLock.Unlock()
+
 	runtime.LockOSThread()
+	cID := C.CString(opts.ID)
+	defer C.free(unsafe.Pointer(cID))
 	cUrl := C.CString(opts.URL)
 	defer C.free(unsafe.Pointer(cUrl))
 	cInjectedJS := C.CString(opts.InjectedJS)
@@ -185,7 +224,24 @@ func open_webview(opts *BoxWebviewOptions) {
 		cIconLen = C.int(len(opts.IconData))
 	}
 
-	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cAppName, C.int(opts.Width), C.int(opts.Height))
+	C.webviewRunApp(cID, cUrl, cInjectedJS, cIcon, cIconLen, cAppName, C.int(opts.Width), C.int(opts.Height))
+}
+
+func open_window(opts *BoxWebviewOptions) {
+	mapLock.Lock()
+	pendingOpts[opts.ID] = opts
+	mapLock.Unlock()
+
+	cID := C.CString(opts.ID)
+	defer C.free(unsafe.Pointer(cID))
+	cUrl := C.CString(opts.URL)
+	defer C.free(unsafe.Pointer(cUrl))
+	cInjectedJS := C.CString(opts.InjectedJS)
+	defer C.free(unsafe.Pointer(cInjectedJS))
+	cAppName := C.CString(opts.AppName)
+	defer C.free(unsafe.Pointer(cAppName))
+
+	C.webviewCreateWindow(cID, cUrl, cInjectedJS, cAppName, C.int(opts.Width), C.int(opts.Height))
 }
 
 func Terminate() {

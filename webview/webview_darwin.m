@@ -15,6 +15,7 @@ static BOOL isRunningInAppBundle(void);
 extern void GoHandleMessage(void* webview, const char* msg);
 extern void GoHandleSchemeTask(void* webview, void* task, const char* url);
 extern void GoHandleDragDrop(void* webview, const char* event, const char* payload);
+extern void GoRegisterWebview(void* webview, const char* id);
 
 @interface DraggableWebView : WKWebView
 @end
@@ -67,11 +68,14 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
 @property(strong) NSWindow* window;
 @property(strong) WKWebView* webview;
 @property(strong) AppSchemeHandler* schemeHandler;
+@property(copy) NSString* id;
 @property(copy) NSString* startURL;
 @property(copy) NSString* injectedJS;
 @property(copy) NSString* appName;
 @property(assign) int windowWidth;
 @property(assign) int windowHeight;
+@property(strong) NSMutableArray<NSWindow*>* extraWindows;
+- (void)openAdditionalWindowWithID:(NSString*)id url:(NSString*)url width:(int)width height:(int)height appName:(NSString*)appName injectedJS:(NSString*)injectedJS;
 @end
 
 @implementation MiniDelegate
@@ -117,6 +121,11 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
     }
     [self.window setContentView:self.webview];
     
+    // Register webview with Go
+    if (self.id) {
+        GoRegisterWebview((__bridge void*)self.webview, [self.id UTF8String]);
+    }
+    
     [self setupMenu];
     
     [self.window makeKeyAndOrderFront:nil];
@@ -127,6 +136,67 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
     NSLog(@"Webview: Loading Start URL: %@", self.startURL);
 }
 
+- (void)openAdditionalWindowWithID:(NSString*)id url:(NSString*)url width:(int)width height:(int)height appName:(NSString*)appName injectedJS:(NSString*)injectedJS {
+    if (!self.extraWindows) {
+        self.extraWindows = [NSMutableArray array];
+    }
+    int winWidth = width > 0 ? width : (self.windowWidth > 0 ? self.windowWidth : 1024);
+    int winHeight = height > 0 ? height : (self.windowHeight > 0 ? self.windowHeight : 768);
+    NSRect frame = NSMakeRect(0, 0, winWidth, winHeight);
+    NSWindow* newWindow = [[NSWindow alloc] initWithContentRect:frame
+                                                      styleMask:(NSWindowStyleMaskTitled |
+                                                                 NSWindowStyleMaskClosable |
+                                                                 NSWindowStyleMaskMiniaturizable |
+                                                                 NSWindowStyleMaskResizable)
+                                                        backing:NSBackingStoreBuffered
+                                                          defer:NO];
+    [newWindow center];
+    [newWindow setDelegate:self];
+
+    NSString* windowTitle = appName ? appName : (self.appName ? self.appName : @"App");
+    [newWindow setTitle:windowTitle];
+
+    WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
+    WKUserContentController* controller = [[WKUserContentController alloc] init];
+    [controller addScriptMessageHandler:self name:@"go"];
+    NSString* js = injectedJS;
+    if (!js || [js length] == 0) {
+        js = self.injectedJS ? self.injectedJS : @"";
+    }
+    if (js != nil && [js length] > 0) {
+        WKUserScript* userScript = [[WKUserScript alloc] initWithSource:js
+                                                          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                       forMainFrameOnly:NO];
+        [controller addUserScript:userScript];
+    }
+    config.userContentController = controller;
+
+    if (self.schemeHandler) {
+        [config setURLSchemeHandler:self.schemeHandler forURLScheme:@"velo"];
+    }
+    [config.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
+
+    DraggableWebView* wv = [[DraggableWebView alloc] initWithFrame:frame configuration:config];
+    [wv registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
+    if (@available(macOS 13.3, *)) {
+        wv.inspectable = YES;
+    }
+    [newWindow setContentView:wv];
+    
+    // Register webview with Go
+    if (id) {
+        GoRegisterWebview((__bridge void*)wv, [id UTF8String]);
+    }
+    
+    [newWindow makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+
+    NSURL* nsurl = [NSURL URLWithString:url];
+    [wv loadRequest:[NSURLRequest requestWithURL:nsurl]];
+
+    [self.extraWindows addObject:newWindow];
+}
+
 - (void)userContentController:(WKUserContentController *)userContentController
       didReceiveScriptMessage:(WKScriptMessage *)message {
     if (![message.name isEqualToString:@"go"]) {
@@ -134,7 +204,13 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
     }
     NSString* m = (NSString*)message.body;
     const char* utf8 = [m UTF8String];
-    GoHandleMessage((__bridge void*)self.webview, utf8);
+    WKWebView* wv = nil;
+    if ([message respondsToSelector:@selector(webView)]) {
+        wv = (WKWebView*)message.webView;
+    } else {
+        wv = self.webview;
+    }
+    GoHandleMessage((__bridge void*)wv, utf8);
 }
 
 - (void)setupMenu {
@@ -174,12 +250,20 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-    NSLog(@"Webview: Window will close, terminating...");
-    // Force exit the entire process including Go runtime
-    // Use exit() on main thread to ensure it works
-    dispatch_async(dispatch_get_main_queue(), ^{
-        exit(0);
-    });
+    NSWindow* closingWindow = (NSWindow*)notification.object;
+    if (closingWindow == self.window) {
+        self.window = nil;
+    } else if (self.extraWindows) {
+        [self.extraWindows removeObject:closingWindow];
+    }
+    BOOL hasMain = self.window != nil;
+    BOOL hasExtra = self.extraWindows && [self.extraWindows count] > 0;
+    if (!hasMain && !hasExtra) {
+        NSLog(@"Webview: Last window closed, terminating...");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            exit(0);
+        });
+    }
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -192,7 +276,7 @@ extern void GoHandleDragDrop(void* webview, const char* event, const char* paylo
 // Global delegate for window control
 static MiniDelegate* gDelegate = nil;
 
-void webviewRunApp(const char* startURL, const char* injectedJS, const void* iconData, int iconLen, const char* appName, int width, int height) {
+void webviewRunApp(const char* id, const char* startURL, const char* injectedJS, const void* iconData, int iconLen, const char* appName, int width, int height) {
     NSLog(@"Webview: Starting webviewRunApp");
     @autoreleasepool {
         NSString* name = appName ? [NSString stringWithUTF8String:appName] : @"App";
@@ -256,6 +340,7 @@ void webviewRunApp(const char* startURL, const char* injectedJS, const void* ico
 
         MiniDelegate* delegate = [MiniDelegate new];
         gDelegate = delegate;
+        delegate.id = id ? [NSString stringWithUTF8String:id] : nil;
         delegate.startURL = [NSString stringWithUTF8String:startURL];
         if (injectedJS != NULL) {
             delegate.injectedJS = [NSString stringWithUTF8String:injectedJS];
@@ -466,6 +551,30 @@ void webviewSetURL(const char* url) {
 void webviewClose(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [gDelegate.window close];
+    });
+}
+
+void webviewCreateWindow(const char* id, const char* startURL, const char* injectedJS, const char* appName, int width, int height) {
+    NSString* url = nil;
+    if (startURL) {
+        url = [NSString stringWithUTF8String:startURL];
+    }
+    NSString* js = nil;
+    if (injectedJS) {
+        js = [NSString stringWithUTF8String:injectedJS];
+    }
+    NSString* name = nil;
+    if (appName) {
+        name = [NSString stringWithUTF8String:appName];
+    }
+    NSString* windowID = id ? [NSString stringWithUTF8String:id] : nil;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!gDelegate) {
+            return;
+        }
+        NSString* effectiveURL = url ? url : gDelegate.startURL;
+        [gDelegate openAdditionalWindowWithID:windowID url:effectiveURL width:width height:height appName:name injectedJS:js];
     });
 }
 
