@@ -155,6 +155,10 @@ func open_webview(opts *BoxWebviewOptions) {
 	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, C.int(opts.Width), C.int(opts.Height))
 }
 
+func open_window(opts *BoxWebviewOptions) {
+	fmt.Println("Additional webview windows are not supported on Windows yet.")
+}
+
 func Terminate() {
 	C.webviewTerminate()
 }

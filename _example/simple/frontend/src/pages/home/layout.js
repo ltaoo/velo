@@ -2,7 +2,7 @@ import { RouterSubViews } from "../../components/sub-views.js";
 
 const nav_menus = [
   { id: "root.home_layout.index", icon: "home", label: "首页" },
-  { id: "root.home_layout.example", icon: "explore", label: "组件" },
+  { id: "settings", icon: "explore", label: "设置" },
   { id: "root.home_layout.update", icon: "settings", label: "更新" },
 ];
 const icons = {
@@ -70,6 +70,15 @@ export function HomeLayoutView(props) {
                     dataset: { id: menu.id, label: menu.label },
                     onClick() {
                       console.log("Navigate to:", menu);
+                      if (menu.id === "settings") {
+                        invoke("/api/open_window", {
+                          method: "GET",
+                          args: { pathname: "/settings" },
+                        }).catch((err) => {
+                          console.error("open window error", err);
+                        });
+                        return;
+                      }
                       props.history.push(menu.id);
                     },
                   },

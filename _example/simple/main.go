@@ -94,7 +94,7 @@ func main() {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, FrontendFS: frontend_folder, IconData: appIcon}
+	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon}
 	b := velo.NewApp(&opt)
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"message": "pong"})
@@ -174,6 +174,25 @@ func main() {
 		return c.Ok(velo.H{"success": true})
 	})
 
+	b.Get("/api/open_window", func(c *velo.BoxContext) interface{} {
+		pathname := c.Query("pathname")
+		if pathname == "" {
+			pathname = "/home/index"
+		}
+		entryPage := "index.html"
+		if pathname == "/settings" {
+			entryPage = "settings.html"
+		}
+		b.OpenWindow(&velo.VeloWebviewOpt{
+			Pathname:   pathname,
+			Width:      460,
+			Height:     720,
+			EntryPage:  entryPage,
+			FrontendFS: frontend_folder,
+		})
+		return c.Ok(velo.H{"success": true})
+	})
+
 	fmt.Println("starting server...")
 
 	// 注册全局快捷键: Cmd+Shift+M (macOS) / Win+Shift+M (Windows) 显示/隐藏主窗口
@@ -223,9 +242,10 @@ func main() {
 	})
 
 	b.NewWebview(&velo.VeloWebviewOpt{
-		Pathname: "/home/index",
-		Width:    1024,
-		Height:   768,
+		FrontendFS: frontend_folder,
+		Pathname:   "/home/index",
+		Width:      1024,
+		Height:     768,
 		OnDragDrop: func(event string, payload string) {
 			fmt.Printf("OnDragDrop: %s, %s\n", event, payload)
 		},

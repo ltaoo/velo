@@ -8,6 +8,10 @@ func open_webview(opts *BoxWebviewOptions) {
 	fmt.Println("Webview is not supported on this platform yet.")
 }
 
+func open_window(opts *BoxWebviewOptions) {
+	fmt.Println("Additional webview windows are not supported on this platform yet.")
+}
+
 func Terminate()                       {}
 func setTitle(title string)            {}
 func setSize(width, height int)        {}

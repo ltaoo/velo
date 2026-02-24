@@ -8,6 +8,10 @@ func open_webview(opts *BoxWebviewOptions) {
 	fmt.Println("Webview (WebView2) requires CGO; building without UI on Windows.")
 }
 
+func open_window(opts *BoxWebviewOptions) {
+	fmt.Println("Additional webview windows are not supported on Windows without CGO.")
+}
+
 func Terminate()                       {}
 func setTitle(title string)            {}
 func setSize(width, height int)        {}

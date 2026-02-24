@@ -2,6 +2,7 @@ package webview
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"sync"
 )
@@ -10,6 +11,7 @@ type Handler func(message string) (id string, result string)
 type DragDropHandler func(event string, payload string)
 
 type BoxWebviewOptions struct {
+	ID             string
 	URL            string
 	Pathname       string
 	IconData       []byte
@@ -17,7 +19,8 @@ type BoxWebviewOptions struct {
 	AppName        string
 	Width          int
 	Height         int
-	Mux            *http.ServeMux
+	Mux            http.Handler
+	FrontendFS     fs.FS
 	HandleMessage  Handler
 	HandleDragDrop DragDropHandler
 }
@@ -27,6 +30,11 @@ type Webview struct{}
 func OpenWebview(opts *BoxWebviewOptions) *Webview {
 	open_webview(opts)
 	return nil // open_webview blocks; this is reached after window closes
+}
+
+func OpenWindow(opts *BoxWebviewOptions) *Webview {
+	open_window(opts)
+	return nil
 }
 
 func (w *Webview) SetTitle(title string)        { setTitle(title) }

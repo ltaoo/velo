@@ -5,6 +5,8 @@ package velo
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -182,17 +184,14 @@ type Box struct {
 	mux           *http.ServeMux
 	mode          Mode
 	frontendDir   string
-	frontendFS    fs.FS
 	appName       string
 	iconData      []byte
 }
 
 type VeloAppOpt struct {
-	Mode        Mode
-	FrontendDir string
-	FrontendFS  fs.FS
-	AppName     string
-	IconData    []byte
+	Mode     Mode
+	AppName  string
+	IconData []byte
 }
 
 func NewApp(o *VeloAppOpt) *Box {
@@ -200,16 +199,9 @@ func NewApp(o *VeloAppOpt) *Box {
 		get_handlers:  make(map[string]Handler),
 		post_handlers: make(map[string]Handler),
 		frontendDir:   "frontend",
-		frontendFS:    nil,
 		appName:       LoadAppConfig().displayName(),
 	}
 	b.mode = o.Mode
-	if o.FrontendDir != "" {
-		b.frontendDir = o.FrontendDir
-	}
-	if o.FrontendFS != nil {
-		b.frontendFS = o.FrontendFS
-	}
 	if o.AppName != "" {
 		b.appName = o.AppName
 	}
@@ -228,6 +220,36 @@ func (b *Box) Post(name string, handler Handler) {
 
 func (b *Box) SendMessage(message interface{}) bool {
 	return webview.SendMessage(message)
+}
+
+func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
+	pathname := opt.Pathname
+	if pathname == "" {
+		pathname = "/"
+	}
+
+	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
+	id := generateID()
+
+	opts := &webview.BoxWebviewOptions{
+		ID:             id,
+		Pathname:       pathname,
+		IconData:       b.iconData,
+		InjectedJS:     string(asset.JSRuntime),
+		AppName:        b.appName,
+		Width:          opt.Width,
+		Height:         opt.Height,
+		Mux:            mux,
+		FrontendFS:     opt.FrontendFS,
+		HandleMessage:  b.handleMessage,
+		HandleDragDrop: opt.OnDragDrop,
+	}
+	if b.mode == ModeBridgeHttp {
+		opts.URL = "http://127.0.0.1:8080" + pathname
+	} else {
+		opts.URL = "velo://localhost" + pathname
+	}
+	return webview.OpenWindow(opts)
 }
 
 func (b *Box) handleMessage(message string) (string, string) {
@@ -263,47 +285,68 @@ func (b *Box) handleMessage(message string) (string, string) {
 	return msg.ID, fmt.Sprintf("%v", result)
 }
 
-func (box *Box) Run() {
-	box.mux = http.NewServeMux()
+func generateID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	if entryPage == "" {
+		entryPage = "index.html"
+	}
 
 	var fileServer http.Handler
 	var indexBytes func() ([]byte, error)
 	if box.mode == ModeBridgeHttp {
 		fileServer = http.FileServer(http.Dir(box.frontendDir))
 		indexBytes = func() ([]byte, error) {
-			return os.ReadFile(filepath.Join(box.frontendDir, "index.html"))
+			return os.ReadFile(filepath.Join(box.frontendDir, entryPage))
 		}
-	} else {
-		fs_frontend, _ := fs.Sub(box.frontendFS, "frontend")
+	} else if frontendFS != nil {
+		fs_frontend, _ := fs.Sub(frontendFS, "frontend")
 		fileServer = http.FileServer(http.FS(fs_frontend))
 		indexBytes = func() ([]byte, error) {
-			return fs.ReadFile(fs_frontend, "index.html")
+			return fs.ReadFile(fs_frontend, entryPage)
 		}
 	}
-	box.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		rec := httptest.NewRecorder()
-		fileServer.ServeHTTP(rec, r)
-		if rec.Code == http.StatusNotFound {
-			data, err := indexBytes()
-			if err != nil {
-				http.Error(w, "Not Found", http.StatusNotFound)
+
+	if fileServer != nil {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" {
+				data, err := indexBytes()
+				if err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Write(data)
+					return
+				}
+			}
+			rec := httptest.NewRecorder()
+			fileServer.ServeHTTP(rec, r)
+			if rec.Code == http.StatusNotFound {
+				data, err := indexBytes()
+				if err != nil {
+					http.Error(w, "Not Found", http.StatusNotFound)
+					return
+				}
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Write(data)
 				return
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(data)
-			return
-		}
-		for k, v := range rec.Result().Header {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(rec.Code)
-		w.Write(rec.Body.Bytes())
-	})
+			for k, v := range rec.Result().Header {
+				w.Header()[k] = v
+			}
+			w.WriteHeader(rec.Code)
+			w.Write(rec.Body.Bytes())
+		})
+	}
 
 	for path, handler := range box.get_handlers {
 		path, handler := path, handler
 		fmt.Printf("[velo] registering GET %s\n", path)
-		box.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("[velo] handling GET %s (registered as %s)\n", r.URL.Path, path)
 			query_params := make(map[string]string)
 			for key, values := range r.URL.Query() {
@@ -331,7 +374,7 @@ func (box *Box) Run() {
 
 	for path, handler := range box.post_handlers {
 		path, handler := path, handler
-		box.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			var args interface{}
 			if r.Method == "POST" {
 				json.NewDecoder(r.Body).Decode(&args)
@@ -360,11 +403,20 @@ func (box *Box) Run() {
 		})
 	}
 
+	return mux
+}
+
+func (box *Box) Run() {
 	if len(box.webviews) > 0 && box.mode != ModeHttp {
 		first := box.webviews[0]
-		first.Mux = box.mux
 		pathname := first.Pathname
 		if box.mode == ModeBridgeHttp {
+			if mux, ok := first.Mux.(*http.ServeMux); ok {
+				box.mux = mux
+			} else {
+				// Fallback if Mux is generic handler
+				box.mux = box.setupMux(first.FrontendFS, "")
+			}
 			go func() {
 				server := &http.Server{Addr: "127.0.0.1:8080", Handler: box.mux}
 				server.ListenAndServe()
@@ -375,30 +427,44 @@ func (box *Box) Run() {
 		}
 		webview.OpenWebview(first)
 	} else {
+		box.mux = box.setupMux(nil, "")
 		server := &http.Server{Addr: "127.0.0.1:8080", Handler: box.mux}
 		server.ListenAndServe()
 	}
 }
 
 type VeloWebviewOpt struct {
-	Pathname   string
-	Width      int
-	Height     int
-	OnDragDrop func(event string, payload string)
+	Pathname    string
+	Width       int
+	Height      int
+	FrontendDir string
+	FrontendFS  fs.FS
+	EntryPage   string
+	OnDragDrop  func(event string, payload string)
 }
 
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
+	if opt.FrontendDir != "" {
+		b.frontendDir = opt.FrontendDir
+	}
+
+	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
+	id := generateID()
+
 	pathname := opt.Pathname
 	if pathname == "" {
 		pathname = "/"
 	}
 	opts := &webview.BoxWebviewOptions{
+		ID:             id,
 		Pathname:       pathname,
 		IconData:       b.iconData,
 		InjectedJS:     string(asset.JSRuntime),
 		AppName:        b.appName,
 		Width:          opt.Width,
 		Height:         opt.Height,
+		Mux:            mux,
+		FrontendFS:     opt.FrontendFS,
 		HandleMessage:  b.handleMessage,
 		HandleDragDrop: opt.OnDragDrop,
 	}
