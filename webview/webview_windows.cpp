@@ -190,10 +190,15 @@ static void NavigateTo(const char* url) {
     g_webview->Navigate(wurl.c_str());
 }
 
-void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen) {
+void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height) {
     HINSTANCE hInstance = GetModuleHandle(nullptr);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(InitWindow(hInstance))) return;
+
+    if (title) {
+        webviewSetTitle(title);
+    }
+    
     CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
         Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {

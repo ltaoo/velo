@@ -17,6 +17,7 @@ type BoxWebviewOptions struct {
 	IconData       []byte
 	InjectedJS     string
 	AppName        string
+	Title          string
 	Width          int
 	Height         int
 	Mux            http.Handler

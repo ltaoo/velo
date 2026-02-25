@@ -69,7 +69,11 @@ func runDev(dir string) error {
 	loop:
 		for {
 			select {
-			case <-doneCh:
+			case err := <-doneCh:
+				if err == nil {
+					action = "quit"
+					break loop
+				}
 				// process exited, wait for key
 				select {
 				case k := <-keyCh:

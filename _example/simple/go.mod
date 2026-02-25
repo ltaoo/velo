@@ -1,6 +1,6 @@
 module example/simple
 
-go 1.20
+go 1.24
 
 require (
 	github.com/ltaoo/velo v0.0.0

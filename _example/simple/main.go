@@ -184,6 +184,7 @@ func main() {
 			entryPage = "settings.html"
 		}
 		b.OpenWindow(&velo.VeloWebviewOpt{
+			Title:      "App-Settings",
 			Pathname:   pathname,
 			Width:      460,
 			Height:     720,
@@ -242,6 +243,7 @@ func main() {
 	})
 
 	b.NewWebview(&velo.VeloWebviewOpt{
+		Title:      "App-Main",
 		FrontendFS: frontend_folder,
 		Pathname:   "/home/index",
 		Width:      1024,

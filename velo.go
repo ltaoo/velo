@@ -61,10 +61,19 @@ func (c *BoxContext) Error(message string) string {
 }
 
 func (c *BoxContext) Query(key string) string {
-	if c.query == nil {
-		return ""
+	if c.query != nil {
+		if v, ok := c.query[key]; ok && v != "" {
+			return v
+		}
 	}
-	return c.query[key]
+	if c.args != nil {
+		if args, ok := c.args.(map[string]interface{}); ok {
+			if v, ok := args[key]; ok {
+				return fmt.Sprintf("%v", v)
+			}
+		}
+	}
+	return ""
 }
 
 func (c *BoxContext) SetQuery(query map[string]string) {
@@ -185,12 +194,14 @@ type Box struct {
 	mode          Mode
 	frontendDir   string
 	appName       string
+	title         string
 	iconData      []byte
 }
 
 type VeloAppOpt struct {
 	Mode     Mode
 	AppName  string
+	Title    string
 	IconData []byte
 }
 
@@ -204,6 +215,9 @@ func NewApp(o *VeloAppOpt) *Box {
 	b.mode = o.Mode
 	if o.AppName != "" {
 		b.appName = o.AppName
+	}
+	if o.Title != "" {
+		b.title = o.Title
 	}
 	if o.IconData != nil {
 		b.iconData = o.IconData
@@ -231,12 +245,21 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
 	id := generateID()
 
+	title := opt.Title
+	if title == "" {
+		title = b.title
+	}
+	if title == "" {
+		title = b.appName
+	}
+
 	opts := &webview.BoxWebviewOptions{
 		ID:             id,
 		Pathname:       pathname,
 		IconData:       b.iconData,
 		InjectedJS:     string(asset.JSRuntime),
 		AppName:        b.appName,
+		Title:          title,
 		Width:          opt.Width,
 		Height:         opt.Height,
 		Mux:            mux,
@@ -435,6 +458,7 @@ func (box *Box) Run() {
 
 type VeloWebviewOpt struct {
 	Pathname    string
+	Title       string
 	Width       int
 	Height      int
 	FrontendDir string
@@ -455,12 +479,20 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	if pathname == "" {
 		pathname = "/"
 	}
+	title := opt.Title
+	if title == "" {
+		title = b.title
+	}
+	if title == "" {
+		title = b.appName
+	}
 	opts := &webview.BoxWebviewOptions{
 		ID:             id,
 		Pathname:       pathname,
 		IconData:       b.iconData,
 		InjectedJS:     string(asset.JSRuntime),
 		AppName:        b.appName,
+		Title:          title,
 		Width:          opt.Width,
 		Height:         opt.Height,
 		Mux:            mux,
