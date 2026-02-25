@@ -152,7 +152,9 @@ func open_webview(opts *BoxWebviewOptions) {
 		defer C.free(cIcon)
 		cIconLen = C.int(len(opts.IconData))
 	}
-	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, C.int(opts.Width), C.int(opts.Height))
+	cTitle := C.CString(opts.Title)
+	defer C.free(unsafe.Pointer(cTitle))
+	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height))
 }
 
 func open_window(opts *BoxWebviewOptions) {

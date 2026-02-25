@@ -276,10 +276,11 @@ extern void GoRegisterWebview(void* webview, const char* id);
 // Global delegate for window control
 static MiniDelegate* gDelegate = nil;
 
-void webviewRunApp(const char* id, const char* startURL, const char* injectedJS, const void* iconData, int iconLen, const char* appName, int width, int height) {
+void webviewRunApp(const char* id, const char* startURL, const char* injectedJS, const void* iconData, int iconLen, const char* appName, const char* title, int width, int height) {
     NSLog(@"Webview: Starting webviewRunApp");
     @autoreleasepool {
         NSString* name = appName ? [NSString stringWithUTF8String:appName] : @"App";
+        NSString* windowTitle = title ? [NSString stringWithUTF8String:title] : name;
         NSData* iconNSData = (iconData && iconLen > 0) ? [NSData dataWithBytes:iconData length:iconLen] : nil;
         
         int winWidth = width > 0 ? width : 1024;
@@ -347,7 +348,7 @@ void webviewRunApp(const char* id, const char* startURL, const char* injectedJS,
         } else {
             delegate.injectedJS = @"";
         }
-        delegate.appName = name;
+        delegate.appName = windowTitle;
         delegate.windowWidth = winWidth;
         delegate.windowHeight = winHeight;
         
@@ -554,7 +555,7 @@ void webviewClose(void) {
     });
 }
 
-void webviewCreateWindow(const char* id, const char* startURL, const char* injectedJS, const char* appName, int width, int height) {
+void webviewCreateWindow(const char* id, const char* startURL, const char* injectedJS, const char* appName, const char* title, int width, int height) {
     NSString* url = nil;
     if (startURL) {
         url = [NSString stringWithUTF8String:startURL];
@@ -567,6 +568,13 @@ void webviewCreateWindow(const char* id, const char* startURL, const char* injec
     if (appName) {
         name = [NSString stringWithUTF8String:appName];
     }
+    NSString* windowTitle = nil;
+    if (title) {
+        windowTitle = [NSString stringWithUTF8String:title];
+    } else {
+        windowTitle = name;
+    }
+    
     NSString* windowID = id ? [NSString stringWithUTF8String:id] : nil;
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -574,7 +582,7 @@ void webviewCreateWindow(const char* id, const char* startURL, const char* injec
             return;
         }
         NSString* effectiveURL = url ? url : gDelegate.startURL;
-        [gDelegate openAdditionalWindowWithID:windowID url:effectiveURL width:width height:height appName:name injectedJS:js];
+        [gDelegate openAdditionalWindowWithID:windowID url:effectiveURL width:width height:height appName:windowTitle injectedJS:js];
     });
 }
 

@@ -1,7 +1,7 @@
 #ifndef WEBVIEW_DARWIN_H
 #define WEBVIEW_DARWIN_H
 
-void webviewRunApp(const char* id, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* appName, int width, int height);
+void webviewRunApp(const char* id, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* appName, const char* title, int width, int height);
 void webviewEval(void* webview, const char* js);
 void webviewTerminate();
 void webviewSchemeTaskDidReceiveResponse(void* task, int status, const char* contentType, const char* headers);
@@ -26,6 +26,6 @@ void webviewSetAlwaysOnTop(int onTop);
 void webviewSetURL(const char* url);
 void webviewClose(void);
 
-void webviewCreateWindow(const char* id, const char* url, const char* injectedJS, const char* appName, int width, int height);
+void webviewCreateWindow(const char* id, const char* url, const char* injectedJS, const char* appName, const char* title, int width, int height);
 
 #endif

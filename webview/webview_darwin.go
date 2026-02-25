@@ -215,6 +215,8 @@ func open_webview(opts *BoxWebviewOptions) {
 	defer C.free(unsafe.Pointer(cInjectedJS))
 	cAppName := C.CString(opts.AppName)
 	defer C.free(unsafe.Pointer(cAppName))
+	cTitle := C.CString(opts.Title)
+	defer C.free(unsafe.Pointer(cTitle))
 
 	var cIcon unsafe.Pointer
 	var cIconLen C.int
@@ -224,7 +226,7 @@ func open_webview(opts *BoxWebviewOptions) {
 		cIconLen = C.int(len(opts.IconData))
 	}
 
-	C.webviewRunApp(cID, cUrl, cInjectedJS, cIcon, cIconLen, cAppName, C.int(opts.Width), C.int(opts.Height))
+	C.webviewRunApp(cID, cUrl, cInjectedJS, cIcon, cIconLen, cAppName, cTitle, C.int(opts.Width), C.int(opts.Height))
 }
 
 func open_window(opts *BoxWebviewOptions) {
@@ -240,8 +242,10 @@ func open_window(opts *BoxWebviewOptions) {
 	defer C.free(unsafe.Pointer(cInjectedJS))
 	cAppName := C.CString(opts.AppName)
 	defer C.free(unsafe.Pointer(cAppName))
+	cTitle := C.CString(opts.Title)
+	defer C.free(unsafe.Pointer(cTitle))
 
-	C.webviewCreateWindow(cID, cUrl, cInjectedJS, cAppName, C.int(opts.Width), C.int(opts.Height))
+	C.webviewCreateWindow(cID, cUrl, cInjectedJS, cAppName, cTitle, C.int(opts.Width), C.int(opts.Height))
 }
 
 func Terminate() {

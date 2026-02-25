@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, int width, int height);
+void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height);
 void webviewEval(void* webview, const char* js);
 void webviewTerminate();
 void webviewSchemeTaskDidReceiveResponse(void* task, int status, const char* contentType, const char* headers);
