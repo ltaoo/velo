@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ltaoo/velo/asset"
@@ -181,19 +180,6 @@ func (c *AppConfig) displayName() string {
 	return name
 }
 
-var devMode string
-
-func isDev() bool {
-	if devMode == "1" {
-		return true
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	return filepath.Base(filepath.Dir(exe)) == "exe" || strings.Contains(exe, "go-build")
-}
-
 type Mode int
 
 const (
@@ -291,7 +277,9 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleDragDrop:         opt.OnDragDrop,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 	}
-	if b.mode == ModeBridgeHttp {
+	if opt.URL != "" {
+		opts.URL = opt.URL
+	} else if b.mode == ModeBridgeHttp {
 		opts.URL = "http://127.0.0.1:8080" + pathname
 	} else {
 		opts.URL = "velo://localhost" + pathname
@@ -347,16 +335,16 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 
 	var fileServer http.Handler
 	var indexBytes func() ([]byte, error)
-	if box.mode == ModeBridgeHttp {
-		fileServer = http.FileServer(http.Dir(box.frontendDir))
-		indexBytes = func() ([]byte, error) {
-			return os.ReadFile(filepath.Join(box.frontendDir, entryPage))
-		}
-	} else if frontendFS != nil {
+	if frontendFS != nil {
 		fs_frontend, _ := fs.Sub(frontendFS, "frontend")
 		fileServer = http.FileServer(http.FS(fs_frontend))
 		indexBytes = func() ([]byte, error) {
 			return fs.ReadFile(fs_frontend, entryPage)
+		}
+	} else if box.mode == ModeBridgeHttp {
+		fileServer = http.FileServer(http.Dir(box.frontendDir))
+		indexBytes = func() ([]byte, error) {
+			return os.ReadFile(filepath.Join(box.frontendDir, entryPage))
 		}
 	}
 
@@ -489,6 +477,7 @@ type VeloWebviewOpt struct {
 	FrontendFS  fs.FS
 	EntryPage   string
 	OnDragDrop  func(event string, payload string)
+	URL         string
 }
 
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {

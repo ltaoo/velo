@@ -145,10 +145,18 @@ type Config struct {
 		MacOS   MacOSSection   `json:"macos"`
 		Windows WindowsSection `json:"windows"`
 		Linux   LinuxSection   `json:"linux"`
+		IOS     IOSSection     `json:"ios"`
 	} `json:"platforms"`
 	Build   BuildSection   `json:"build"`
 	Release ReleaseSection `json:"release"`
 	Update  UpdateSection  `json:"update"`
+}
+
+type IOSSection struct {
+	BundleID         string `json:"bundle_id"`
+	IconFile         string `json:"icon_file"`
+	MinimumOSVersion string `json:"minimum_os_version"`
+	Xcassets         string `json:"xcassets"`
 }
 
 func Load(path string) (*Config, error) {
