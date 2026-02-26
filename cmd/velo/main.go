@@ -11,13 +11,18 @@ var version = "dev"
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: velo <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: build, dev, version")
+		fmt.Fprintln(os.Stderr, "commands: build, dev, doctor, version")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "version":
 		fmt.Printf("velo %s\n", version)
+	case "doctor":
+		if err := runDoctor(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	case "build":
 		fs := flag.NewFlagSet("build", flag.ExitOnError)
 		platform := fs.String("platform", "", "target platform: darwin, windows, linux, all (default: current OS)")

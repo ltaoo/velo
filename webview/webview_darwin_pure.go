@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !ios
 
 package webview
 
@@ -298,9 +298,24 @@ func open_webview(opts *BoxWebviewOptions) {
 }
 
 func open_window(opts *BoxWebviewOptions) {
-	cocoa.DispatchMain(func() {
-		createWindow(opts, false)
-	})
+	// If NSApp is not running (globalWindow is 0 as a proxy, though imperfect),
+	// and we are calling OpenWindow, we should probably start the loop?
+	// But usually OpenWindow implies "add a window".
+	// The velo framework seems to imply OpenWindow starts the app.
+
+	// If we are on macOS, and this is the first window, we should use open_webview
+	// to ensure the run loop starts.
+	mapLock.RLock()
+	count := len(webviewMap)
+	mapLock.RUnlock()
+
+	if count == 0 {
+		open_webview(opts)
+	} else {
+		cocoa.DispatchMain(func() {
+			createWindow(opts, false)
+		})
+	}
 }
 
 func createWindow(opts *BoxWebviewOptions, isMain bool) {
