@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,11 +21,37 @@ func (c crlfWriter) Write(p []byte) (int, error) {
 	return len(p), err
 }
 
+func loadAppName(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "app-config.json"))
+	if err != nil {
+		return "app"
+	}
+	var cfg struct {
+		App struct {
+			DisplayName string `json:"display_name"`
+			Name        string `json:"name"`
+		} `json:"app"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "app"
+	}
+	if cfg.App.DisplayName != "" {
+		return cfg.App.DisplayName
+	}
+	if cfg.App.Name != "" {
+		return cfg.App.Name
+	}
+	return "app"
+}
+
 func runDev(dir string) error {
 	mainFile := filepath.Join(dir, "main.go")
 	if _, err := os.Stat(mainFile); err != nil {
 		return fmt.Errorf("main.go not found in %s", dir)
 	}
+
+	appName := loadAppName(dir)
+	binPath := filepath.Join(dir, appName)
 
 	width, height := 80, 24
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
@@ -52,9 +79,26 @@ func runDev(dir string) error {
 		fmt.Printf("\033[2J\033[H\033[1;%dr\033[H", height-2)
 		drawFooter(width, height)
 
-		cmd := exec.Command("go", "run", "main.go")
-		cmd.Dir = dir
+		buildCmd := exec.Command("go", "build", "-ldflags", "-X github.com/ltaoo/velo.devMode=1", "-o", binPath, ".")
+		buildCmd.Dir = dir
 		crlf := crlfWriter{os.Stdout}
+		buildCmd.Stdout = crlf
+		buildCmd.Stderr = crlf
+		if err := buildCmd.Run(); err != nil {
+			// build failed, wait for key to restart or quit
+			select {
+			case k := <-keyCh:
+				switch k {
+				case 'r', 'R':
+					continue
+				default:
+					return nil
+				}
+			}
+		}
+
+		cmd := exec.Command(binPath)
+		cmd.Dir = dir
 		cmd.Stdout = crlf
 		cmd.Stderr = crlf
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -106,6 +150,7 @@ func runDev(dir string) error {
 		}
 	}
 
+	os.Remove(binPath)
 	// Reset terminal
 	fmt.Printf("\033[r\033[%d;0H\n", height)
 	return nil

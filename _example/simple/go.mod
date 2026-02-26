@@ -1,6 +1,6 @@
 module example/simple
 
-go 1.24
+go 1.20
 
 require (
 	github.com/ltaoo/velo v0.0.0
@@ -9,6 +9,7 @@ require (
 
 require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
+	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
