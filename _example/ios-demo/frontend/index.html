@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Velo iOS Demo</title>
+</head>
+<body>
+    <h1>Hello from Embedded Frontend!</h1>
+    <div id="appInfo" style="margin: 10px 0; color: #666;">Loading info...</div>
+    <button id="openProfileBtn">Open Profile</button>
+
+    <script>
+        function fetchAppInfo() {
+            if (window.invoke) {
+                window.invoke('/api/app', { method: 'GET' })
+                    .then(res => {
+                        console.log("App Info:", res);
+                        if (res && res.data) {
+                            document.getElementById('appInfo').innerText = 
+                                `App: ${res.data.name} (v${res.data.version})`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Failed to fetch app info:", err);
+                        document.getElementById('appInfo').innerText = "Failed to load info";
+                    });
+            }
+        }
+
+        // Try to fetch immediately, but also wait for bridge ready if needed
+        // In most cases, invoke is ready when page loads in this setup
+        // But if it's injected asynchronously, we might need a retry or event
+        function initApp() {
+            if (window.invoke) {
+                fetchAppInfo();
+            } else {
+                // If invoke is not immediately available, try one more time after a short delay
+                // If still not available, show error message
+                setTimeout(() => {
+                    if (window.invoke) {
+                        fetchAppInfo();
+                    } else {
+                        const el = document.getElementById('appInfo');
+                        el.innerText = "Error: window.invoke not found";
+                        el.style.color = "red";
+                    }
+                }, 500);
+            }
+        }
+
+        if (document.readyState === 'complete') {
+            initApp();
+        } else {
+            window.addEventListener('load', initApp);
+        }
+
+        document.getElementById('openProfileBtn').addEventListener('click', () => {
+            if (window.invoke) {
+                console.log("Using invoke for API call");
+                window.invoke('/open_window?target=profile', { method: 'GET' })
+                    .then(data => console.log("Invoke response:", data))
+                    .catch(error => console.error('Invoke Error:', error));
+            } else {
+                console.error("invoke not found!");
+                alert('invoke not existing');
+            }
+        });
+    </script>
+</body>
+</html>

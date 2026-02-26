@@ -1,0 +1,44 @@
+{
+  "app": {
+    "name": "MyApp",
+    "display_name": "My Application",
+    "description": "A mobile application built with Velo",
+    "version": "1.0.0",
+    "author": "Author",
+    "icon": "assets/appicon.png",
+    "tray_icon": "assets/appicon.png"
+  },
+  "binary": {
+    "project_name": "myapp"
+  },
+  "platforms": {
+    "ios": {
+      "bundle_id": "com.funzm.flix",
+      "icon_file": "assets/appicon.png",
+      "minimum_os_version": "13.0"
+    }
+  },
+  "build": {
+    "config_files": [],
+    "exclude_files": []
+  },
+  "release": {
+    "footer": "Built with Velo"
+  },
+  "update": {
+    "enabled": true,
+    "check_frequency": "startup",
+    "channel": "stable",
+    "auto_download": false,
+    "timeout": 300,
+    "sources": [
+      {
+        "type": "http",
+        "priority": 1,
+        "enabled": true,
+        "need_check_checksum": false,
+        "manifest_url": "http://111.229.247.226:5555/api/public/dl/3nfqWk9Y?inline=true"
+      }
+    ]
+  }
+}
