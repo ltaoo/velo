@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ltaoo/velo/asset"
@@ -168,13 +169,29 @@ func LoadAppConfig(embedded ...[]byte) *AppConfig {
 }
 
 func (c *AppConfig) displayName() string {
+	var name string
 	if c.App.DisplayName != "" {
-		return c.App.DisplayName
+		name = c.App.DisplayName
+	} else if c.App.Name != "" {
+		name = c.App.Name
+	} else {
+		name = "App"
 	}
-	if c.App.Name != "" {
-		return c.App.Name
+
+	return name
+}
+
+var devMode string
+
+func isDev() bool {
+	if devMode == "1" {
+		return true
 	}
-	return "App"
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(filepath.Dir(exe)) == "exe" || strings.Contains(exe, "go-build")
 }
 
 type Mode int
@@ -186,31 +203,34 @@ const (
 )
 
 type Box struct {
-	get_handlers  map[string]Handler
-	post_handlers map[string]Handler
-	webviews      []*webview.BoxWebviewOptions
-	Webview       *webview.Webview
-	mux           *http.ServeMux
-	mode          Mode
-	frontendDir   string
-	appName       string
-	title         string
-	iconData      []byte
+	get_handlers           map[string]Handler
+	post_handlers          map[string]Handler
+	webviews               []*webview.BoxWebviewOptions
+	Webview                *webview.Webview
+	mux                    *http.ServeMux
+	mode                   Mode
+	frontendDir            string
+	appName                string
+	title                  string
+	iconData               []byte
+	quitOnLastWindowClosed bool
 }
 
 type VeloAppOpt struct {
-	Mode     Mode
-	AppName  string
-	Title    string
-	IconData []byte
+	Mode                   Mode
+	AppName                string
+	Title                  string
+	IconData               []byte
+	QuitOnLastWindowClosed *bool
 }
 
 func NewApp(o *VeloAppOpt) *Box {
 	b := &Box{
-		get_handlers:  make(map[string]Handler),
-		post_handlers: make(map[string]Handler),
-		frontendDir:   "frontend",
-		appName:       LoadAppConfig().displayName(),
+		get_handlers:           make(map[string]Handler),
+		post_handlers:          make(map[string]Handler),
+		frontendDir:            "frontend",
+		appName:                LoadAppConfig().displayName(),
+		quitOnLastWindowClosed: true,
 	}
 	b.mode = o.Mode
 	if o.AppName != "" {
@@ -221,6 +241,9 @@ func NewApp(o *VeloAppOpt) *Box {
 	}
 	if o.IconData != nil {
 		b.iconData = o.IconData
+	}
+	if o.QuitOnLastWindowClosed != nil {
+		b.quitOnLastWindowClosed = *o.QuitOnLastWindowClosed
 	}
 	return b
 }
@@ -254,18 +277,19 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	}
 
 	opts := &webview.BoxWebviewOptions{
-		ID:             id,
-		Pathname:       pathname,
-		IconData:       b.iconData,
-		InjectedJS:     string(asset.JSRuntime),
-		AppName:        b.appName,
-		Title:          title,
-		Width:          opt.Width,
-		Height:         opt.Height,
-		Mux:            mux,
-		FrontendFS:     opt.FrontendFS,
-		HandleMessage:  b.handleMessage,
-		HandleDragDrop: opt.OnDragDrop,
+		ID:                     id,
+		Pathname:               pathname,
+		IconData:               b.iconData,
+		InjectedJS:             string(asset.JSRuntime),
+		AppName:                b.appName,
+		Title:                  title,
+		Width:                  opt.Width,
+		Height:                 opt.Height,
+		Mux:                    mux,
+		FrontendFS:             opt.FrontendFS,
+		HandleMessage:          b.handleMessage,
+		HandleDragDrop:         opt.OnDragDrop,
+		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 	}
 	if b.mode == ModeBridgeHttp {
 		opts.URL = "http://127.0.0.1:8080" + pathname
@@ -487,18 +511,19 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		title = b.appName
 	}
 	opts := &webview.BoxWebviewOptions{
-		ID:             id,
-		Pathname:       pathname,
-		IconData:       b.iconData,
-		InjectedJS:     string(asset.JSRuntime),
-		AppName:        b.appName,
-		Title:          title,
-		Width:          opt.Width,
-		Height:         opt.Height,
-		Mux:            mux,
-		FrontendFS:     opt.FrontendFS,
-		HandleMessage:  b.handleMessage,
-		HandleDragDrop: opt.OnDragDrop,
+		ID:                     id,
+		Pathname:               pathname,
+		IconData:               b.iconData,
+		InjectedJS:             string(asset.JSRuntime),
+		AppName:                b.appName,
+		Title:                  title,
+		Width:                  opt.Width,
+		Height:                 opt.Height,
+		Mux:                    mux,
+		FrontendFS:             opt.FrontendFS,
+		HandleMessage:          b.handleMessage,
+		HandleDragDrop:         opt.OnDragDrop,
+		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 	}
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}

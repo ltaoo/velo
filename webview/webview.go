@@ -11,19 +11,20 @@ type Handler func(message string) (id string, result string)
 type DragDropHandler func(event string, payload string)
 
 type BoxWebviewOptions struct {
-	ID             string
-	URL            string
-	Pathname       string
-	IconData       []byte
-	InjectedJS     string
-	AppName        string
-	Title          string
-	Width          int
-	Height         int
-	Mux            http.Handler
-	FrontendFS     fs.FS
-	HandleMessage  Handler
-	HandleDragDrop DragDropHandler
+	ID                      string
+	URL                     string
+	Pathname                string
+	IconData                []byte
+	InjectedJS              string
+	AppName                 string
+	Title                   string
+	Width                   int
+	Height                  int
+	Mux                     http.Handler
+	FrontendFS              fs.FS
+	HandleMessage           Handler
+	HandleDragDrop          DragDropHandler
+	QuitOnLastWindowClosed  bool
 }
 
 type Webview struct{}
