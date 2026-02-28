@@ -29,6 +29,12 @@ CGRect msgSend_GetRect(void* id, void* sel) {
     send_type func = (send_type)objc_msgSend;
     return func(id, sel);
 }
+
+void msgSend_Transition(void* cls, void* sel, void* view, double duration, unsigned long options, void* animations, void* completion) {
+    typedef void (*send_type)(void*, void*, void*, double, unsigned long, void*, void*);
+    send_type func = (send_type)objc_msgSend;
+    func(cls, sel, view, duration, options, animations, completion);
+}
 */
 import "C"
 
@@ -263,6 +269,13 @@ func (id ID) SendGetRect(sel Selector) CGRect {
 		Origin: CGPoint{X: float64(ret.origin.x), Y: float64(ret.origin.y)},
 		Size:   CGSize{Width: float64(ret.size.width), Height: float64(ret.size.height)},
 	}
+}
+
+// SendTransition performs a UIView transition
+func (c Class) SendTransition(sel Selector, view ID, duration float64, options uint, animations, completion uintptr) {
+	C.msgSend_Transition(unsafe.Pointer(c), unsafe.Pointer(sel), 
+		unsafe.Pointer(view), C.double(duration), 
+		C.ulong(options), unsafe.Pointer(animations), unsafe.Pointer(completion))
 }
 
 // Helper to create NSString
