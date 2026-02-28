@@ -9,13 +9,18 @@ import (
 )
 
 var (
-	webview_opts *BoxWebviewOptions
-	wkWebView    uikit.ID
+	webview_opts  *BoxWebviewOptions
+	wkWebView     uikit.ID
 	navController uikit.ID
+	appWindow     uikit.ID
 )
 
 func open_webview(opts *BoxWebviewOptions) {
+	fmt.Println("========================================")
 	fmt.Println("DEBUG: Starting iOS Webview (open_webview)")
+	fmt.Printf("DEBUG: Options - Title: %s, URL: %s\n", opts.Title, opts.URL)
+	fmt.Println("========================================")
+
 	// Store options for AppDelegate
 	webview_opts = opts
 
@@ -23,11 +28,18 @@ func open_webview(opts *BoxWebviewOptions) {
 	fmt.Printf("DEBUG: SharedApplication returned: %v\n", app)
 
 	if app != 0 {
+		fmt.Println("========================================")
 		fmt.Println("DEBUG: UIApplication already running, navigating existing webview")
+		fmt.Printf("DEBUG: Current navController: %v\n", navController)
+		fmt.Printf("DEBUG: Current wkWebView: %v\n", wkWebView)
+		fmt.Println("========================================")
 		uikit.DispatchAsyncMain(func() {
+			fmt.Println("DEBUG: Inside DispatchAsyncMain, calling pushWindow")
 			pushWindow(opts)
+			fmt.Println("DEBUG: pushWindow completed")
 		})
 		// Do not block, return immediately to allow handler to complete
+		fmt.Println("DEBUG: Returning from open_webview (app already running)")
 		return
 	} else {
 		fmt.Println("DEBUG: UIApplication not running, starting new one")
@@ -38,6 +50,8 @@ func open_webview(opts *BoxWebviewOptions) {
 		// Start UIApplication
 		// This blocks until app exit
 		fmt.Println("DEBUG: Calling UIApplicationMain...")
+		// The third argument (principalClassName) can be nil, or "UIApplication"
+		// The fourth argument is our delegate class name
 		ret := uikit.UIApplicationMain(0, nil, "", "VeloAppDelegate")
 		fmt.Printf("DEBUG: UIApplicationMain returned: %d\n", ret)
 	}
@@ -57,7 +71,21 @@ func createAppDelegate() {
 	// Add application:didFinishLaunchingWithOptions:
 	uikit.AddMethod(cls, uikit.RegisterName("application:didFinishLaunchingWithOptions:"), applicationDidFinishLaunching, "B@:@@")
 
+	// Add window property methods (required for correct AppDelegate behavior)
+	// @property (strong, nonatomic) UIWindow *window;
+	uikit.AddMethod(cls, uikit.RegisterName("window"), getWindow, "@@:")
+	uikit.AddMethod(cls, uikit.RegisterName("setWindow:"), setWindow, "v@:@")
+
 	uikit.RegisterClassPair(cls)
+}
+
+func getWindow(self, _cmd uintptr) uintptr {
+	return uintptr(appWindow)
+}
+
+func setWindow(self, _cmd, win uintptr) uintptr {
+	appWindow = uikit.ID(win)
+	return 0
 }
 
 func createScriptMessageHandler() {
@@ -74,6 +102,9 @@ func createScriptMessageHandler() {
 }
 
 func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
+	fmt.Println("========================================")
+	fmt.Println("DEBUG: scriptMessageReceived called")
+
 	// message is WKScriptMessage
 	// body property contains the message body
 	msgID := uikit.ID(message)
@@ -83,6 +114,11 @@ func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
 	msgStr := uikit.NSStringToString(body)
 
 	fmt.Printf("DEBUG: Received message from JS: %s\n", msgStr)
+	fmt.Printf("DEBUG: webview_opts is nil: %v\n", webview_opts == nil)
+	if webview_opts != nil {
+		fmt.Printf("DEBUG: HandleMessage is nil: %v\n", webview_opts.HandleMessage == nil)
+	}
+	fmt.Println("========================================")
 
 	if webview_opts != nil && webview_opts.HandleMessage != nil {
 		go func() {
@@ -97,14 +133,21 @@ func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
 			}
 		}()
 	} else {
-		fmt.Println("DEBUG: webview_opts or HandleMessage is nil")
+		fmt.Println("ERROR: webview_opts or HandleMessage is nil, cannot handle message")
 	}
 	return 0
 }
 
 func applicationDidFinishLaunching(self, _cmd, app, options uintptr) uintptr {
 	fmt.Println("Velo: applicationDidFinishLaunching")
+	
+	// Create and setup the window
 	initWindow()
+	
+	// Assign the window to the delegate
+	// self.window = appWindow
+	uikit.ID(self).Send(uikit.RegisterName("setWindow:"), appWindow)
+	
 	return 1 // true
 }
 
@@ -158,23 +201,38 @@ func createWebviewController(opts *BoxWebviewOptions, rect uikit.CGRect) (uikit.
 }
 
 func pushWindow(opts *BoxWebviewOptions) {
-	fmt.Println("DEBUG: pushWindow called")
+	fmt.Println("========================================")
+	fmt.Println("DEBUG: pushWindow called (pushing to navigation stack)")
+	fmt.Printf("DEBUG: pushWindow - Title: %s, URL: %s\n", opts.Title, opts.URL)
+	fmt.Printf("DEBUG: pushWindow - navController: %v\n", navController)
+	fmt.Println("========================================")
+
+	// Check if navigation controller exists
 	if navController == 0 {
-		fmt.Println("DEBUG: navController is 0, cannot push")
+		fmt.Println("ERROR: navController is 0, cannot push")
 		return
 	}
-	
+
 	screen := uikit.GetClass("UIScreen").Send(uikit.RegisterName("mainScreen"))
+	fmt.Printf("DEBUG: Got screen: %v\n", screen)
+
 	rect := screen.SendGetRect(uikit.RegisterName("bounds"))
-	
+	fmt.Printf("DEBUG: Screen bounds - X: %.0f, Y: %.0f, W: %.0f, H: %.0f\n",
+		rect.Origin.X, rect.Origin.Y, rect.Size.Width, rect.Size.Height)
+
 	fmt.Printf("DEBUG: Creating new webview controller for URL: %s\n", opts.URL)
 	vc, wv := createWebviewController(opts, rect)
+	fmt.Printf("DEBUG: Created vc: %v, wv: %v\n", vc, wv)
+
 	wkWebView = wv // Update current active webview
-	
-	// Push VC
-	// pushViewController:animated:
-	fmt.Println("DEBUG: Pushing view controller to navigation stack")
+	fmt.Printf("DEBUG: Updated global wkWebView to: %v\n", wkWebView)
+
+	// Push the new view controller onto the navigation stack
+	// [navController pushViewController:vc animated:YES]
+	fmt.Println("DEBUG: About to call pushViewController:animated:")
 	navController.Send(uikit.RegisterName("pushViewController:animated:"), vc, true)
+	fmt.Println("DEBUG: pushViewController:animated: completed")
+	fmt.Println("========================================")
 }
 
 func initWindow() {
@@ -185,6 +243,7 @@ func initWindow() {
 
 	win := uikit.GetClass("UIWindow").Send(uikit.RegisterName("alloc"))
 	win = win.SendRect(uikit.RegisterName("initWithFrame:"), rect)
+	appWindow = win
 
 	// Create Root View Controller (Navigation Controller)
 	vc, wv := createWebviewController(webview_opts, rect)

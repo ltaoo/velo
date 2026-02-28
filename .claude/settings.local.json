@@ -16,7 +16,8 @@
       "Bash(open:*)",
       "Bash(./velo build:*)",
       "Bash(wc:*)",
-      "Bash(/tmp/velo dev:*)"
+      "Bash(/tmp/velo dev:*)",
+      "Bash(./run_ios.sh:*)"
     ]
   }
 }
