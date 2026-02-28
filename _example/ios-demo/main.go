@@ -32,8 +32,13 @@ func main() {
 	})
 
 	app.Get("/open_window", func(c *velo.BoxContext) interface{} {
+		fmt.Println("========================================")
+		fmt.Println("HANDLER: /open_window called")
 		target := c.Query("target")
+		fmt.Printf("HANDLER: target = %s\n", target)
+
 		if target == "profile" {
+			fmt.Println("HANDLER: Opening profile window")
 			app.OpenWindow(&velo.VeloWebviewOpt{
 				Title:      "Profile",
 				Width:      390,
@@ -41,13 +46,17 @@ func main() {
 				EntryPage:  "profile.html",
 				FrontendFS: frontend_folder,
 			})
+			fmt.Println("HANDLER: OpenWindow call completed")
+		} else {
+			fmt.Printf("HANDLER: Unknown target: %s\n", target)
 		}
+		fmt.Println("========================================")
 		return c.Ok(velo.H{"success": true})
 	})
 
 	app.Get("/api/app", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{
-			"version": "1.0.0",
+			"version": "1.2.0",
 			"name":    "VeloiOSDemo",
 		})
 	})
