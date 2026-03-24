@@ -11,13 +11,12 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ltaoo/velo/asset"
 	"github.com/ltaoo/velo/buildcfg"
+	"github.com/ltaoo/velo/frontendserver"
 	"github.com/ltaoo/velo/webview"
 )
 
@@ -333,49 +332,19 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 		entryPage = "index.html"
 	}
 
-	var fileServer http.Handler
-	var indexBytes func() ([]byte, error)
 	if frontendFS != nil {
-		fs_frontend, _ := fs.Sub(frontendFS, "frontend")
-		fileServer = http.FileServer(http.FS(fs_frontend))
-		indexBytes = func() ([]byte, error) {
-			return fs.ReadFile(fs_frontend, entryPage)
-		}
+		mux.Handle("/", frontendserver.New(frontendserver.Options{
+			Mode:      frontendserver.ModeProd,
+			Root:      "frontend",
+			Embedded:  frontendFS,
+			EntryPage: entryPage,
+		}))
 	} else if box.mode == ModeBridgeHttp {
-		fileServer = http.FileServer(http.Dir(box.frontendDir))
-		indexBytes = func() ([]byte, error) {
-			return os.ReadFile(filepath.Join(box.frontendDir, entryPage))
-		}
-	}
-
-	if fileServer != nil {
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" {
-				data, err := indexBytes()
-				if err == nil {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.Write(data)
-					return
-				}
-			}
-			rec := httptest.NewRecorder()
-			fileServer.ServeHTTP(rec, r)
-			if rec.Code == http.StatusNotFound {
-				data, err := indexBytes()
-				if err != nil {
-					http.Error(w, "Not Found", http.StatusNotFound)
-					return
-				}
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Write(data)
-				return
-			}
-			for k, v := range rec.Result().Header {
-				w.Header()[k] = v
-			}
-			w.WriteHeader(rec.Code)
-			w.Write(rec.Body.Bytes())
-		})
+		mux.Handle("/", frontendserver.New(frontendserver.Options{
+			Mode:      frontendserver.ModeDev,
+			Root:      box.frontendDir,
+			EntryPage: entryPage,
+		}))
 	}
 
 	for path, handler := range box.get_handlers {

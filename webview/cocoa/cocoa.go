@@ -265,7 +265,7 @@ func NSStringToString(nsStr ID) string {
 		return ""
 	}
 
-	ptr := unsafe.Pointer(uintptr(cstr))
+	ptr := unsafe.Pointer(cstr)
 	var bytes []byte
 	// Read until null terminator
 	for {
@@ -274,7 +274,7 @@ func NSStringToString(nsStr ID) string {
 			break
 		}
 		bytes = append(bytes, b)
-		ptr = unsafe.Pointer(uintptr(ptr) + 1)
+		ptr = unsafe.Add(ptr, 1)
 	}
 	return string(bytes)
 }
