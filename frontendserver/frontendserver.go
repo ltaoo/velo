@@ -9,18 +9,20 @@ import (
 	"strings"
 )
 
-type Mode int
+type Mode = string
 
 const (
-	ModeDev Mode = iota
-	ModeProd
+	ModeDev  Mode = "dev"
+	ModeProd Mode = "prod"
 )
 
 type Options struct {
-	Mode      Mode
-	Root      string
-	Embedded  fs.FS
-	EntryPage string
+	Mode                Mode
+	Root                string
+	Embedded            fs.FS
+	EntryPage           string
+	StaticAssetPrefixes []string
+	NoFallbackPrefixes  []string
 }
 
 type Server struct {
@@ -31,6 +33,9 @@ type Server struct {
 	fileServer http.Handler
 	indexBytes func() ([]byte, error)
 	initErr    error
+
+	staticAssetPrefixes []string
+	noFallbackPrefixes  []string
 }
 
 func New(opts Options) *Server {
@@ -41,6 +46,15 @@ func New(opts Options) *Server {
 	}
 	if s.entryPage == "" {
 		s.entryPage = "index.html"
+	}
+	s.staticAssetPrefixes = normalizeStaticAssetPrefixes(opts.StaticAssetPrefixes)
+	s.noFallbackPrefixes = normalizeNoFallbackPrefixes(opts.NoFallbackPrefixes)
+
+	if opts.Embedded != nil {
+		s.mode = ModeProd
+	}
+	if s.mode == "" {
+		s.mode = ModeDev
 	}
 
 	switch s.mode {
@@ -85,8 +99,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isPublic := isPublicPath(r.URL.Path)
-	if s.mode == ModeDev && !isPublic {
+	isStaticAsset := isStaticAssetPath(r.URL.Path, s.staticAssetPrefixes)
+	if s.mode == ModeDev && !isStaticAsset {
 		setNoCacheHeaders(w.Header())
 	}
 
@@ -97,23 +111,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rec := httptest.NewRecorder()
 	req := r
-	if s.mode == ModeDev && !isPublic {
+	if s.mode == ModeDev && !isStaticAsset {
 		req = r.Clone(r.Context())
 		req.Header = r.Header.Clone()
 		stripConditionalHeaders(req.Header)
 	}
 	s.fileServer.ServeHTTP(rec, req)
 	if rec.Code == http.StatusNotFound {
-		if !isPublic {
-			s.serveEntryPage(w)
-			return
+		if !isStaticAsset {
+			if !isNoFallbackPath(r.URL.Path, s.noFallbackPrefixes) {
+				s.serveEntryPage(w)
+				return
+			}
 		}
 	}
 
 	for k, v := range rec.Result().Header {
 		w.Header()[k] = v
 	}
-	if isPublic {
+	if isStaticAsset {
 		setPublicCacheHeaders(w.Header())
 	} else if s.mode == ModeDev {
 		setNoCacheHeaders(w.Header())
@@ -153,12 +169,88 @@ func setPublicCacheHeaders(h http.Header) {
 	h.Set("Cache-Control", "public, max-age=31536000, immutable")
 }
 
-func isPublicPath(p string) bool {
-	if p == "" {
+func normalizeStaticAssetPrefixes(prefixes []string) []string {
+	if len(prefixes) == 0 {
+		return []string{"/public"}
+	}
+
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		if len(p) > 1 {
+			p = strings.TrimRight(p, "/")
+		}
+		if p == "/" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return []string{"/public"}
+	}
+	return out
+}
+
+func normalizeNoFallbackPrefixes(prefixes []string) []string {
+	if len(prefixes) == 0 {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		if len(p) > 1 {
+			p = strings.TrimRight(p, "/")
+		}
+		if p == "/" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isStaticAssetPath(p string, staticAssetPrefixes []string) bool {
+	return isPathPrefixed(p, staticAssetPrefixes)
+}
+
+func isNoFallbackPath(p string, noFallbackPrefixes []string) bool {
+	return isPathPrefixed(p, noFallbackPrefixes)
+}
+
+func isPathPrefixed(p string, prefixes []string) bool {
+	if p == "" || len(prefixes) == 0 {
 		return false
 	}
-	if strings.HasPrefix(p, "/public/") {
-		return true
+	for _, prefix := range prefixes {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
 	}
-	return p == "/public"
+	return false
 }

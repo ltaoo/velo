@@ -334,14 +334,12 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 
 	if frontendFS != nil {
 		mux.Handle("/", frontendserver.New(frontendserver.Options{
-			Mode:      frontendserver.ModeProd,
 			Root:      "frontend",
 			Embedded:  frontendFS,
 			EntryPage: entryPage,
 		}))
 	} else if box.mode == ModeBridgeHttp {
 		mux.Handle("/", frontendserver.New(frontendserver.Options{
-			Mode:      frontendserver.ModeDev,
 			Root:      box.frontendDir,
 			EntryPage: entryPage,
 		}))
