@@ -5,11 +5,12 @@ import LoginPage from "@/pages/login/index.js";
 import NotFoundPageView from "@/pages/notfound/index.js";
 import HomeLayoutView from "@/pages/home/index.js";
 
-const routesConfigure = {
-  home_layout: {
+const route_configure = {
+  home: {
     title: "首页",
     pathname: "/home",
     component: HomeLayoutView,
+    default: true,
   },
   login: {
     title: "登录",
@@ -24,17 +25,11 @@ const routesConfigure = {
   },
 };
 
-const {
-  routes,
-  routesWithPathname,
-  views: generatedViews,
-  defaultRouteName: generatedDefaultRouteName,
-  notfoundRouteName: generatedNotfoundRouteName,
-} = Timeless.buildRoutes(routesConfigure);
-
-export const views = generatedViews;
-export const defaultRouteName = generatedDefaultRouteName;
-export const notfoundRouteName = generatedNotfoundRouteName;
+const r = Timeless.buildRoutes(route_configure);
+const routes = r.routes;
+export const views = r.views;
+export const defaultRouteName = r.defaultRouteName;
+export const notfoundRouteName = r.notfoundRouteName;
 
 // LocalStorage
 const DEFAULT_CACHE_VALUES = {
@@ -95,8 +90,8 @@ export const app = new Timeless.ApplicationModel({
   storage,
   async beforeReady() {
     const { pathname, query } = router;
-    const route = routesWithPathname[pathname];
-    console.log("[Store] beforeReady", pathname, route, routesWithPathname);
+    const route = r.routesWithPathname[pathname];
+    console.log("[Store] beforeReady", pathname, route);
     // if (route.options?.require?.includes("login")) {
     //   if (!user.isLogin) {
     //     app.tip?.({ text: ["请先登录"] });
@@ -131,7 +126,7 @@ history.onRouteChange(({ reason, view, href, ignore }) => {
 });
 history.onClickLink(({ href, target }) => {
   const { pathname, query } = Timeless.NavigatorCore.parse(href);
-  const route = routesWithPathname[pathname];
+  const route = r.routesWithPathname[pathname];
   if (!route) {
     app.tip?.({ text: ["没有匹配的页面"] });
     return;
