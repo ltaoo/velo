@@ -711,8 +711,16 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 			Err(err).
 			Str("path", path).
 			Str("output", string(output)).
-			Msg("Code signature verification failed, skipping")
-		return nil
+			Msg("Code signature verification failed")
+		return &types.UpdateError{
+			Category: types.ErrCategorySecurity,
+			Message:  "code signature verification failed",
+			Cause:    err,
+			Context: map[string]interface{}{
+				"path":   path,
+				"output": strings.TrimSpace(string(output)),
+			},
+		}
 	}
 
 	du.logger.Info().

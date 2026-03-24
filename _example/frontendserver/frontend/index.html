@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="public/timeless/0.2.0/timeless.shadcn.css" rel="stylesheet" />
+  <script type="importmap">
+    {
+      "imports": {
+        "@/": "./src/"
+      }
+    }
+  </script>
+  <title>DownloadTaskList</title>
+  <style>
+    #root {
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <script>!function () { try { var d = document.documentElement, n = 'data-theme', s = 'setAttribute'; var e = localStorage.getItem('theme'); if ('system' === e || (!e && true)) { var t = '(prefers-color-scheme: dark)', m = window.matchMedia(t); if (m.media !== t || m.matches) { d.style.colorScheme = 'dark'; d[s](n, 'dark') } else { d.style.colorScheme = 'light'; d[s](n, 'light') } } else if (e) { d[s](n, e || '') } if (e === 'light' || e === 'dark') d.style.colorScheme = e } catch (e) { } }()</script>
+  <script src="public/timeless/0.3.0/timeless.reactive.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.utils.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.ui.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.kit.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.web.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.headless.umd.min.js"></script>
+  <script src="public/timeless/0.3.0/timeless.icons.umd.min.js"></script>
+  <div id="root"></div>
+  <script type="module" src="src/index.js"></script>
+</body>
+
+</html>
