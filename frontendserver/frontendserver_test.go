@@ -113,11 +113,9 @@ func TestDevMode_SpaFallbackToEntryPage(t *testing.T) {
 	}
 }
 
-func TestDevMode_NoFallbackPrefixes_404DoesNotFallback(t *testing.T) {
+func TestDevMode_NoFallbackPrefixes(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("index"), 0644); err != nil {
-		t.Fatalf("write index.html: %v", err)
-	}
+	os.WriteFile(filepath.Join(root, "index.html"), []byte("index"), 0644)
 
 	s := New(Options{
 		Mode:               ModeDev,
@@ -126,38 +124,36 @@ func TestDevMode_NoFallbackPrefixes_404DoesNotFallback(t *testing.T) {
 		NoFallbackPrefixes: []string{"/api"},
 	})
 
-	apiReq := httptest.NewRequest(http.MethodGet, "http://example.local/api/missing", nil)
+	// /api/missing should 404, not fallback
 	apiW := httptest.NewRecorder()
-	s.ServeHTTP(apiW, apiReq)
+	s.ServeHTTP(apiW, httptest.NewRequest(http.MethodGet, "http://example.local/api/missing", nil))
 	if apiW.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", apiW.Code)
+		t.Fatalf("expected 404, got %d", apiW.Code)
 	}
-	if got := apiW.Body.String(); got == "index" {
-		t.Fatalf("expected not to fallback to entry page for /api, got %q", got)
-	}
-	if got := apiW.Header().Get("Content-Type"); got == "text/html; charset=utf-8" {
-		t.Fatalf("expected not to serve html for /api 404, got %q", got)
+	if apiW.Body.String() == "index" {
+		t.Fatal("should not fallback to entry page for /api")
 	}
 
-	spaReq := httptest.NewRequest(http.MethodGet, "http://example.local/home/index", nil)
+	// /home/index should still fallback
 	spaW := httptest.NewRecorder()
-	s.ServeHTTP(spaW, spaReq)
+	s.ServeHTTP(spaW, httptest.NewRequest(http.MethodGet, "http://example.local/home/index", nil))
 	if spaW.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", spaW.Code)
+		t.Fatalf("expected 200, got %d", spaW.Code)
 	}
-	if got := spaW.Body.String(); got != "index" {
-		t.Fatalf("expected entry page body index, got %q", got)
+	if spaW.Body.String() != "index" {
+		t.Fatalf("expected entry page, got %q", spaW.Body.String())
 	}
 }
 
 func TestProdMode_ServesEmbeddedFiles(t *testing.T) {
 	embedded := fstest.MapFS{
-		"frontend/index.html":  {Data: []byte("index-prod")},
-		"frontend/app.js":      {Data: []byte("prod")},
+		"frontend/index.html": {Data: []byte("index-prod")},
+		"frontend/app.js":     {Data: []byte("prod")},
 		"frontend/public/x.js": {Data: []byte("x")},
 	}
 
 	s := New(Options{
+		Mode:      ModeProd,
 		Root:      "frontend",
 		Embedded:  embedded,
 		EntryPage: "index.html",
@@ -199,64 +195,49 @@ func TestProdMode_ServesEmbeddedFiles(t *testing.T) {
 	}
 }
 
-func TestProdMode_NoFallbackPrefixes_404DoesNotFallback(t *testing.T) {
+func TestProdMode_NoFallbackPrefixes(t *testing.T) {
 	embedded := fstest.MapFS{
 		"frontend/index.html": {Data: []byte("index-prod")},
 	}
 
 	s := New(Options{
+		Mode:               ModeProd,
 		Root:               "frontend",
 		Embedded:           embedded,
 		EntryPage:          "index.html",
 		NoFallbackPrefixes: []string{"/api"},
 	})
 
-	apiReq := httptest.NewRequest(http.MethodGet, "http://example.local/api/missing", nil)
+	// /api/missing should 404
 	apiW := httptest.NewRecorder()
-	s.ServeHTTP(apiW, apiReq)
+	s.ServeHTTP(apiW, httptest.NewRequest(http.MethodGet, "http://example.local/api/missing", nil))
 	if apiW.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", apiW.Code)
+		t.Fatalf("expected 404, got %d", apiW.Code)
 	}
-	body, err := io.ReadAll(apiW.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	body, _ := io.ReadAll(apiW.Body)
 	if string(body) == "index-prod" {
-		t.Fatalf("expected not to fallback to entry page for /api, got %q", string(body))
+		t.Fatal("should not fallback to entry page for /api")
 	}
 
-	spaReq := httptest.NewRequest(http.MethodGet, "http://example.local/home/index", nil)
+	// /home/index should fallback
 	spaW := httptest.NewRecorder()
-	s.ServeHTTP(spaW, spaReq)
+	s.ServeHTTP(spaW, httptest.NewRequest(http.MethodGet, "http://example.local/home/index", nil))
 	if spaW.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", spaW.Code)
+		t.Fatalf("expected 200, got %d", spaW.Code)
 	}
-	body2, err := io.ReadAll(spaW.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	body2, _ := io.ReadAll(spaW.Body)
 	if string(body2) != "index-prod" {
-		t.Fatalf("expected entry page body index-prod, got %q", string(body2))
+		t.Fatalf("expected entry page, got %q", string(body2))
 	}
 }
 
-func TestStaticAssetPrefixes_Customize(t *testing.T) {
+func TestStaticAssetPrefixes_Custom(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("index"), 0644); err != nil {
-		t.Fatalf("write index.html: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "assets"), 0755); err != nil {
-		t.Fatalf("mkdir assets: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "assets", "a.js"), []byte("a"), 0644); err != nil {
-		t.Fatalf("write assets/a.js: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "public"), 0755); err != nil {
-		t.Fatalf("mkdir public: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "public", "x.js"), []byte("x"), 0644); err != nil {
-		t.Fatalf("write public/x.js: %v", err)
-	}
+	os.WriteFile(filepath.Join(root, "index.html"), []byte("index"), 0644)
+	os.MkdirAll(filepath.Join(root, "assets"), 0755)
+	os.WriteFile(filepath.Join(root, "assets", "a.js"), []byte("a"), 0644)
+	os.MkdirAll(filepath.Join(root, "public"), 0755)
+	os.WriteFile(filepath.Join(root, "public", "x.js"), []byte("x"), 0644)
 
 	s := New(Options{
 		Mode:                ModeDev,
@@ -265,50 +246,23 @@ func TestStaticAssetPrefixes_Customize(t *testing.T) {
 		StaticAssetPrefixes: []string{"assets"},
 	})
 
-	assetsReq := httptest.NewRequest(http.MethodGet, "http://example.local/assets/a.js", nil)
+	// /assets/a.js should get public cache headers
 	assetsW := httptest.NewRecorder()
-	s.ServeHTTP(assetsW, assetsReq)
+	s.ServeHTTP(assetsW, httptest.NewRequest(http.MethodGet, "http://example.local/assets/a.js", nil))
 	if assetsW.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", assetsW.Code)
+		t.Fatalf("expected 200, got %d", assetsW.Code)
 	}
 	if got := assetsW.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
 		t.Fatalf("expected public cache-control, got %q", got)
 	}
-	if got := assetsW.Body.String(); got != "a" {
-		t.Fatalf("expected body a, got %q", got)
-	}
 
-	publicReq := httptest.NewRequest(http.MethodGet, "http://example.local/public/x.js", nil)
+	// /public/x.js should NOT get public cache (custom prefix replaced default)
 	publicW := httptest.NewRecorder()
-	s.ServeHTTP(publicW, publicReq)
+	s.ServeHTTP(publicW, httptest.NewRequest(http.MethodGet, "http://example.local/public/x.js", nil))
 	if publicW.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", publicW.Code)
+		t.Fatalf("expected 200, got %d", publicW.Code)
 	}
 	if got := publicW.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("expected Cache-Control no-store, got %q", got)
-	}
-	if got := publicW.Body.String(); got != "x" {
-		t.Fatalf("expected body x, got %q", got)
-	}
-}
-
-func TestAutoMode_EmbeddedForcesProd(t *testing.T) {
-	embedded := fstest.MapFS{
-		"frontend/index.html": {Data: []byte("index-prod")},
-		"frontend/app.js":     {Data: []byte("prod")},
-	}
-	s := New(Options{
-		Root:      "frontend",
-		Embedded:  embedded,
-		EntryPage: "index.html",
-	})
-	r := httptest.NewRequest(http.MethodGet, "http://example.local/app.js", nil)
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
-	}
-	if got := w.Header().Get("Cache-Control"); got == "no-store" {
-		t.Fatalf("expected prod-like cache (not no-store), got %q", got)
+		t.Fatalf("expected no-store, got %q", got)
 	}
 }

@@ -9,11 +9,11 @@ import (
 	"strings"
 )
 
-type Mode = string
+type Mode int
 
 const (
-	ModeDev  Mode = "dev"
-	ModeProd Mode = "prod"
+	ModeDev Mode = iota
+	ModeProd
 )
 
 type Options struct {
@@ -47,15 +47,8 @@ func New(opts Options) *Server {
 	if s.entryPage == "" {
 		s.entryPage = "index.html"
 	}
-	s.staticAssetPrefixes = normalizeStaticAssetPrefixes(opts.StaticAssetPrefixes)
-	s.noFallbackPrefixes = normalizeNoFallbackPrefixes(opts.NoFallbackPrefixes)
-
-	if opts.Embedded != nil {
-		s.mode = ModeProd
-	}
-	if s.mode == "" {
-		s.mode = ModeDev
-	}
+	s.staticAssetPrefixes = normalizePrefixes(opts.StaticAssetPrefixes, "/public")
+	s.noFallbackPrefixes = normalizePrefixes(opts.NoFallbackPrefixes, "")
 
 	switch s.mode {
 	case ModeDev:
@@ -99,7 +92,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isStaticAsset := isStaticAssetPath(r.URL.Path, s.staticAssetPrefixes)
+	isStaticAsset := hasPathPrefix(r.URL.Path, s.staticAssetPrefixes)
 	if s.mode == ModeDev && !isStaticAsset {
 		setNoCacheHeaders(w.Header())
 	}
@@ -118,11 +111,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.fileServer.ServeHTTP(rec, req)
 	if rec.Code == http.StatusNotFound {
-		if !isStaticAsset {
-			if !isNoFallbackPath(r.URL.Path, s.noFallbackPrefixes) {
-				s.serveEntryPage(w)
-				return
-			}
+		if !isStaticAsset && !hasPathPrefix(r.URL.Path, s.noFallbackPrefixes) {
+			s.serveEntryPage(w)
+			return
 		}
 	}
 
@@ -169,84 +160,31 @@ func setPublicCacheHeaders(h http.Header) {
 	h.Set("Cache-Control", "public, max-age=31536000, immutable")
 }
 
-func normalizeStaticAssetPrefixes(prefixes []string) []string {
-	if len(prefixes) == 0 {
-		return []string{"/public"}
-	}
-
+func normalizePrefixes(prefixes []string, fallback string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(prefixes))
 	for _, p := range prefixes {
 		p = strings.TrimSpace(p)
-		if p == "" {
+		if p == "" || p == "/" {
 			continue
 		}
 		if !strings.HasPrefix(p, "/") {
 			p = "/" + p
 		}
-		if len(p) > 1 {
-			p = strings.TrimRight(p, "/")
-		}
-		if p == "/" {
-			continue
-		}
+		p = strings.TrimRight(p, "/")
 		if _, ok := seen[p]; ok {
 			continue
 		}
 		seen[p] = struct{}{}
 		out = append(out, p)
 	}
-	if len(out) == 0 {
-		return []string{"/public"}
+	if len(out) == 0 && fallback != "" {
+		return []string{fallback}
 	}
 	return out
 }
 
-func normalizeNoFallbackPrefixes(prefixes []string) []string {
-	if len(prefixes) == 0 {
-		return nil
-	}
-
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if !strings.HasPrefix(p, "/") {
-			p = "/" + p
-		}
-		if len(p) > 1 {
-			p = strings.TrimRight(p, "/")
-		}
-		if p == "/" {
-			continue
-		}
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		seen[p] = struct{}{}
-		out = append(out, p)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func isStaticAssetPath(p string, staticAssetPrefixes []string) bool {
-	return isPathPrefixed(p, staticAssetPrefixes)
-}
-
-func isNoFallbackPath(p string, noFallbackPrefixes []string) bool {
-	return isPathPrefixed(p, noFallbackPrefixes)
-}
-
-func isPathPrefixed(p string, prefixes []string) bool {
-	if p == "" || len(prefixes) == 0 {
-		return false
-	}
+func hasPathPrefix(p string, prefixes []string) bool {
 	for _, prefix := range prefixes {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return true
