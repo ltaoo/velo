@@ -21,3 +21,6 @@ Thumbs.db
 
 MyApp.app
 vendor/
+
+# Frontend assets
+_example/frontendserver/frontend/public/timeless/
