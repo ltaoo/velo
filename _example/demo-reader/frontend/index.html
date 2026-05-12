@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reader</title>
+  <link rel="stylesheet" href="/public/index.css">
+  <script src="/public/timeless.core.umd.min.js"></script>
+  <script src="/public/timeless.web.umd.min.js"></script>
+  <script src="/public/veloui.umd.min.js"></script>
+  <script src="/public/tailwindcss.3.4.17.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: ['selector', '[data-theme="dark"]'],
+    }
+  </script>
+  <style>
+    :root {
+      --BG-0: #1a1a1a;
+      --BG-1: #2a2a2a;
+      --BG-2: #333;
+      --BG-3: #3a3a3a;
+      --FG-0: #e0e0e0;
+      --FG-1: #b0b0b0;
+      --FG-2: #888;
+      --border: rgba(255,255,255,0.1);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.js"></script>
+</body>
+</html>
