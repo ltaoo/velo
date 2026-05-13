@@ -32,6 +32,27 @@ func (d *Dir) UpdateStateFile() string {
 	return filepath.Join(d.Data(), "update_state.json")
 }
 
+// WorkDir returns the current working directory (where the command was executed).
+func WorkDir() string {
+	d, _ := os.Getwd()
+	return d
+}
+
+// ExeDir returns the directory where the application binary is located.
+// It resolves symlinks so that it works correctly even when the binary
+// is launched from a macOS .app bundle (which symlinks back to the original).
+func ExeDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		resolved = exe
+	}
+	return filepath.Dir(resolved)
+}
+
 func homeDir() string {
 	h, _ := os.UserHomeDir()
 	return h

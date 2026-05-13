@@ -2,16 +2,21 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ltaoo/velo"
 	veloerr "github.com/ltaoo/velo/error"
 	"github.com/ltaoo/velo/file"
+	"github.com/ltaoo/velo/shortcut"
 	"github.com/ltaoo/velo/tray"
+	"example/reader/store"
 	"github.com/rs/zerolog"
 )
 
@@ -55,6 +60,9 @@ func main() {
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 
+	st := store.New()
+	logger.Info().Msgf("Store path: %s", st.Path())
+
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"message": "pong"})
 	})
@@ -75,6 +83,85 @@ func main() {
 
 	b.Get("/api/window/show", func(c *velo.BoxContext) interface{} {
 		b.Webview.Show()
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/window/state/save", func(c *velo.BoxContext) interface{} {
+		name := c.Query("name")
+		if name == "" {
+			name = "default"
+		}
+		x, _ := strconv.Atoi(c.Query("x"))
+		y, _ := strconv.Atoi(c.Query("y"))
+		w, _ := strconv.Atoi(c.Query("width"))
+		h, _ := strconv.Atoi(c.Query("height"))
+		err := st.SaveWindow(name, &store.WindowState{X: x, Y: y, Width: w, Height: h})
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to save window state")
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/window/state/load", func(c *velo.BoxContext) interface{} {
+		name := c.Query("name")
+		if name == "" {
+			name = "default"
+		}
+		ws := st.GetWindow(name)
+		if ws == nil {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{"found": true, "x": ws.X, "y": ws.Y, "width": ws.Width, "height": ws.Height})
+	})
+
+	b.Get("/api/window/state/snapshot", func(c *velo.BoxContext) interface{} {
+		name := c.Query("name")
+		if name == "" {
+			name = "default"
+		}
+		x, y := b.Webview.GetPosition()
+		w, h := b.Webview.GetSize()
+		err := st.SaveWindow(name, &store.WindowState{X: x, Y: y, Width: w, Height: h})
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to snapshot window state")
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true, "x": x, "y": y, "width": w, "height": h})
+	})
+
+	b.Get("/api/config/get", func(c *velo.BoxContext) interface{} {
+		key := c.Query("key")
+		if key == "" {
+			return c.Ok(velo.H{"data": st.GetAll()})
+		}
+		v := st.Get(key)
+		if v == nil {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{"found": true, "value": json.RawMessage(v)})
+	})
+
+	b.Get("/api/config/set", func(c *velo.BoxContext) interface{} {
+		key := c.Query("key")
+		val := c.Query("value")
+		if key == "" {
+			return c.Error("key is required")
+		}
+		if err := st.Set(key, json.RawMessage(val)); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/config/delete", func(c *velo.BoxContext) interface{} {
+		key := c.Query("key")
+		if key == "" {
+			return c.Error("key is required")
+		}
+		if err := st.Delete(key); err != nil {
+			return c.Error(err.Error())
+		}
 		return c.Ok(velo.H{"success": true})
 	})
 
@@ -108,15 +195,72 @@ func main() {
 		},
 	})
 
-	b.NewWebview(&velo.VeloWebviewOpt{
-		Title:              "Reader",
-		FrontendFS:         frontend_folder,
-		Pathname:           "/reader",
-		Width:              400,
-		Height:             600,
-		Frameless:          true,
-		Hidden:             true,
+	// Register global shortcuts
+	sm := shortcut.NewManager()
+	sm.Register("MetaLeft+ShiftLeft+KeyS", func() {
+		b.Webview.Show()
 	})
+	sm.Register("MetaLeft+ShiftLeft+KeyH", func() {
+		b.Webview.Hide()
+	})
+	sm.Register("MetaLeft+ShiftLeft+KeyJ", func() {
+		b.SendMessage(velo.H{"type": "startAutoScroll"})
+	})
+	sm.Register("MetaLeft+ShiftLeft+KeyK", func() {
+		b.SendMessage(velo.H{"type": "stopAutoScroll"})
+	})
+	_ = sm
+
+	windowName := "reader"
+	initWidth := 400
+	initHeight := 600
+	savedState := st.GetWindow(windowName)
+	if savedState != nil && savedState.Width > 0 && savedState.Height > 0 {
+		initWidth = savedState.Width
+		initHeight = savedState.Height
+	}
+
+	b.NewWebview(&velo.VeloWebviewOpt{
+		Title:      "Reader",
+		FrontendFS: frontend_folder,
+		Pathname:   "/reader",
+		Width:      initWidth,
+		Height:     initHeight,
+		Frameless:  true,
+		Hidden:     true,
+		OnDragDrop: func(event string, payload string) {
+			if event != "drop" {
+				return
+			}
+			var paths []string
+			if err := json.Unmarshal([]byte(payload), &paths); err != nil {
+				logger.Error().Err(err).Msg("failed to parse drop payload")
+				return
+			}
+			for _, path := range paths {
+				if !strings.HasSuffix(strings.ToLower(path), ".txt") {
+					continue
+				}
+				content, err := os.ReadFile(path)
+				if err != nil {
+					logger.Error().Err(err).Str("path", path).Msg("failed to read dropped file")
+					continue
+				}
+				name := filepath.Base(path)
+				name = name[:len(name)-len(filepath.Ext(name))]
+				b.SendMessage(velo.H{
+					"type":    "fileDrop",
+					"content": string(content),
+					"title":   name,
+				})
+				break
+			}
+		},
+	})
+
+	if savedState != nil && (savedState.X != 0 || savedState.Y != 0) {
+		b.Webview.SetPosition(savedState.X, savedState.Y)
+	}
 
 	b.Run()
 }
