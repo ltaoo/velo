@@ -3,16 +3,22 @@
 package webview
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
+	"time"
 	"unsafe"
 )
 
 /*
-#cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -lole32 -lshell32 -luser32 -lgdi32
+#cgo CXXFLAGS: -std=c++17 -IC:/Users/litao/.nuget/packages/microsoft.web.webview2/1.0.2792.45/build/native/include
+#cgo LDFLAGS: -lole32 -lshell32 -luser32 -lgdi32 -luuid -ldwmapi
 #include <stdlib.h>
 #include "webview_windows.h"
 */
@@ -21,11 +27,35 @@ import "C"
 var webview_opts *BoxWebviewOptions
 var globalWebview unsafe.Pointer
 
+var traceLogMu sync.Mutex
+var traceLogFile *os.File
+
+func traceLog(format string, args ...interface{}) {
+	traceLogMu.Lock()
+	defer traceLogMu.Unlock()
+	if traceLogFile == nil {
+		path := filepath.Join(os.TempDir(), "velo-webview-trace.log")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return
+		}
+		traceLogFile = f
+		fmt.Fprintf(traceLogFile, "\n=== %s === trace started (pid=%d)\n",
+			time.Now().Format(time.RFC3339), os.Getpid())
+	}
+	fmt.Fprintf(traceLogFile, "[%s] %s\n",
+		time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+	traceLogFile.Sync()
+}
+
 type schemeResponseWriter struct {
-	task        unsafe.Pointer
-	header      http.Header
-	wroteHeader bool
-	finished    bool
+	task           unsafe.Pointer
+	header         http.Header
+	wroteHeader    bool
+	finished       bool
+	statusLog      int
+	bytesWritten   int
+	contentTypeLog string
 }
 
 func (s *schemeResponseWriter) Header() http.Header {
@@ -43,6 +73,7 @@ func (s *schemeResponseWriter) Write(b []byte) (int, error) {
 		s.WriteHeader(http.StatusOK)
 	}
 	C.webviewSchemeTaskDidReceiveData(s.task, unsafe.Pointer(&b[0]), C.int(len(b)))
+	s.bytesWritten += len(b)
 	return len(b), nil
 }
 
@@ -55,13 +86,26 @@ func (s *schemeResponseWriter) WriteHeader(statusCode int) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	headersJson := ""
+	s.statusLog = statusCode
+	s.contentTypeLog = contentType
+	// Serialize all headers except Content-Type (C++ side prepends it).
+	// Format: "Name: Value\r\nName2: Value2" — CRLF separators required by
+	// ICoreWebView2Environment::CreateWebResourceResponse.
+	var headerLines []string
 	if s.header != nil {
-		headersJson = "{}"
+		for name, values := range s.header {
+			if strings.EqualFold(name, "Content-Type") {
+				continue
+			}
+			for _, v := range values {
+				headerLines = append(headerLines, name+": "+v)
+			}
+		}
 	}
+	headersStr := strings.Join(headerLines, "\r\n")
 	cContentType := C.CString(contentType)
 	defer C.free(unsafe.Pointer(cContentType))
-	cHeaders := C.CString(headersJson)
+	cHeaders := C.CString(headersStr)
 	defer C.free(unsafe.Pointer(cHeaders))
 	C.webviewSchemeTaskDidReceiveResponse(s.task, C.int(statusCode), cContentType, cHeaders)
 }
@@ -74,18 +118,40 @@ func (s *schemeResponseWriter) Finish() {
 	C.webviewSchemeTaskDidFinish(s.task)
 }
 
+//export GoTrace
+func GoTrace(msg *C.char) {
+	if msg == nil {
+		return
+	}
+	traceLog("[cpp] %s", C.GoString(msg))
+}
+
 //export GoHandleMessage
 func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 	globalWebview = webview
 	notifyReady()
-	// fmt.Println("[webview]GoHandleMessage", webview_opts)
+	goMsg := C.GoString(msg)
+
+	// Intercept built-in window drag message before routing to user handlers
+	// (mirrors the Darwin implementation). JS from runtime.js posts this when
+	// the user mousedowns on a .velo-drag / [data-velo-drag] element.
+	var parsed struct {
+		ID     string `json:"id"`
+		Method string `json:"method"`
+	}
+	if json.Unmarshal([]byte(goMsg), &parsed) == nil && parsed.Method == "__velo/window/start_drag" {
+		C.webviewStartWindowDrag()
+		if parsed.ID != "" {
+			sendCallback(parsed.ID, `"ok"`)
+		}
+		return
+	}
+
 	if webview_opts == nil || webview_opts.HandleMessage == nil {
 		return
 	}
-	goMsg := C.GoString(msg)
 	id, result := webview_opts.HandleMessage(goMsg)
 	if id == "" {
-		fmt.Println("[webview]GoHandleMessage", webview_opts)
 		return
 	}
 	js := fmt.Sprintf(
@@ -94,7 +160,6 @@ func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 	)
 	cjs := C.CString(js)
 	defer C.free(unsafe.Pointer(cjs))
-	// fmt.Println("before invoke C.webviewEval")
 	C.webviewEval(webview, cjs)
 }
 
@@ -125,16 +190,24 @@ func sendMessage(payload string) bool {
 //export GoHandleSchemeTask
 func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.char) {
 	if webview_opts == nil || webview_opts.Mux == nil {
+		traceLog("GoHandleSchemeTask: no mux configured")
 		return
 	}
 	goUrl := C.GoString(urlPtr)
+	traceLog("GoHandleSchemeTask: url=%s", goUrl)
 	go func() {
-		u, _ := url.Parse(goUrl)
+		u, err := url.Parse(goUrl)
+		if err != nil {
+			traceLog("url.Parse failed: %v", err)
+			return
+		}
 		u.Scheme = "http"
 		req, _ := http.NewRequest("GET", u.String(), nil)
 		rw := &schemeResponseWriter{task: task}
 		webview_opts.Mux.ServeHTTP(rw, req)
 		rw.Finish()
+		traceLog("served %s -> status=%d, body=%d bytes, contentType=%q",
+			goUrl, rw.statusLog, rw.bytesWritten, rw.contentTypeLog)
 	}()
 }
 
@@ -154,7 +227,15 @@ func open_webview(opts *BoxWebviewOptions) {
 	}
 	cTitle := C.CString(opts.Title)
 	defer C.free(unsafe.Pointer(cTitle))
-	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height))
+	frameless := C.int(0)
+	if opts.Frameless {
+		frameless = 1
+	}
+	hidden := C.int(0)
+	if opts.Hidden {
+		hidden = 1
+	}
+	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden)
 }
 
 func open_window(opts *BoxWebviewOptions) {
