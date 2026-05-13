@@ -1,0 +1,2 @@
+ALTER TABLE novels ADD COLUMN current_chapter INTEGER DEFAULT 0;
+ALTER TABLE novels ADD COLUMN current_offset INTEGER DEFAULT 0;

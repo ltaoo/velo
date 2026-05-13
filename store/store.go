@@ -17,22 +17,27 @@ type WindowState struct {
 	Height int `json:"height"`
 }
 
-// Data is the top-level structure persisted to data.json.
+// Data is the top-level structure persisted to storage.json.
 type Data struct {
 	Windows map[string]*WindowState    `json:"windows"`
 	Config  map[string]json.RawMessage `json:"config"`
 }
 
-// Store provides read/write access to data.json.
+// Store provides read/write access to storage.json beside the executable.
 type Store struct {
 	path string
 	mu   sync.Mutex
 	data *Data
 }
 
-// New creates a Store that reads/writes data.json beside the executable.
+// New creates a Store that reads/writes storage.json in the executable's directory.
 func New() *Store {
-	p := filepath.Join(dir.ExeDir(), "data.json")
+	return NewWithDir(dir.ExeDir())
+}
+
+// NewWithDir creates a Store that reads/writes storage.json in the given directory.
+func NewWithDir(d string) *Store {
+	p := filepath.Join(d, "storage.json")
 	s := &Store{
 		path: p,
 		data: &Data{
@@ -41,12 +46,11 @@ func New() *Store {
 		},
 	}
 	s.load()
-	// Ensure the file exists on disk from the start.
 	s.save()
 	return s
 }
 
-// Path returns the file path of data.json.
+// Path returns the file path of storage.json.
 func (s *Store) Path() string {
 	return s.path
 }
