@@ -98,9 +98,7 @@ func main() {
 		Pathname:           "/reader",
 		Width:              400,
 		Height:             600,
-		BorderlessTitlebar: true,
-		TitlebarHeight:     42,
-		CaptionButtonWidth: 44,
+		Frameless:          true,
 	})
 
 	b.Run()

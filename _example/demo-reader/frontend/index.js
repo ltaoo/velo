@@ -1,205 +1,279 @@
-const render = ($root) => {
-  const { innerWidth, innerHeight } = window;
+function ApplicationView() {
+  return View(
+    {
+      class: "reader-device",
+    },
+    [
+      View(
+        {
+          class: "screen-container",
+        },
+        [
+          View(
+            {
+              class: "header velo-drag",
+            },
+            [
+              View(
+                {
+                  class: "book-title",
+                },
+                ["侠客行"],
+              ),
+              View(
+                {
+                  style: {
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "12px",
+                  },
+                },
+                [
+                  Button(
+                    {
+                      class: "menu-btn",
+                    },
+                    ["打开文件"],
+                  ),
+                  FilePicker({ class: "file-input", accept: ".txt" }),
+                  View(
+                    {
+                      class: "battery",
+                    },
+                    [
+                      View(
+                        {
+                          class: "battery-icon",
+                        },
+                        [
+                          View({
+                            class: "battery-level",
+                          }),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          View(
+            {
+              class: "content-area",
+            },
+            [
+              View(
+                {
+                  class: "chapter-block",
+                },
+                [
+                  View(
+                    {
+                      class: "chapter-title",
+                    },
+                    ["Title"],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    ],
+  );
+}
 
-  const isWebView2 = !!(window.chrome && window.chrome.webview);
-  const titlebarHeight = 42;
-  const captionButtonWidth = 44;
+// function render($root) {
+//   // --- DOM structure ---
+//   var device = document.createElement("div");
+//   device.className = "reader-device";
 
-  const shell = document.createElement("div");
-  shell.className = "reader-shell";
+//   var screen = document.createElement("div");
+//   screen.className = "screen-container";
 
-  let contentHost = shell;
+//   var loadingOverlay = document.createElement("div");
+//   loadingOverlay.className = "loading-overlay";
+//   loadingOverlay.innerHTML = '<span class="loading-text">加载中...</span>';
 
-  if (isWebView2) {
-    const titlebar = document.createElement("div");
-    titlebar.className = "reader-titlebar";
+//   var header = document.createElement("div");
+//   header.className = "header velo-drag";
 
-    const edgeTop = document.createElement("div");
-    edgeTop.className = "reader-edge-indicator top";
-    shell.appendChild(edgeTop);
+//   var bookTitle = document.createElement("span");
+//   bookTitle.className = "book-title";
+//   bookTitle.textContent = "加载中...";
 
-    const edgeBottom = document.createElement("div");
-    edgeBottom.className = "reader-edge-indicator bottom";
-    shell.appendChild(edgeBottom);
+//   var headerRight = document.createElement("div");
+//   headerRight.style.cssText = "display:flex;align-items:center;gap:12px;";
 
-    const edgeLeft = document.createElement("div");
-    edgeLeft.className = "reader-edge-indicator left";
-    shell.appendChild(edgeLeft);
+//   var openFileBtn = document.createElement("button");
+//   openFileBtn.className = "menu-btn";
+//   openFileBtn.textContent = "打开文件";
 
-    const edgeRight = document.createElement("div");
-    edgeRight.className = "reader-edge-indicator right";
-    shell.appendChild(edgeRight);
+//   var fileInput = document.createElement("input");
+//   fileInput.type = "file";
+//   fileInput.className = "file-input";
+//   fileInput.accept = ".txt";
 
-    const drag = document.createElement("div");
-    drag.className = "reader-titlebar-drag";
-    drag.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      invoke("__velo/window/start_drag", { method: "GET", args: {} }).catch(() => {});
+//   var battery = document.createElement("div");
+//   battery.className = "battery";
+//   battery.innerHTML =
+//     '<div class="battery-icon"><div class="battery-level"></div></div>';
+
+//   headerRight.appendChild(openFileBtn);
+//   headerRight.appendChild(fileInput);
+//   headerRight.appendChild(battery);
+
+//   header.appendChild(bookTitle);
+//   header.appendChild(headerRight);
+
+//   var contentArea = document.createElement("div");
+//   contentArea.className = "content-area";
+
+//   var pagesContainer = document.createElement("div");
+//   contentArea.appendChild(pagesContainer);
+
+//   screen.appendChild(loadingOverlay);
+//   screen.appendChild(header);
+//   screen.appendChild(contentArea);
+//   device.appendChild(screen);
+//   $root.appendChild(device);
+
+//   // --- Logic ---
+//   function showLoading(show) {
+//     if (show) {
+//       loadingOverlay.classList.add("active");
+//     } else {
+//       loadingOverlay.classList.remove("active");
+//     }
+//   }
+
+// }
+
+function parseBookContent(text) {
+  var lines = text
+    .split("\n")
+    .map(function (line) {
+      return line.trim();
+    })
+    .filter(function (line) {
+      return line.length > 0;
     });
+  var chapters = [];
+  var currentChapter = { title: "内容", paragraphs: [] };
 
-    const title = document.createElement("div");
-    title.className = "reader-titlebar-title";
-    title.textContent = "Reader";
-    drag.appendChild(title);
+  var chapterPattern =
+    /^={10,}\s*第([一二三四五六七八九十百千万\d]+)[回卷部章节]\s*(.*?)\s*={10,}$/;
 
-    const controls = document.createElement("div");
-    controls.className = "reader-titlebar-controls";
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var match = line.match(chapterPattern);
+    if (match) {
+      var chapterNum = match[1];
+      var chapterTitle = match[2].trim();
+      var fullTitle = "第" + chapterNum + "章 " + chapterTitle;
 
-    const mkBtn = (key, svg, title) => {
-      const el = document.createElement("button");
-      el.className = "reader-control-btn";
-      el.dataset.btn = key;
-      el.title = title;
-      el.innerHTML = svg;
-      return el;
-    };
-
-    const pinBtn = mkBtn(
-      "pin",
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8m0 0l3-3m-3 3L9 7"/><circle cx="12" cy="14" r="6"/></svg>',
-      "固定窗口"
-    );
-    pinBtn.classList.add("pinned");
-    pinBtn.addEventListener("click", () => {
-      const isPinned = pinBtn.classList.contains("pinned");
-      invoke("/api/window/set_pinned", {
-        method: "GET",
-        args: { pinned: !isPinned },
-      }).then(() => {
-        if (isPinned) {
-          pinBtn.classList.remove("pinned");
-        } else {
-          pinBtn.classList.add("pinned");
-        }
-      }).catch(() => {});
-    });
-
-    const hideBtn = mkBtn(
-      "hide",
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
-      "隐藏窗口"
-    );
-    hideBtn.addEventListener("click", () => {
-      invoke("/api/window/hide", { method: "GET", args: {} }).catch(() => {});
-    });
-
-    const closeBtn = mkBtn(
-      "close",
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>',
-      "关闭"
-    );
-    closeBtn.addEventListener("click", () => {
-      invoke("__velo/window/close", { method: "GET", args: {} }).catch(() => {});
-    });
-
-    controls.appendChild(pinBtn);
-    controls.appendChild(hideBtn);
-    controls.appendChild(closeBtn);
-
-    titlebar.appendChild(drag);
-    titlebar.appendChild(controls);
-
-    shell.appendChild(titlebar);
-
-    const content = document.createElement("div");
-    content.className = "reader-content";
-    contentHost = content;
-
-    shell.appendChild(content);
-
-    const checkEdge = (e) => {
-      const rect = shell.getBoundingClientRect();
-      const edgeThreshold = 20;
-
-      const edges = {
-        top: rect.top < edgeThreshold,
-        bottom: rect.bottom > window.innerHeight - edgeThreshold,
-        left: rect.left < edgeThreshold,
-        right: rect.right > window.innerWidth - edgeThreshold,
-      };
-
-      edgeTop.classList.toggle("active", edges.top);
-      edgeBottom.classList.toggle("active", edges.bottom);
-      edgeLeft.classList.toggle("active", edges.left);
-      edgeRight.classList.toggle("active", edges.right);
-
-      if (edges.top) {
-        titlebar.classList.add("highlight-top");
-        titlebar.classList.remove("highlight-bottom");
-      } else if (edges.bottom) {
-        titlebar.classList.add("highlight-bottom");
-        titlebar.classList.remove("highlight-top");
-      } else {
-        titlebar.classList.remove("highlight-top", "highlight-bottom");
+      if (currentChapter.paragraphs.length > 0) {
+        chapters.push(currentChapter);
       }
-    };
-
-    shell.addEventListener("mouseenter", () => {
-      const interval = setInterval(checkEdge, 100);
-      shell._edgeInterval = interval;
-    });
-
-    shell.addEventListener("mouseleave", () => {
-      if (shell._edgeInterval) {
-        clearInterval(shell._edgeInterval);
-        shell._edgeInterval = null;
-      }
-      edgeTop.classList.remove("active");
-      edgeBottom.classList.remove("active");
-      edgeLeft.classList.remove("active");
-      edgeRight.classList.remove("active");
-      titlebar.classList.remove("highlight-top", "highlight-bottom");
-    });
+      currentChapter = { title: fullTitle, paragraphs: [] };
+    } else {
+      currentChapter.paragraphs.push(line);
+    }
   }
 
-  const appData = {
-    articles: [
-      { id: 1, title: "深入理解 JavaScript 闭包", meta: "技术 · 2024-01-15" },
-      { id: 2, title: "React 18 新特性解析", meta: "前端 · 2024-01-14" },
-      { id: 3, title: "TypeScript 最佳实践", meta: "开发 · 2024-01-13" },
-      { id: 4, title: "CSS Grid 布局详解", meta: "前端 · 2024-01-12" },
-      { id: 5, title: "Node.js 性能优化", meta: "后端 · 2024-01-11" },
-      { id: 6, title: "微服务架构设计", meta: "架构 · 2024-01-10" },
-    ],
-  };
+  if (currentChapter.paragraphs.length > 0) {
+    chapters.push(currentChapter);
+  }
 
-  const renderList = () => {
-    const list = document.createElement("div");
-    list.className = "reader-list";
+  if (chapters.length === 0) {
+    chapters.push({ title: "内容", paragraphs: lines });
+  }
 
-    appData.articles.forEach((article) => {
-      const item = document.createElement("div");
-      item.className = "reader-item";
+  return chapters;
+}
 
-      const title = document.createElement("div");
-      title.className = "reader-item-title";
-      title.textContent = article.title;
+function formatContent(text) {
+  var paragraphs = text.split("\n\n").filter(function (p) {
+    return p.trim();
+  });
+  return paragraphs
+    .map(function (p) {
+      return "<p>" + p.replace(/\n/g, "<br>") + "</p>";
+    })
+    .join("");
+}
 
-      const meta = document.createElement("div");
-      meta.className = "reader-item-meta";
-      meta.textContent = article.meta;
+function loadBook(content, title) {
+  showLoading(true);
 
-      item.appendChild(title);
-      item.appendChild(meta);
-      list.appendChild(item);
+  setTimeout(function () {
+    var chapters = parseBookContent(content);
+
+    bookTitle.textContent = title;
+    pagesContainer.innerHTML = "";
+
+    chapters.forEach(function (chapter) {
+      var chapterDiv = document.createElement("div");
+      chapterDiv.className = "chapter-block";
+
+      var html = '<h2 class="chapter-title">' + chapter.title + "</h2>";
+      html += formatContent(chapter.paragraphs.join("\n\n"));
+
+      chapterDiv.innerHTML = html;
+      pagesContainer.appendChild(chapterDiv);
     });
 
-    return list;
-  };
+    showLoading(false);
+  }, 100);
+}
 
-  const renderContent = () => {
-    return renderList();
+function loadFromFile(file) {
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var fileName = file.name.replace(".txt", "");
+    loadBook(e.target.result, fileName);
   };
+  reader.readAsText(file);
+}
 
-  contentHost.appendChild(renderContent());
-  $root.appendChild(shell);
-};
+function loadDefaultBook() {
+  showLoading(true);
+  fetch("全集_格式化/金庸-侠客行txt全本精校版.txt")
+    .then(function (response) {
+      if (!response.ok) throw new Error("Failed to load");
+      return response.text();
+    })
+    .then(function (text) {
+      loadBook(text, "侠客行");
+    })
+    .catch(function (error) {
+      console.error("Failed to load default book:", error);
+      bookTitle.textContent = "点击打开文件";
+      showLoading(false);
+      pagesContainer.innerHTML =
+        '<div class="chapter-block"><p style="text-align:center;color:var(--ink-secondary);font-size:14px;margin-top:100px;">请点击右上角「打开文件」按钮选择 txt 文件</p></div>';
+    });
+}
+
+// openFileBtn.addEventListener("click", function () {
+//   fileInput.click();
+// });
+
+// fileInput.addEventListener("change", function (e) {
+//   if (e.target.files.length > 0) {
+//     loadFromFile(e.target.files[0]);
+//     e.target.value = "";
+//   }
+// });
+
+//   loadDefaultBook();
 
 document.addEventListener("DOMContentLoaded", function () {
-  const $root = document.querySelector("#root");
+  var $root = document.getElementById("root");
   if (!$root) {
     console.error("[Render] Root element not found");
     return;
   }
-  render($root);
+  // render($root);
+  Timeless.DOM.render(ApplicationView(), $root);
 });

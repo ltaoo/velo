@@ -1,34 +1,320 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reader</title>
-  <link rel="stylesheet" href="/public/index.css">
-  <script src="/public/timeless.core.umd.min.js"></script>
-  <script src="/public/timeless.web.umd.min.js"></script>
-  <script src="/public/veloui.umd.min.js"></script>
-  <script src="/public/tailwindcss.3.4.17.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: ['selector', '[data-theme="dark"]'],
-    }
-  </script>
-  <style>
-    :root {
-      --BG-0: #1a1a1a;
-      --BG-1: #2a2a2a;
-      --BG-2: #333;
-      --BG-3: #3a3a3a;
-      --FG-0: #e0e0e0;
-      --FG-1: #b0b0b0;
-      --FG-2: #888;
-      --border: rgba(255,255,255,0.1);
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Ink Reader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@300;400;500&family=Noto+Serif+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.1.0/style.css">
+    <style>
+        :root {
+            --device-bg: #0d0d0d;
+            --device-border: #1a1a1a;
+            --screen-bg: #1a1a1a;
+            --screen-border: #2d2d2d;
+            --ink-primary: #e0e0e0;
+            --ink-secondary: #a0a0a0;
+            --ink-tertiary: #606060;
+            --accent: #c9a66b;
+            --accent-light: #d4b87a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 50%, #1f1f1f 100%);
+            font-family: 'Source Sans 3', sans-serif;
+        }
+        #root {
+            width: 100vw;
+            height: 100vh;
+        }
+        .reader-device {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #3a3a3a 0%, #252525 100%);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow:
+                0 25px 60px rgba(0, 0, 0, 0.5),
+                0 10px 20px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .reader-device::before {
+            content: '';
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 6px;
+            background: #1a1a1a;
+            border-radius: 3px;
+        }
+
+        .screen-container {
+            height: 100%;
+            background: var(--screen-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            box-shadow:
+                inset 0 2px 12px rgba(0, 0, 0, 0.12),
+                inset 0 0 50px rgba(0, 0, 0, 0.03),
+                0 1px 0 rgba(255, 255, 255, 0.05);
+            filter: contrast(0.95) brightness(1.02);
+        }
+
+        .screen-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='paper'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='5' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23paper)'/%3E%3C/svg%3E");
+            opacity: 0.06;
+            pointer-events: none;
+            z-index: 10;
+            mix-blend-mode: multiply;
+        }
+
+        .screen-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg,
+                rgba(255,255,255,0.08) 0%,
+                transparent 40%,
+                transparent 60%,
+                rgba(0,0,0,0.02) 100%);
+            pointer-events: none;
+            z-index: 11;
+        }
+
+        .header {
+            padding: 24px 28px 16px;
+            border-bottom: 1px solid rgba(74, 74, 74, 0.15);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .book-title {
+            font-family: 'Noto Serif SC', 'Libre Baskerville', Georgia, serif;
+            font-size: 13px;
+            color: var(--ink-secondary);
+            letter-spacing: 0.8px;
+            font-weight: 500;
+        }
+
+        .menu-btn {
+            background: none;
+            border: none;
+            color: var(--ink-tertiary);
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            font-family: 'Source Sans 3', sans-serif;
+        }
+
+        .menu-btn:hover {
+            background: rgba(102, 102, 102, 0.1);
+            color: var(--ink-secondary);
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--screen-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .loading-text {
+            font-family: 'LXGW WenKai', 'Noto Serif SC', serif;
+            color: var(--ink-secondary);
+            font-size: 14px;
+        }
+
+        .battery {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .battery-icon {
+            width: 22px;
+            height: 10px;
+            border: 1.5px solid var(--ink-secondary);
+            border-radius: 2px;
+            position: relative;
+        }
+
+        .battery-icon::after {
+            content: '';
+            position: absolute;
+            right: -4px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 5px;
+            background: var(--ink-secondary);
+            border-radius: 0 1px 1px 0;
+        }
+
+        .battery-level {
+            width: 14px;
+            height: 100%;
+            background: var(--ink-tertiary);
+            border-radius: 1px;
+            filter: blur(0.1px);
+        }
+
+        .content-area {
+            padding: 28px 32px;
+            min-height: 380px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        .content-area::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .content-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .content-area::-webkit-scrollbar-thumb {
+            background: rgba(74, 74, 74, 0.3);
+            border-radius: 2px;
+        }
+
+        .chapter-title {
+            font-family: 'LXGW WenKai', 'Noto Serif SC', 'Libre Baskerville', Georgia, serif;
+            font-size: 20px;
+            color: var(--ink-primary);
+            margin-bottom: 24px;
+            font-weight: 700;
+            filter: blur(0.1px);
+            letter-spacing: 0.05em;
+        }
+
+        .chapter-block {
+            font-family: 'LXGW WenKai', 'Noto Serif SC', 'Lora', 'Times New Roman', serif;
+            font-size: 17px;
+            line-height: 1.95;
+            color: var(--ink-primary);
+            text-align: justify;
+            filter: blur(0.15px);
+            letter-spacing: 0.02em;
+        }
+
+        .chapter-block p {
+            margin-bottom: 1.4em;
+            text-indent: 2em;
+        }
+
+        .nav-btn {
+            font-family: 'Source Sans 3', sans-serif;
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--ink-tertiary);
+            background: transparent;
+            border: 1px solid rgba(102, 102, 102, 0.2);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            filter: blur(0.1px);
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            background: rgba(102, 102, 102, 0.08);
+            color: var(--ink-secondary);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .nav-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        @media (max-width: 480px) {
+            .reader-device {
+                padding: 12px;
+                border-radius: 12px;
+            }
+
+            .header {
+                padding: 20px 20px 12px;
+            }
+
+            .content-area {
+                padding: 20px;
+                min-height: 320px;
+            }
+
+            .chapter-title {
+                font-size: 18px;
+            }
+
+            .chapter-block {
+                font-size: 15px;
+            }
+        }
+    </style>
+    <script src="public/timeless/0.24.0/timeless.umd.min.js"></script>
+    <script src="public/timeless/0.24.0/timeless.dom.umd.min.js"></script>
+    <script src="public/timeless/0.24.0/timeless.web.umd.min.js"></script>
+    <script>
+        Object.assign(window, Timeless);
+    </script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="/index.js"></script>
+    <div id="root"></div>
+    <script src="index.js"></script>
 </body>
 </html>
