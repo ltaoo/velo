@@ -290,6 +290,126 @@
             height: 14px;
         }
 
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 10px 24px;
+            border-top: 1px solid rgba(74, 74, 74, 0.15);
+            flex-shrink: 0;
+        }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toolbar-label {
+            font-size: 12px;
+            color: var(--ink-tertiary);
+            margin-right: 4px;
+            white-space: nowrap;
+        }
+
+        .toolbar-value {
+            font-size: 12px;
+            color: var(--ink-secondary);
+            min-width: 28px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .toolbar-btn {
+            background: none;
+            border: 1px solid rgba(102, 102, 102, 0.2);
+            color: var(--ink-secondary);
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'Source Sans 3', sans-serif;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .toolbar-btn:hover {
+            background: rgba(102, 102, 102, 0.1);
+            color: var(--ink-primary);
+        }
+
+        .toolbar-btn:active {
+            background: rgba(102, 102, 102, 0.2);
+        }
+
+        .toolbar-btn-toggle {
+            width: 32px;
+            margin-left: 4px;
+        }
+
+        .toolbar-divider {
+            width: 1px;
+            height: 20px;
+            background: rgba(74, 74, 74, 0.2);
+        }
+
+        .drop-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(13, 13, 13, 0.85);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        .drop-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .drop-overlay-border {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            right: 24px;
+            bottom: 24px;
+            border: 2px dashed var(--accent);
+            border-radius: 12px;
+            pointer-events: none;
+        }
+
+        .drop-overlay-icon {
+            font-size: 36px;
+            color: var(--accent);
+            line-height: 1;
+        }
+
+        .drop-overlay-text {
+            font-family: 'LXGW WenKai', 'Noto Serif SC', serif;
+            font-size: 16px;
+            color: var(--ink-primary);
+            letter-spacing: 0.05em;
+        }
+
+        .drop-overlay-hint {
+            font-family: 'Source Sans 3', sans-serif;
+            font-size: 12px;
+            color: var(--ink-tertiary);
+        }
+
         @media (max-width: 480px) {
             .reader-device {
                 padding: 12px;
@@ -311,6 +431,11 @@
 
             .chapter-block {
                 font-size: 15px;
+            }
+
+            .toolbar {
+                gap: 10px;
+                padding: 8px 16px;
             }
         }
     </style>
