@@ -281,7 +281,7 @@
         try {
           if (e.button !== 0) return;
           var el = e.target;
-          if (el && typeof el.closest === "function" && el.closest("[data-velo-drag], .velo-drag")) {
+          if (el && typeof el.closest === "function" && el.closest("[data-velo-drag], .velo-drag") && !el.closest("[data-velo-no-drag], .velo-no-drag")) {
             e.preventDefault();
             post_message_to_go({
               id: "drag_" + String(Date.now()) + Math.random().toString(16).slice(2),

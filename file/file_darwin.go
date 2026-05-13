@@ -5,8 +5,9 @@ package file
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Cocoa
+#cgo LDFLAGS: -framework Cocoa -framework UniformTypeIdentifiers
 #import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <dispatch/dispatch.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@ package file
 @property (nonatomic, assign) char* result;
 @property (nonatomic, assign) int cancelled;
 @property (nonatomic, assign) int animationType;
+@property (nonatomic, strong) NSArray<NSString*>* allowedTypes;
 @property (nonatomic, strong) dispatch_semaphore_t sem;
 - (void)showPanel;
 @end
@@ -26,6 +28,23 @@ package file
     [panel setCanChooseDirectories:NO];
     [panel setAllowsMultipleSelection:NO];
     [panel setResolvesAliases:YES];
+
+    if (self.allowedTypes != nil && self.allowedTypes.count > 0) {
+        if (@available(macOS 11.0, *)) {
+            NSMutableArray<UTType*>* utTypes = [NSMutableArray array];
+            for (NSString* ext in self.allowedTypes) {
+                UTType* t = [UTType typeWithFilenameExtension:ext];
+                if (t != nil) {
+                    [utTypes addObject:t];
+                }
+            }
+            if (utTypes.count > 0) {
+                [panel setAllowedContentTypes:utTypes];
+            }
+        } else {
+            [panel setAllowedFileTypes:self.allowedTypes];
+        }
+    }
 
     NSWindowAnimationBehavior behavior = NSWindowAnimationBehaviorDefault;
     switch (self.animationType) {
@@ -77,12 +96,20 @@ package file
 }
 @end
 
-static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType) {
+static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType, const char** allowedTypes, int allowedTypesCount) {
     FilePanelHelper* helper = [[FilePanelHelper alloc] init];
     helper.sem = dispatch_semaphore_create(0);
     helper.result = NULL;
     helper.cancelled = 0;
     helper.animationType = animationType;
+
+    if (allowedTypes != NULL && allowedTypesCount > 0) {
+        NSMutableArray<NSString*>* types = [NSMutableArray arrayWithCapacity:allowedTypesCount];
+        for (int i = 0; i < allowedTypesCount; i++) {
+            [types addObject:[NSString stringWithUTF8String:allowedTypes[i]]];
+        }
+        helper.allowedTypes = types;
+    }
 
     // Always dispatch to main thread.
     // Since ShowFileSelectDialog is now called from a goroutine (via go func in HandleMessage),
@@ -103,7 +130,7 @@ import (
 
 // ShowFileSelectDialog shows a file selection dialog and returns the selected file path.
 // animationType: "default", "none", "document", "utility", "alert", "sheet"
-func showFileSelectDialog(animationType string) (string, error) {
+func showFileSelectDialog(animationType string, allowedTypes []string) (string, error) {
 	runtime.UnlockOSThread()
 
 	var animCode int
@@ -125,7 +152,22 @@ func showFileSelectDialog(animationType string) (string, error) {
 	}
 
 	var cancelled C.int
-	cStr := C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode))
+	var cStr *C.char
+
+	if len(allowedTypes) > 0 {
+		cTypes := make([]*C.char, len(allowedTypes))
+		for i, t := range allowedTypes {
+			cTypes[i] = C.CString(t)
+		}
+		defer func() {
+			for _, ct := range cTypes {
+				C.free(unsafe.Pointer(ct))
+			}
+		}()
+		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), &cTypes[0], C.int(len(cTypes)))
+	} else {
+		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), nil, 0)
+	}
 
 	if cancelled != 0 {
 		return "", errors.New("cancelled")

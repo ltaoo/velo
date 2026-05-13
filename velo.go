@@ -442,6 +442,7 @@ type VeloWebviewOpt struct {
 	Width       int
 	Height      int
 	Frameless   bool
+	Hidden      bool
 	FrontendDir string
 	FrontendFS  fs.FS
 	EntryPage   string
@@ -483,6 +484,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HandleDragDrop:         opt.OnDragDrop,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
+		Hidden:                 opt.Hidden,
 	}
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}
