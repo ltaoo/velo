@@ -10,6 +10,7 @@ import (
 
 	"github.com/ltaoo/velo"
 	veloerr "github.com/ltaoo/velo/error"
+	"github.com/ltaoo/velo/file"
 	"github.com/ltaoo/velo/tray"
 	"github.com/rs/zerolog"
 )
@@ -50,7 +51,8 @@ func main() {
 	logger := setupLogger()
 	logger.Info().Msgf("Version: %s, OS: %s/%s", Version, runtime.GOOS, runtime.GOARCH)
 
-	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon}
+	quitOnLastWindowClosed := false
+	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
@@ -76,6 +78,20 @@ func main() {
 		return c.Ok(velo.H{"success": true})
 	})
 
+	b.Get("/api/file/open", func(c *velo.BoxContext) interface{} {
+		path, err := file.ShowFileSelectDialogWithTypes("default", []string{"txt"})
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		name := filepath.Base(path)
+		name = name[:len(name)-len(filepath.Ext(name))]
+		return c.Ok(velo.H{"content": string(content), "title": name})
+	})
+
 	tray.Setup(&tray.Tray{
 		Icon:    appIcon,
 		Tooltip: "Reader",
@@ -99,6 +115,7 @@ func main() {
 		Width:              400,
 		Height:             600,
 		Frameless:          true,
+		Hidden:             true,
 	})
 
 	b.Run()

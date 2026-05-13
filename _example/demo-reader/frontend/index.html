@@ -1,13 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Ink Reader</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@300;400;500&family=Noto+Serif+SC:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.1.0/style.css">
     <style>
         :root {
             --device-bg: #0d0d0d;
@@ -27,6 +24,11 @@
             box-sizing: border-box;
         }
 
+        html,
+        body {
+            overscroll-behavior: none;
+        }
+
         body {
             min-height: 100vh;
             display: flex;
@@ -35,21 +37,23 @@
             background: linear-gradient(145deg, #1a1a1a 0%, #2d2d2d 50%, #1f1f1f 100%);
             font-family: 'Source Sans 3', sans-serif;
         }
+
         #root {
             width: 100vw;
             height: 100vh;
         }
+
         .reader-device {
             width: 100%;
             height: 100%;
             background: linear-gradient(180deg, #3a3a3a 0%, #252525 100%);
-            border-radius: 16px;
             padding: 16px;
             box-shadow:
                 0 25px 60px rgba(0, 0, 0, 0.5),
                 0 10px 20px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
             position: relative;
+            cursor: default;
         }
 
         .reader-device::before {
@@ -70,6 +74,8 @@
             border-radius: 8px;
             overflow: hidden;
             position: relative;
+            display: flex;
+            flex-direction: column;
             box-shadow:
                 inset 0 2px 12px rgba(0, 0, 0, 0.12),
                 inset 0 0 50px rgba(0, 0, 0, 0.03),
@@ -99,10 +105,10 @@
             right: 0;
             bottom: 0;
             background: linear-gradient(135deg,
-                rgba(255,255,255,0.08) 0%,
-                transparent 40%,
-                transparent 60%,
-                rgba(0,0,0,0.02) 100%);
+                    rgba(255, 255, 255, 0.08) 0%,
+                    transparent 40%,
+                    transparent 60%,
+                    rgba(0, 0, 0, 0.02) 100%);
             pointer-events: none;
             z-index: 11;
         }
@@ -127,12 +133,12 @@
             background: none;
             border: none;
             color: var(--ink-tertiary);
-            cursor: pointer;
             padding: 4px 8px;
             font-size: 12px;
             border-radius: 4px;
             transition: all 0.2s ease;
             font-family: 'Source Sans 3', sans-serif;
+            cursor: pointer;
         }
 
         .menu-btn:hover {
@@ -208,8 +214,10 @@
         .content-area {
             padding: 28px 32px;
             min-height: 380px;
+            flex: 1;
             overflow-y: auto;
-            scroll-behavior: smooth;
+            overflow-x: hidden;
+            overscroll-behavior: contain;
         }
 
         .content-area::-webkit-scrollbar {
@@ -231,7 +239,7 @@
             color: var(--ink-primary);
             margin-bottom: 24px;
             font-weight: 700;
-            filter: blur(0.1px);
+            /* filter: blur(0.1px); */
             letter-spacing: 0.05em;
         }
 
@@ -241,11 +249,11 @@
             line-height: 1.95;
             color: var(--ink-primary);
             text-align: justify;
-            filter: blur(0.15px);
+            /* filter: blur(0.15px); */
             letter-spacing: 0.02em;
         }
 
-        .chapter-block p {
+        .chapter-block .paragraph {
             margin-bottom: 1.4em;
             text-indent: 2em;
         }
@@ -294,7 +302,7 @@
 
             .content-area {
                 padding: 20px;
-                min-height: 320px;
+                height: 100%;
             }
 
             .chapter-title {
@@ -313,8 +321,10 @@
         Object.assign(window, Timeless);
     </script>
 </head>
+
 <body>
     <div id="root"></div>
     <script src="index.js"></script>
 </body>
+
 </html>
