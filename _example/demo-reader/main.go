@@ -28,6 +28,9 @@ var appConfigData []byte
 //go:embed assets/appicon.png
 var appIcon []byte
 
+//go:embed assets/WebView2Loader.dll
+var webview2LoaderDLL []byte
+
 //go:embed migrations
 var migrations embed.FS
 
@@ -74,6 +77,18 @@ func fatal(logger *zerolog.Logger, msg string) {
 func main() {
 	logger := setupLogger()
 	logger.Info().Msgf("Version: %s, OS: %s/%s", Version, runtime.GOOS, runtime.GOARCH)
+
+	// Extract WebView2Loader.dll to exe directory for single-exe distribution
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
+	dllPath := filepath.Join(exeDir, "WebView2Loader.dll")
+	if _, err := os.Stat(dllPath); os.IsNotExist(err) {
+		if err := os.WriteFile(dllPath, webview2LoaderDLL, 0644); err != nil {
+			logger.Warn().Err(err).Msg("failed to extract WebView2Loader.dll")
+		} else {
+			logger.Info().Msg("extracted WebView2Loader.dll")
+		}
+	}
 
 	quitOnLastWindowClosed := false
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
@@ -248,7 +263,7 @@ func main() {
 		Width:      400,
 		Height:     600,
 		Frameless:  true,
-		Hidden:     true,
+		Hidden:     false,
 		OnDragDrop: func(event string, payload string) {
 			if event != "drop" {
 				return
