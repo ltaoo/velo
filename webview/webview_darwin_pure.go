@@ -172,11 +172,18 @@ func didReceiveScriptMessage(self, _cmd, userContentController, message uintptr)
 		return
 	}
 
-	// Handle message
-	id, result := opts.HandleMessage(str)
-	if id != "" {
-		sendCallbackTo(webView, id, result)
-	}
+	// Handle message in a goroutine to avoid blocking the main thread.
+	// This prevents deadlocks when handlers need to run UI code on the main thread
+	// (e.g. showing a native file dialog via performSelectorOnMainThread).
+	wv := cocoa.ID(webView)
+	go func() {
+		id, result := opts.HandleMessage(str)
+		if id != "" {
+			cocoa.DispatchMain(func() {
+				sendCallbackTo(wv, id, result)
+			})
+		}
+	}()
 }
 
 type schemeResponseWriter struct {
@@ -390,8 +397,10 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	// Center window
 	nsWindow.Send(cocoa.RegisterName("center"))
 
-	// Make Key and Order Front
-	nsWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+	// Make Key and Order Front (unless hidden)
+	if !opts.Hidden {
+		nsWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+	}
 
 	if isMain {
 		globalWindow = nsWindow
@@ -643,6 +652,8 @@ func getSize() (int, int) {
 func show() {
 	cocoa.DispatchMain(func() {
 		if globalWindow != 0 {
+			nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+			nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
 			globalWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
 		}
 	})
