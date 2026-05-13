@@ -6,6 +6,7 @@ package velo
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,8 +18,11 @@ import (
 
 	"github.com/ltaoo/velo/asset"
 	"github.com/ltaoo/velo/buildcfg"
+	"github.com/ltaoo/velo/database"
 	"github.com/ltaoo/velo/frontendserver"
+	"github.com/ltaoo/velo/store"
 	"github.com/ltaoo/velo/webview"
+	"gorm.io/gorm"
 )
 
 type BoxContext struct {
@@ -193,6 +197,8 @@ type Box struct {
 	post_handlers          map[string]Handler
 	webviews               []*webview.BoxWebviewOptions
 	Webview                *webview.Webview
+	Store                  *store.Store
+	DB                     *gorm.DB
 	mux                    *http.ServeMux
 	mode                   Mode
 	frontendDir            string
@@ -231,7 +237,26 @@ func NewApp(o *VeloAppOpt) *Box {
 	if o.QuitOnLastWindowClosed != nil {
 		b.quitOnLastWindowClosed = *o.QuitOnLastWindowClosed
 	}
+	b.Store = store.New()
+	b.registerStoreRoutes()
 	return b
+}
+
+// UseDatabase opens a database connection, runs migrations, and stores the
+// resulting *gorm.DB on b.DB. Apps opt-in by calling this method.
+func (b *Box) UseDatabase(cfg *database.DBConfig, migrations *embed.FS) error {
+	db, err := database.NewDatabase(cfg)
+	if err != nil {
+		return err
+	}
+	if migrations != nil {
+		m := database.NewMigrator(cfg, migrations)
+		if err := m.MigrateUp(db); err != nil {
+			return err
+		}
+	}
+	b.DB = db
+	return nil
 }
 
 func (b *Box) Get(name string, handler Handler) {
@@ -334,6 +359,64 @@ func (b *Box) handleMessage(message string) (string, string) {
 	}
 	result := handler(ctx)
 	return msg.ID, fmt.Sprintf("%v", result)
+}
+
+func (b *Box) registerStoreRoutes() {
+	b.Get("/api/storage/get", func(c *BoxContext) interface{} {
+		key := c.Query("key")
+		if key == "" {
+			return c.Ok(H{"data": b.Store.GetAll()})
+		}
+		v := b.Store.Get(key)
+		if v == nil {
+			return c.Ok(H{"found": false})
+		}
+		return c.Ok(H{"found": true, "value": json.RawMessage(v)})
+	})
+	b.Get("/api/storage/set", func(c *BoxContext) interface{} {
+		key := c.Query("key")
+		val := c.Query("value")
+		if key == "" {
+			return c.Error("key is required")
+		}
+		if err := b.Store.Set(key, json.RawMessage(val)); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(H{"success": true})
+	})
+	b.Get("/api/storage/delete", func(c *BoxContext) interface{} {
+		key := c.Query("key")
+		if key == "" {
+			return c.Error("key is required")
+		}
+		if err := b.Store.Delete(key); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(H{"success": true})
+	})
+	b.Get("/api/window/state/snapshot", func(c *BoxContext) interface{} {
+		name := c.Query("name")
+		if name == "" {
+			name = "default"
+		}
+		x, y := b.Webview.GetPosition()
+		w, h := b.Webview.GetSize()
+		if err := b.Store.SaveWindow(name, &store.WindowState{X: x, Y: y, Width: w, Height: h}); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(H{"success": true, "x": x, "y": y, "width": w, "height": h})
+	})
+	b.Get("/api/window/state/load", func(c *BoxContext) interface{} {
+		name := c.Query("name")
+		if name == "" {
+			name = "default"
+		}
+		ws := b.Store.GetWindow(name)
+		if ws == nil {
+			return c.Ok(H{"found": false})
+		}
+		return c.Ok(H{"found": true, "x": ws.X, "y": ws.Y, "width": ws.Width, "height": ws.Height})
+	})
 }
 
 func generateID() string {
@@ -454,6 +537,7 @@ func (box *Box) Run() {
 }
 
 type VeloWebviewOpt struct {
+	Name        string // window name used as storage key for position/size persistence
 	Pathname    string
 	Title       string
 	Width       int
@@ -470,6 +554,19 @@ type VeloWebviewOpt struct {
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	if opt.FrontendDir != "" {
 		b.frontendDir = opt.FrontendDir
+	}
+
+	// Restore saved window size from storage
+	windowName := opt.Name
+	if windowName == "" {
+		windowName = "default"
+	}
+	width := opt.Width
+	height := opt.Height
+	savedState := b.Store.GetWindow(windowName)
+	if savedState != nil && savedState.Width > 0 && savedState.Height > 0 {
+		width = savedState.Width
+		height = savedState.Height
 	}
 
 	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
@@ -493,8 +590,8 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		InjectedJS:             string(asset.JSRuntime),
 		AppName:                b.appName,
 		Title:                  title,
-		Width:                  opt.Width,
-		Height:                 opt.Height,
+		Width:                  width,
+		Height:                 height,
 		Mux:                    mux,
 		FrontendFS:             opt.FrontendFS,
 		HandleMessage:          b.handleMessage,
@@ -506,5 +603,9 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}
 	b.Webview = wv
+	// Restore saved window position
+	if savedState != nil && (savedState.X != 0 || savedState.Y != 0) {
+		wv.SetPosition(savedState.X, savedState.Y)
+	}
 	return wv
 }

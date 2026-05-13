@@ -7,16 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ltaoo/velo"
+	"github.com/ltaoo/velo/database"
 	veloerr "github.com/ltaoo/velo/error"
 	"github.com/ltaoo/velo/file"
 	"github.com/ltaoo/velo/shortcut"
 	"github.com/ltaoo/velo/tray"
-	"example/reader/store"
 	"github.com/rs/zerolog"
 )
 
@@ -29,7 +28,27 @@ var appConfigData []byte
 //go:embed assets/appicon.png
 var appIcon []byte
 
+//go:embed migrations
+var migrations embed.FS
+
 var Version = "1.0.0"
+
+type Novel struct {
+	ID             uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name           string `json:"name" gorm:"not null"`
+	Path           string `json:"path" gorm:"not null;uniqueIndex"`
+	WordCount      int    `json:"word_count" gorm:"default:0"`
+	FileSize       int64  `json:"file_size" gorm:"default:0"`
+	CurrentChapter int    `json:"current_chapter" gorm:"default:0"`
+	CurrentOffset  int    `json:"current_offset" gorm:"default:0"`
+	IsCurrent      int    `json:"is_current" gorm:"default:0"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+func (Novel) TableName() string {
+	return "novels"
+}
 
 func setupLogger() *zerolog.Logger {
 	logDir := filepath.Join(os.TempDir(), "velo-demo-reader")
@@ -60,8 +79,11 @@ func main() {
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 
-	st := store.New()
-	logger.Info().Msgf("Store path: %s", st.Path())
+	logger.Info().Msgf("Store path: %s", b.Store.Path())
+
+	if err := b.UseDatabase(database.DefaultSQLiteConfig(), &migrations); err != nil {
+		fatal(logger, "failed to initialize database: "+err.Error())
+	}
 
 	b.Get("/api/ping", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"message": "pong"})
@@ -86,85 +108,6 @@ func main() {
 		return c.Ok(velo.H{"success": true})
 	})
 
-	b.Get("/api/window/state/save", func(c *velo.BoxContext) interface{} {
-		name := c.Query("name")
-		if name == "" {
-			name = "default"
-		}
-		x, _ := strconv.Atoi(c.Query("x"))
-		y, _ := strconv.Atoi(c.Query("y"))
-		w, _ := strconv.Atoi(c.Query("width"))
-		h, _ := strconv.Atoi(c.Query("height"))
-		err := st.SaveWindow(name, &store.WindowState{X: x, Y: y, Width: w, Height: h})
-		if err != nil {
-			logger.Error().Err(err).Msg("failed to save window state")
-			return c.Error(err.Error())
-		}
-		return c.Ok(velo.H{"success": true})
-	})
-
-	b.Get("/api/window/state/load", func(c *velo.BoxContext) interface{} {
-		name := c.Query("name")
-		if name == "" {
-			name = "default"
-		}
-		ws := st.GetWindow(name)
-		if ws == nil {
-			return c.Ok(velo.H{"found": false})
-		}
-		return c.Ok(velo.H{"found": true, "x": ws.X, "y": ws.Y, "width": ws.Width, "height": ws.Height})
-	})
-
-	b.Get("/api/window/state/snapshot", func(c *velo.BoxContext) interface{} {
-		name := c.Query("name")
-		if name == "" {
-			name = "default"
-		}
-		x, y := b.Webview.GetPosition()
-		w, h := b.Webview.GetSize()
-		err := st.SaveWindow(name, &store.WindowState{X: x, Y: y, Width: w, Height: h})
-		if err != nil {
-			logger.Error().Err(err).Msg("failed to snapshot window state")
-			return c.Error(err.Error())
-		}
-		return c.Ok(velo.H{"success": true, "x": x, "y": y, "width": w, "height": h})
-	})
-
-	b.Get("/api/config/get", func(c *velo.BoxContext) interface{} {
-		key := c.Query("key")
-		if key == "" {
-			return c.Ok(velo.H{"data": st.GetAll()})
-		}
-		v := st.Get(key)
-		if v == nil {
-			return c.Ok(velo.H{"found": false})
-		}
-		return c.Ok(velo.H{"found": true, "value": json.RawMessage(v)})
-	})
-
-	b.Get("/api/config/set", func(c *velo.BoxContext) interface{} {
-		key := c.Query("key")
-		val := c.Query("value")
-		if key == "" {
-			return c.Error("key is required")
-		}
-		if err := st.Set(key, json.RawMessage(val)); err != nil {
-			return c.Error(err.Error())
-		}
-		return c.Ok(velo.H{"success": true})
-	})
-
-	b.Get("/api/config/delete", func(c *velo.BoxContext) interface{} {
-		key := c.Query("key")
-		if key == "" {
-			return c.Error("key is required")
-		}
-		if err := st.Delete(key); err != nil {
-			return c.Error(err.Error())
-		}
-		return c.Ok(velo.H{"success": true})
-	})
-
 	b.Get("/api/file/open", func(c *velo.BoxContext) interface{} {
 		path, err := file.ShowFileSelectDialogWithTypes("default", []string{"txt"})
 		if err != nil {
@@ -174,9 +117,95 @@ func main() {
 		if err != nil {
 			return c.Error(err.Error())
 		}
+		info, _ := os.Stat(path)
+		var fileSize int64
+		if info != nil {
+			fileSize = info.Size()
+		}
+		name := filepath.Base(path)
+		name = name[:len(name)-len(filepath.Ext(name))]
+		return c.Ok(velo.H{"content": string(content), "title": name, "path": path, "file_size": fileSize})
+	})
+
+	b.Get("/api/file/read", func(c *velo.BoxContext) interface{} {
+		path := c.Query("path")
+		if path == "" {
+			return c.Error("path is required")
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return c.Error(err.Error())
+		}
 		name := filepath.Base(path)
 		name = name[:len(name)-len(filepath.Ext(name))]
 		return c.Ok(velo.H{"content": string(content), "title": name})
+	})
+
+	b.Post("/api/book/load", func(c *velo.BoxContext) interface{} {
+		var req struct {
+			Name      string `json:"name"`
+			Path      string `json:"path"`
+			WordCount int    `json:"word_count"`
+			FileSize  int64  `json:"file_size"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+
+		// Clear is_current on all novels
+		b.DB.Model(&Novel{}).Where("is_current = 1").Update("is_current", 0)
+
+		// Upsert by path
+		var novel Novel
+		result := b.DB.Where("path = ?", req.Path).First(&novel)
+		if result.Error != nil {
+			// Create new
+			novel = Novel{
+				Name:      req.Name,
+				Path:      req.Path,
+				WordCount: req.WordCount,
+				FileSize:  req.FileSize,
+				IsCurrent: 1,
+			}
+			b.DB.Create(&novel)
+		} else {
+			// Update existing
+			b.DB.Model(&novel).Updates(map[string]interface{}{
+				"name":       req.Name,
+				"word_count": req.WordCount,
+				"file_size":  req.FileSize,
+				"is_current": 1,
+			})
+		}
+
+		return c.Ok(velo.H{"novel": novel})
+	})
+
+	b.Post("/api/book/progress", func(c *velo.BoxContext) interface{} {
+		var req struct {
+			Path           string `json:"path"`
+			CurrentChapter int    `json:"current_chapter"`
+			CurrentOffset  int    `json:"current_offset"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+
+		b.DB.Model(&Novel{}).Where("path = ?", req.Path).Updates(map[string]interface{}{
+			"current_chapter": req.CurrentChapter,
+			"current_offset":  req.CurrentOffset,
+		})
+
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/book/current", func(c *velo.BoxContext) interface{} {
+		var novel Novel
+		result := b.DB.Where("is_current = 1").First(&novel)
+		if result.Error != nil {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{"found": true, "novel": novel})
 	})
 
 	tray.Setup(&tray.Tray{
@@ -211,21 +240,13 @@ func main() {
 	})
 	_ = sm
 
-	windowName := "reader"
-	initWidth := 400
-	initHeight := 600
-	savedState := st.GetWindow(windowName)
-	if savedState != nil && savedState.Width > 0 && savedState.Height > 0 {
-		initWidth = savedState.Width
-		initHeight = savedState.Height
-	}
-
 	b.NewWebview(&velo.VeloWebviewOpt{
+		Name:       "reader",
 		Title:      "Reader",
 		FrontendFS: frontend_folder,
 		Pathname:   "/reader",
-		Width:      initWidth,
-		Height:     initHeight,
+		Width:      400,
+		Height:     600,
 		Frameless:  true,
 		Hidden:     true,
 		OnDragDrop: func(event string, payload string) {
@@ -246,21 +267,24 @@ func main() {
 					logger.Error().Err(err).Str("path", path).Msg("failed to read dropped file")
 					continue
 				}
+				info, _ := os.Stat(path)
+				var fileSize int64
+				if info != nil {
+					fileSize = info.Size()
+				}
 				name := filepath.Base(path)
 				name = name[:len(name)-len(filepath.Ext(name))]
 				b.SendMessage(velo.H{
-					"type":    "fileDrop",
-					"content": string(content),
-					"title":   name,
+					"type":      "fileDrop",
+					"content":   string(content),
+					"title":     name,
+					"path":      path,
+					"file_size": fileSize,
 				})
 				break
 			}
 		},
 	})
-
-	if savedState != nil && (savedState.X != 0 || savedState.Y != 0) {
-		b.Webview.SetPosition(savedState.X, savedState.Y)
-	}
 
 	b.Run()
 }

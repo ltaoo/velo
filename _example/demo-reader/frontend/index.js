@@ -68,24 +68,223 @@ function ApplicationView() {
 
   var scroll_raf = null;
   var scroll_last_time = 0;
+  var scroll_accumulator = 0;
   var content_el = null;
+  var current_path_ = null;
+  var scroll_save_timer_ = null;
 
   const txt$ = TxtFileLoader();
 
-  function loadBook(content, title) {
+  // Find which chapter is at the top of the viewport and the character
+  // offset within that chapter. Returns { chapter, offset }.
+  function getCurrentPosition() {
+    if (!content_el) return { chapter: 0, offset: 0 };
+    var blocks = content_el.querySelectorAll(".chapter-block");
+    if (blocks.length === 0) return { chapter: 0, offset: 0 };
+    var scrollTop = content_el.scrollTop;
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      var blockBottom = block.offsetTop + block.offsetHeight;
+      if (blockBottom > scrollTop) {
+        var relativeScroll = Math.max(0, scrollTop - block.offsetTop);
+        var blockHeight = block.offsetHeight;
+        var ratio = blockHeight > 0 ? relativeScroll / blockHeight : 0;
+        var textLen = block.textContent ? block.textContent.length : 0;
+        var offset = Math.floor(ratio * textLen);
+        return { chapter: i, offset: offset };
+      }
+    }
+    // Past the end — return last chapter at its end
+    var lastIdx = blocks.length - 1;
+    var lastBlock = blocks[lastIdx];
+    var lastTextLen = lastBlock.textContent ? lastBlock.textContent.length : 0;
+    return { chapter: lastIdx, offset: lastTextLen };
+  }
+
+  function saveScrollProgress() {
+    if (!current_path_ || !content_el) {
+      console.log("[progress] save skipped — no path or content_el", {
+        current_path_,
+        content_el,
+      });
+      return;
+    }
+    var pos = getCurrentPosition();
+    console.log(
+      "[progress] saving — ch:",
+      pos.chapter,
+      "off:",
+      pos.offset,
+      "path:",
+      current_path_,
+    );
+    invoke("/api/book/progress", {
+      method: "POST",
+      args: {
+        path: current_path_,
+        current_chapter: pos.chapter,
+        current_offset: pos.offset,
+      },
+    }).then(function (r) {
+      console.log("[progress] save response:", r);
+    });
+  }
+
+  // Retry via requestAnimationFrame until the target chapter block is
+  // rendered, then scroll to the character-offset position within it.
+  function restoreReadingPosition(chapter, offset) {
+    console.log("[progress] restore requested — ch:", chapter, "off:", offset);
+    var attempts = 0;
+    function tryRestore() {
+      if (!content_el) {
+        console.log(
+          "[progress] restore waiting — no content_el, attempt",
+          attempts,
+        );
+        attempts++;
+        if (attempts < 50) requestAnimationFrame(tryRestore);
+        return;
+      }
+      var blocks = content_el.querySelectorAll(".chapter-block");
+      console.log(
+        "[progress] restore attempt",
+        attempts,
+        "— blocks:",
+        blocks.length,
+        "need ch:",
+        chapter,
+      );
+      if (blocks.length > chapter) {
+        var block = blocks[chapter];
+        var textLen = block.textContent ? block.textContent.length : 1;
+        var ratio = Math.min(1, offset / Math.max(1, textLen));
+        var targetTop = block.offsetTop + ratio * block.offsetHeight;
+        console.log(
+          "[progress] restore done — scrollTop:",
+          targetTop,
+          "ratio:",
+          ratio,
+          "textLen:",
+          textLen,
+          "blockHeight:",
+          block.offsetHeight,
+        );
+        content_el.scrollTop = targetTop;
+        return;
+      }
+      attempts++;
+      if (attempts < 50) {
+        requestAnimationFrame(tryRestore);
+      } else {
+        console.log("[progress] restore FAILED — gave up after 50 attempts");
+      }
+    }
+    requestAnimationFrame(tryRestore);
+  }
+
+  function debounceScrollSave() {
+    if (scroll_save_timer_) {
+      clearTimeout(scroll_save_timer_);
+    }
+    console.log("[progress] scroll detected — scheduling save in 2s");
+    scroll_save_timer_ = setTimeout(saveScrollProgress, 2000);
+  }
+
+  function loadBook(content, title, path, file_size) {
     var chapters = txt$.parseBookContent(content);
+    var word_count = content.length;
 
     book_title_.as(title);
     chapters_.as(chapters);
+    current_path_ = path || null;
+
+    if (path) {
+      invoke("/api/book/load", {
+        method: "POST",
+        args: {
+          name: title,
+          path: path,
+          word_count: word_count,
+          file_size: file_size || 0,
+        },
+      }).then(function (res) {
+        console.log(
+          "[progress] loadBook /api/book/load response:",
+          JSON.stringify(res),
+        );
+        if (
+          res &&
+          res.code === 0 &&
+          res.data &&
+          res.data.novel &&
+          (res.data.novel.current_chapter > 0 ||
+            res.data.novel.current_offset > 0)
+        ) {
+          restoreReadingPosition(
+            res.data.novel.current_chapter,
+            res.data.novel.current_offset,
+          );
+        } else {
+          console.log("[progress] loadBook — no saved progress to restore");
+        }
+      });
+    }
   }
 
   function openFile() {
     invoke("/api/file/open", { method: "GET" }).then(function (res) {
       if (res && res.code === 0 && res.data) {
-        loadBook(res.data.content, res.data.title);
+        loadBook(
+          res.data.content,
+          res.data.title,
+          res.data.path,
+          res.data.file_size,
+        );
       }
     });
   }
+
+  function restoreLastBook() {
+    invoke("/api/book/current", { method: "GET" }).then(function (res) {
+      console.log(
+        "[progress] restoreLastBook /api/book/current response:",
+        JSON.stringify(res),
+      );
+      if (res && res.code === 0 && res.data && res.data.found) {
+        var novel = res.data.novel;
+        console.log(
+          "[progress] restoreLastBook novel from DB:",
+          JSON.stringify(novel),
+        );
+        invoke("/api/file/read?path=" + encodeURIComponent(novel.path), {
+          method: "GET",
+        }).then(function (fileRes) {
+          if (fileRes && fileRes.code === 0 && fileRes.data) {
+            var chapters = txt$.parseBookContent(fileRes.data.content);
+            book_title_.as(fileRes.data.title);
+            chapters_.as(chapters);
+            current_path_ = novel.path;
+
+            // Restore reading position after DOM render
+            if (novel.current_chapter > 0 || novel.current_offset > 0) {
+              restoreReadingPosition(
+                novel.current_chapter,
+                novel.current_offset,
+              );
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // Restore last book on startup
+  restoreLastBook();
+
+  // Save reading progress immediately on window close / page unload
+  window.addEventListener("beforeunload", function () {
+    saveScrollProgress();
+  });
 
   function applyFontSize(size) {
     font_size_.as(size);
@@ -99,32 +298,50 @@ function ApplicationView() {
     var current = font_size_.value;
     var next = Math.min(32, Math.max(12, current + delta));
     applyFontSize(next);
-    invoke("/api/config/set?key=fontSize&value=" + next, { method: "GET" });
+    invoke("/api/storage/set?key=fontSize&value=" + next, { method: "GET" });
   }
 
   // Restore fontSize from config
-  invoke("/api/config/get?key=fontSize", { method: "GET" }).then(function (res) {
-    if (res && res.code === 0 && res.data && res.data.found) {
-      var size = Number(res.data.value);
-      if (size >= 12 && size <= 32) {
-        applyFontSize(size);
+  invoke("/api/storage/get?key=fontSize", { method: "GET" }).then(
+    function (res) {
+      if (res && res.code === 0 && res.data && res.data.found) {
+        var size = Number(res.data.value);
+        if (size >= 12 && size <= 32) {
+          applyFontSize(size);
+        }
       }
-    }
-  });
+    },
+  );
+
+  // Restore scrollSpeed from config
+  invoke("/api/storage/get?key=scrollSpeed", { method: "GET" }).then(
+    function (res) {
+      if (res && res.code === 0 && res.data && res.data.found) {
+        var speed = Number(res.data.value);
+        if (speed >= 1 && speed <= 10) {
+          scroll_speed_.as(speed);
+        }
+      }
+    },
+  );
 
   function scrollFrame(timestamp) {
     if (!content_el) return;
     if (scroll_last_time) {
       var dt = timestamp - scroll_last_time;
-      // speed 1~10 maps to ~20~200 px/s
-      var px = (scroll_speed_.value * 20 * dt) / 1000;
-      content_el.scrollTop += px;
-      if (
-        content_el.scrollTop + content_el.clientHeight >=
-        content_el.scrollHeight
-      ) {
-        toggleAutoScroll();
-        return;
+      // Accumulate sub-pixel scroll to avoid truncation to 0
+      scroll_accumulator += (scroll_speed_.value * 20 * dt) / 1000;
+      var wholePx = Math.trunc(scroll_accumulator);
+      if (wholePx !== 0) {
+        scroll_accumulator -= wholePx;
+        content_el.scrollTop += wholePx;
+        if (
+          content_el.scrollTop + content_el.clientHeight >=
+          content_el.scrollHeight
+        ) {
+          toggleAutoScroll();
+          return;
+        }
       }
     }
     scroll_last_time = timestamp;
@@ -135,6 +352,7 @@ function ApplicationView() {
     stopAutoScroll();
     if (!content_el) return;
     scroll_last_time = 0;
+    scroll_accumulator = 0;
     scroll_raf = requestAnimationFrame(scrollFrame);
   }
 
@@ -160,6 +378,7 @@ function ApplicationView() {
     var current = scroll_speed_.value;
     var next = Math.min(10, Math.max(1, current + delta));
     scroll_speed_.as(next);
+    invoke("/api/storage/set?key=scrollSpeed&value=" + next, { method: "GET" });
   }
 
   function handleGoMessage(payload) {
@@ -173,7 +392,7 @@ function ApplicationView() {
         toggleAutoScroll();
       }
     } else if (payload.type === "fileDrop") {
-      loadBook(payload.content, payload.title);
+      loadBook(payload.content, payload.title, payload.path, payload.file_size);
     } else if (payload.type === "__velo_drag_enter") {
       drag_over_.as(true);
     } else if (payload.type === "__velo_drag_leave") {
@@ -195,20 +414,26 @@ function ApplicationView() {
           class: "drop-overlay",
           onMounted(event) {
             var el = event.target.get$elm();
-            drag_over_.onChange(function (v) {
-              if (v) {
-                el.classList.add("active");
-              } else {
-                el.classList.remove("active");
-              }
+            drag_over_.subscribe({
+              onChange(v) {
+                if (v) {
+                  el.classList.add("active");
+                } else {
+                  el.classList.remove("active");
+                }
+              },
             });
           },
         },
         [
           View({ class: "drop-overlay-border" }),
           View({ class: "drop-overlay-icon" }, ["\u2193"]),
-          View({ class: "drop-overlay-text" }, ["\u677E\u5F00\u4EE5\u52A0\u8F7D\u6587\u672C"]),
-          View({ class: "drop-overlay-hint" }, ["\u652F\u6301 .txt \u683C\u5F0F\u6587\u4EF6"]),
+          View({ class: "drop-overlay-text" }, [
+            "\u677E\u5F00\u4EE5\u52A0\u8F7D\u6587\u672C",
+          ]),
+          View({ class: "drop-overlay-hint" }, [
+            "\u652F\u6301 .txt \u683C\u5F0F\u6587\u4EF6",
+          ]),
         ],
       ),
       View(
@@ -285,6 +510,8 @@ function ApplicationView() {
                       toggleAutoScroll();
                     }
                   });
+                  // Save scroll progress on scroll (debounced)
+                  content_el.addEventListener("scroll", debounceScrollSave);
                 }
               },
             },
@@ -331,7 +558,7 @@ function ApplicationView() {
           ),
           View(
             {
-              class: "toolbar",
+              class: "toolbar velo-no-drag",
             },
             [
               View(
