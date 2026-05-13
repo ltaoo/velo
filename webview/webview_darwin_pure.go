@@ -25,7 +25,9 @@ var (
 
 	// Map webview pointer to options for multi-window support
 	webviewMap = make(map[uintptr]*BoxWebviewOptions)
-	mapLock    sync.RWMutex
+	// Map webview pointer to its parent NSWindow for window operations (e.g. drag)
+	nsWindowMap = make(map[uintptr]cocoa.ID)
+	mapLock     sync.RWMutex
 
 	quitOnLastWindowClosed = true
 )
@@ -134,6 +136,29 @@ func didReceiveScriptMessage(self, _cmd, userContentController, message uintptr)
 	str := cocoa.NSStringToString(body)
 
 	webView := msgID.Send(cocoa.RegisterName("webView"))
+
+	// Check for built-in window drag message before routing to Go handler
+	// This is done early to minimize latency for drag operations
+	var parsed struct {
+		ID     string `json:"id"`
+		Method string `json:"method"`
+	}
+	if json.Unmarshal([]byte(str), &parsed) == nil && parsed.Method == "__velo/window/start_drag" {
+		mapLock.RLock()
+		nsWindow := nsWindowMap[uintptr(webView)]
+		mapLock.RUnlock()
+		if nsWindow != 0 {
+			nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+			currentEvent := nsApp.Send(cocoa.RegisterName("currentEvent"))
+			if currentEvent != 0 {
+				nsWindow.Send(cocoa.RegisterName("performWindowDragWithEvent:"), currentEvent)
+			}
+		}
+		if parsed.ID != "" {
+			sendCallbackTo(webView, parsed.ID, `"ok"`)
+		}
+		return
+	}
 
 	mapLock.RLock()
 	opts := webviewMap[uintptr(webView)]
@@ -332,6 +357,10 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		cocoa.NSWindowStyleMaskMiniaturizable |
 		cocoa.NSWindowStyleMaskResizable
 
+	if opts.Frameless {
+		styleMask |= cocoa.NSWindowStyleMaskFullSizeContentView
+	}
+
 	nsWindow := cocoa.GetClass("NSWindow").Send(cocoa.RegisterName("alloc")).SendRectStyle(
 		cocoa.RegisterName("initWithContentRect:styleMask:backing:defer:"),
 		rect,
@@ -339,6 +368,21 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		cocoa.NSBackingStoreBuffered,
 		false, // defer
 	)
+
+	if opts.Frameless {
+		nsWindow.Send(cocoa.RegisterName("setTitlebarAppearsTransparent:"), true)
+		nsWindow.Send(cocoa.RegisterName("setTitleVisibility:"), 1) // NSWindowTitleHidden
+
+		// Hide traffic light buttons (close, miniaturize, zoom)
+		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 0).Send(cocoa.RegisterName("setHidden:"), true) // close
+		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 1).Send(cocoa.RegisterName("setHidden:"), true) // miniaturize
+		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 2).Send(cocoa.RegisterName("setHidden:"), true) // zoom
+
+		// Transparent window background
+		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"),
+			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
+		nsWindow.Send(cocoa.RegisterName("setOpaque:"), false)
+	}
 
 	// Set Title
 	nsWindow.Send(cocoa.RegisterName("setTitle:"), cocoa.StringToNSString(opts.Title))
@@ -426,10 +470,17 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	// Register in map
 	mapLock.Lock()
 	webviewMap[uintptr(wkWebView)] = opts
+	nsWindowMap[uintptr(wkWebView)] = nsWindow
 	mapLock.Unlock()
 
 	// Set as content view
 	nsWindow.Send(cocoa.RegisterName("setContentView:"), wkWebView)
+
+	// Transparent WKWebView background for frameless mode
+	if opts.Frameless {
+		wkWebView.Send(cocoa.RegisterName("setUnderPageBackgroundColor:"),
+			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
+	}
 
 	// Load URL
 	fmt.Fprintf(os.Stderr, "DEBUG: Loading URL: %s\n", opts.URL)

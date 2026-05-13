@@ -273,5 +273,25 @@
         true,
       );
     }
+    // Window drag region support: elements with class "velo-drag" or attribute "data-velo-drag"
+    // act as window drag handles (similar to Electron's -webkit-app-region: drag)
+    document.addEventListener(
+      "mousedown",
+      function (e) {
+        try {
+          if (e.button !== 0) return;
+          var el = e.target;
+          if (el && typeof el.closest === "function" && el.closest("[data-velo-drag], .velo-drag")) {
+            e.preventDefault();
+            post_message_to_go({
+              id: "drag_" + String(Date.now()) + Math.random().toString(16).slice(2),
+              method: "__velo/window/start_drag",
+              args: [],
+            });
+          }
+        } catch (_e) {}
+      },
+      true,
+    );
   } catch (e) {}
 })();

@@ -25,6 +25,7 @@ type BoxWebviewOptions struct {
 	HandleMessage           Handler
 	HandleDragDrop          DragDropHandler
 	QuitOnLastWindowClosed  bool
+	Frameless               bool
 }
 
 type Webview struct{}

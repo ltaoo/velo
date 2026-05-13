@@ -334,6 +334,7 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 
 	if frontendFS != nil {
 		mux.Handle("/", frontendserver.New(frontendserver.Options{
+			Mode:      frontendserver.ModeProd,
 			Root:      "frontend",
 			Embedded:  frontendFS,
 			EntryPage: entryPage,
@@ -440,6 +441,7 @@ type VeloWebviewOpt struct {
 	Title       string
 	Width       int
 	Height      int
+	Frameless   bool
 	FrontendDir string
 	FrontendFS  fs.FS
 	EntryPage   string
@@ -480,6 +482,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		Frameless:              opt.Frameless,
 	}
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}
