@@ -10,6 +10,11 @@ _example/**/*/data.json
 _example/**/*/storage.json
 _example/**/*/*.db
 
+# WebView2 runtime artifacts (extracted from embed on first run)
+_example/demo-reader/WebView2Loader.dll
+_example/demo-reader/reader.exe
+_example/demo-reader/reader.exe.WebView2/
+
 # Environment
 .env
 
