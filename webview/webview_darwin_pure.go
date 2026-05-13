@@ -57,6 +57,15 @@ func init() {
 	cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), applicationShouldTerminateAfterLastWindowClosed, "B@:@")
 	cocoa.RegisterClassPair(appDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloAppDelegate registered")
+
+	// Register VeloWebView class (subclass of WKWebView with drag-drop support)
+	webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
+	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingEntered:"), veloWebViewDraggingEntered, "Q@:@")
+	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingUpdated:"), veloWebViewDraggingUpdated, "Q@:@")
+	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingExited:"), veloWebViewDraggingExited, "v@:@")
+	cocoa.AddMethod(webViewClass, cocoa.RegisterName("performDragOperation:"), veloWebViewPerformDragOperation, "B@:@")
+	cocoa.RegisterClassPair(webViewClass)
+	fmt.Fprintln(os.Stderr, "DEBUG: VeloWebView registered")
 }
 
 // Callback for applicationShouldTerminateAfterLastWindowClosed:
@@ -350,6 +359,96 @@ func open_window(opts *BoxWebviewOptions) {
 	}
 }
 
+// NSDraggingDestination callbacks for VeloWebView
+
+func hasDraggedFiles(sender uintptr) bool {
+	senderID := cocoa.ID(sender)
+	pasteboard := senderID.Send(cocoa.RegisterName("draggingPasteboard"))
+	fileURLType := cocoa.StringToNSString("public.file-url")
+	types := cocoa.GetClass("NSArray").Send(cocoa.RegisterName("arrayWithObject:"), fileURLType)
+	available := pasteboard.Send(cocoa.RegisterName("availableTypeFromArray:"), types)
+	return available != 0
+}
+
+func veloWebViewDraggingEntered(self, _cmd, sender uintptr) uintptr {
+	if !hasDraggedFiles(sender) {
+		return 0 // NSDragOperationNone
+	}
+	// Notify JS
+	webView := cocoa.ID(self)
+	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_enter"});`)
+	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+	return 1 // NSDragOperationCopy
+}
+
+func veloWebViewDraggingUpdated(self, _cmd, sender uintptr) uintptr {
+	if !hasDraggedFiles(sender) {
+		return 0
+	}
+	return 1
+}
+
+func veloWebViewDraggingExited(self, _cmd, sender uintptr) {
+	webView := cocoa.ID(self)
+	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_leave"});`)
+	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+}
+
+func veloWebViewPerformDragOperation(self, _cmd, sender uintptr) uintptr {
+	// Hide overlay immediately
+	webView := cocoa.ID(self)
+	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_leave"});`)
+	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+
+	senderID := cocoa.ID(sender)
+	pasteboard := senderID.Send(cocoa.RegisterName("draggingPasteboard"))
+
+	// Read file URLs from pasteboard using readObjectsForClasses:options:
+	nsURLClass := cocoa.GetClass("NSURL")
+	classArray := cocoa.GetClass("NSArray").Send(cocoa.RegisterName("arrayWithObject:"), nsURLClass)
+	options := cocoa.GetClass("NSDictionary").Send(cocoa.RegisterName("dictionary"))
+
+	urls := pasteboard.Send(cocoa.RegisterName("readObjectsForClasses:options:"), classArray, options)
+	if urls == 0 {
+		return 0
+	}
+
+	count := uintptr(urls.Send(cocoa.RegisterName("count")))
+	if count == 0 {
+		return 0
+	}
+
+	var paths []string
+	for i := uintptr(0); i < count; i++ {
+		urlObj := urls.Send(cocoa.RegisterName("objectAtIndex:"), i)
+		path := urlObj.Send(cocoa.RegisterName("path"))
+		pathStr := cocoa.NSStringToString(path)
+		if pathStr != "" {
+			paths = append(paths, pathStr)
+		}
+	}
+
+	if len(paths) == 0 {
+		return 0
+	}
+
+	// Look up options for this webview
+	mapLock.RLock()
+	opts := webviewMap[self]
+	mapLock.RUnlock()
+
+	if opts == nil {
+		opts = webview_opts
+	}
+
+	if opts != nil && opts.HandleDragDrop != nil {
+		pathsJSON, _ := json.Marshal(paths)
+		go opts.HandleDragDrop("drop", string(pathsJSON))
+	}
+
+	return 1
+}
+
 func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	// Create Window
 	rect := cocoa.CGRect{
@@ -465,12 +564,19 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	)
 	userContentController.Send(cocoa.RegisterName("addUserScript:"), wkUserScript)
 
-	// Create WKWebView
-	wkWebView := cocoa.GetClass("WKWebView").Send(cocoa.RegisterName("alloc")).SendRect(
+	// Create VeloWebView (WKWebView subclass with drag-drop support)
+	wkWebView := cocoa.GetClass("VeloWebView").Send(cocoa.RegisterName("alloc")).SendRect(
 		cocoa.RegisterName("initWithFrame:configuration:"),
 		rect,
 		uintptr(config),
 	)
+
+	// Register for file drag-and-drop
+	if opts.HandleDragDrop != nil {
+		fileURLType := cocoa.StringToNSString("public.file-url")
+		dragTypes := cocoa.GetClass("NSArray").Send(cocoa.RegisterName("arrayWithObject:"), fileURLType)
+		wkWebView.Send(cocoa.RegisterName("registerForDraggedTypes:"), dragTypes)
+	}
 
 	if isMain {
 		globalWebView = wkWebView

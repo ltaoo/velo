@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -297,10 +298,25 @@ func (b *Box) handleMessage(message string) (string, string) {
 		fmt.Println("[box]handleMessage - unmarshal message failed", err)
 		return "", ""
 	}
-	fmt.Println("match methods in get handlers or post handlers", msg.Method)
-	handler, exists := b.get_handlers[msg.Method]
+	// Separate path and query string so that handlers registered by path
+	// can be matched even when the frontend sends query parameters in the URL.
+	path := msg.Method
+	var queryParams map[string]string
+	if u, err := url.Parse(msg.Method); err == nil {
+		path = u.Path
+		if len(u.Query()) > 0 {
+			queryParams = make(map[string]string, len(u.Query()))
+			for k, v := range u.Query() {
+				if len(v) > 0 {
+					queryParams[k] = v[0]
+				}
+			}
+		}
+	}
+	fmt.Println("match methods in get handlers or post handlers", path)
+	handler, exists := b.get_handlers[path]
 	if !exists {
-		if postHandler, ok := b.post_handlers[msg.Method]; ok {
+		if postHandler, ok := b.post_handlers[path]; ok {
 			handler = postHandler
 			exists = true
 		}
@@ -308,9 +324,10 @@ func (b *Box) handleMessage(message string) (string, string) {
 	ctx := &BoxContext{
 		ctx:     context.Background(),
 		id:      msg.ID,
-		method:  msg.Method,
+		method:  path,
 		headers: msg.Headers,
 		args:    msg.Args,
+		query:   queryParams,
 	}
 	if !exists {
 		return msg.ID, fmt.Sprintf("%v", ctx.Error("unknown method"))

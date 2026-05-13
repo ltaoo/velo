@@ -6,6 +6,8 @@ dist/
 !/velo.go
 _example/simple/build
 
+_example/**/*/data.json
+
 # Environment
 .env
 
