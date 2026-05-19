@@ -29,7 +29,8 @@
       "Bash(mise exec *)",
       "Bash(/c/Users/litao/AppData/Local/mise/installs/go/1.24.0/bin/go.exe build *)",
       "Read(//c/Users/litao/AppData/Local/mise/installs/go/1.24.11/bin//**)",
-      "Bash(GOROOT=\"/c/Users/litao/AppData/Local/mise/installs/go/1.24.11\" /c/Users/litao/AppData/Local/mise/installs/go/1.24.11/bin/go.exe build -ldflags \"-H windowsgui -X main.Version=0.1.2-clean\" -o reader.exe .)"
+      "Bash(GOROOT=\"/c/Users/litao/AppData/Local/mise/installs/go/1.24.11\" /c/Users/litao/AppData/Local/mise/installs/go/1.24.11/bin/go.exe build -ldflags \"-H windowsgui -X main.Version=0.1.2-clean\" -o reader.exe .)",
+      "Bash(go mod tidy)"
     ]
   }
 }

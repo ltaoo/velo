@@ -30,6 +30,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Mode=release
+      - -X main.Version={{.AppVersion}}
       - -H windowsgui
 
   - id: linux
@@ -45,6 +46,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Mode=release
+      - -X main.Version={{.AppVersion}}
 
   - id: macos
     env:
@@ -59,6 +61,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Mode=release
+      - -X main.Version={{.AppVersion}}
     hooks:
       post:
         - rcodesign sign --p12-file {{ "{{ .Env.MAC_CERT_P12_FILE }}" }} --p12-password {{ "{{ .Env.MAC_CERT_PASSWORD }}" }} --code-signature-flags runtime --entitlements-xml-path {{ "{{ .Env.MAC_ENTITLEMENTS_PATH }}" }} "{{ "{{ .Path }}" }}"
@@ -113,6 +116,7 @@ type goreleaserData struct {
 	ConfigFiles  []ConfigFile
 	ExcludeFiles []string
 	Footer       string
+	AppVersion   string
 }
 
 func GenerateGoreleaser(cfg *Config, outDir string) error {
@@ -126,6 +130,7 @@ func GenerateGoreleaser(cfg *Config, outDir string) error {
 		ConfigFiles:  cfg.Build.ConfigFiles,
 		ExcludeFiles: cfg.Build.ExcludeFiles,
 		Footer:       strings.TrimSpace(cfg.Release.Footer),
+		AppVersion:   cfg.App.Version,
 	}
 
 	f, err := os.Create(filepath.Join(outDir, ".goreleaser.yaml"))
