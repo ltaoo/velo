@@ -87,7 +87,7 @@ func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
 
 func main() {
 	logger := setupLogger()
-	logger.Info().Msgf("Version: %s, Mode: %s, OS: %s/%s", Version, Mode, runtime.GOOS, runtime.GOARCH)
+	logger.Info().Msgf("Version: %s, Velo: %s, Mode: %s, OS: %s/%s", Version, velo.GetVersion(), Mode, runtime.GOOS, runtime.GOARCH)
 
 	app_updater, err := initUpdater(logger)
 	if err != nil {
@@ -107,7 +107,7 @@ func main() {
 		return c.Ok(velo.H{"path": path})
 	})
 	b.Get("/api/app", func(c *velo.BoxContext) interface{} {
-		return c.Ok(velo.H{"version": Version})
+		return c.Ok(velo.H{"version": Version, "velo": velo.GetVersion()})
 	})
 	b.Get("/api/update/check", func(c *velo.BoxContext) interface{} {
 		if app_updater == nil {
