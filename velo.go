@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/ltaoo/velo/asset"
@@ -24,6 +25,28 @@ import (
 	"github.com/ltaoo/velo/webview"
 	"gorm.io/gorm"
 )
+
+// Version is the velo framework version, injected at build time via -ldflags.
+// In development the default value is "(dev)".
+// When velo is used as a dependency, runtime/debug.ReadBuildInfo() provides the
+// actual module version.
+var Version = "(dev)"
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, dep := range info.Deps {
+			if dep.Path == "github.com/ltaoo/velo" {
+				Version = dep.Version
+				return
+			}
+		}
+	}
+}
+
+// GetVersion returns the velo framework version string.
+func GetVersion() string {
+	return Version
+}
 
 type BoxContext struct {
 	ctx     context.Context
@@ -239,6 +262,7 @@ func NewApp(o *VeloAppOpt) *Box {
 	}
 	b.Store = store.New()
 	b.registerStoreRoutes()
+	b.registerVeloRoutes()
 	return b
 }
 
@@ -419,6 +443,15 @@ func (b *Box) registerStoreRoutes() {
 	})
 }
 
+func (b *Box) registerVeloRoutes() {
+	b.Get("/api/velo/info", func(c *BoxContext) interface{} {
+		return c.Ok(H{
+			"version": Version,
+			"mode":    "development",
+		})
+	})
+}
+
 func generateID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
@@ -510,6 +543,7 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 }
 
 func (box *Box) Run() {
+	fmt.Printf("[velo] version: %s\n", Version)
 	if len(box.webviews) > 0 && box.mode != ModeHttp {
 		first := box.webviews[0]
 		pathname := first.Pathname
