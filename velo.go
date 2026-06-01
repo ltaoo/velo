@@ -111,6 +111,13 @@ func (c *BoxContext) GetHeader(key string) string {
 	if c.headers == nil {
 		return ""
 	}
+	// Try http.Header type assertion first (Go's http.Header is named type alias of map[string][]string)
+	if headers, ok := c.headers.(http.Header); ok {
+		if values, ok := headers[key]; ok && len(values) > 0 {
+			return values[0]
+		}
+		return ""
+	}
 	if headers, ok := c.headers.(map[string][]string); ok {
 		if values, ok := headers[key]; ok && len(values) > 0 {
 			return values[0]

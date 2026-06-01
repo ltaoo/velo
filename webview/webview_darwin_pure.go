@@ -33,9 +33,13 @@ var (
 )
 
 func init() {
-	// Ensure we run on main thread for init
+	// Pin the main goroutine to the OS main thread for the entire app lifetime.
+	// Cocoa requires that NSWindow and other UI operations happen on the main
+	// thread. Without LockOSThread here, Go's runtime may reschedule the main
+	// goroutine to a different thread after init (especially when packages like
+	// GORM/SQLite create goroutines during their init), causing NSWindow creation
+	// to crash with "NSWindow should only be instantiated on the main thread!".
 	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
 
 	fmt.Fprintln(os.Stderr, "DEBUG: webview_darwin_pure.go init()")
 

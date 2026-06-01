@@ -4,6 +4,7 @@ package cocoa
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -19,6 +20,14 @@ var (
 )
 
 func init() {
+	// Pin goroutine 1 to the OS main thread before any CGO calls.
+	// Cocoa requires all UI operations on the main thread (pthread_main_np).
+	// CGO calls (purego.Dlopen below) can cause Go's runtime to reschedule
+	// goroutine 1 to a different OS thread. Without this lock, subsequent
+	// NSWindow creation will crash with "NSWindow should only be instantiated
+	// on the main thread!".
+	runtime.LockOSThread()
+
 	var err error
 	objc, err = purego.Dlopen("libobjc.A.dylib", purego.RTLD_GLOBAL)
 	if err != nil {
