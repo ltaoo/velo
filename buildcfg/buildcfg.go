@@ -19,12 +19,13 @@ type AppSection struct {
 }
 
 type MacOSSection struct {
-	BundleID          string            `json:"bundle_id"`
-	IconFile          string            `json:"icon_file"`
-	MinSystemVersion  string            `json:"min_system_version"`
-	Category          string            `json:"category"`
-	Entitlements      map[string]bool   `json:"entitlements"`
-	DMG               DMGSection        `json:"dmg"`
+	BundleID         string          `json:"bundle_id"`
+	IconFile         string          `json:"icon_file"`
+	MinSystemVersion string          `json:"min_system_version"`
+	Category         string          `json:"category"`
+	Entitlements     map[string]bool `json:"entitlements"`
+	APSEnvironment   string          `json:"aps_environment"`
+	DMG              DMGSection      `json:"dmg"`
 }
 
 type DMGSection struct {

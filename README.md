@@ -4,13 +4,14 @@
 
 A lightweight Go framework for building desktop applications with web frontends.
 
-Velo provides native webview, system tray, file dialogs, and error dialogs across macOS, Windows, and Linux.
+Velo provides native webview, system tray, file dialogs, notifications, and error dialogs across macOS, Windows, and Linux.
 
 ## Features
 
 - **Webview** — Native webview window with JavaScript injection and message passing
 - **System Tray** — System tray icon with menus, shortcuts, and click events
 - **File Dialog** — Native file selection dialog
+- **Notification** — System-level desktop notifications
 - **Error Dialog** — Native error dialog
 
 ## Installation
@@ -152,6 +153,7 @@ func main() {
 | `webview` | Native webview window management |
 | `tray` | System tray icon and menu |
 | `file` | Native file selection dialog |
+| `notification` | System-level desktop notifications |
 | `error` | Native error dialog |
 | `asset` | Embedded JS runtime assets |
 | `updater` | Auto-update system |
