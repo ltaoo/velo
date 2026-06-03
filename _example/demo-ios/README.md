@@ -49,7 +49,7 @@ CGO_ENABLED=1 GOOS=ios GOARCH=arm64 SDK=iphoneos go build .
 ## Troubleshooting
 
 ### Go Version Mismatch
-If you see errors like `compile: version "go1.24.0" does not match go tool version "go1.20"`, it means your `go` command and the Go toolchain used by `gomobile` or your build environment are out of sync. Ensure you are using a consistent Go version (1.20+ recommended). You may need to update your Go installation or check your `PATH`.
+If you see errors like `compile: version "go1.x" does not match go tool version "go1.20"`, it means your `go` command and the Go toolchain used by `gomobile` or your build environment are out of sync. Ensure you are using a consistent Go version (1.20+ recommended). You may need to update your Go installation or check your `PATH`.
 
 ### SDK not found
 If you see `xcrun: error: SDK "iphoneos" cannot be located`, ensure Xcode is installed and the command line tools are selected:

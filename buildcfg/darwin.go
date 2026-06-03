@@ -48,7 +48,7 @@ var entitlementsTmpl = template.Must(template.New("entitlements").Parse(`<?xml v
 <plist version="1.0">
 <dict>{{range .}}
   <key>{{.Key}}</key>
-  <{{.Value}}/>{{end}}
+  {{if .StringValue}}<string>{{.StringValue}}</string>{{else}}<{{.BoolValue}}/>{{end}}{{end}}
 </dict>
 </plist>
 `))
@@ -63,8 +63,9 @@ type plistData struct {
 }
 
 type entitlementEntry struct {
-	Key   string
-	Value string
+	Key         string
+	BoolValue   string
+	StringValue string
 }
 
 func GenerateDarwinPlist(cfg *Config, outDir string) error {
@@ -125,8 +126,15 @@ func generateEntitlements(cfg *Config, outDir string) error {
 			continue
 		}
 		if entKey, ok := entMap[key]; ok {
-			entries = append(entries, entitlementEntry{Key: entKey, Value: "true"})
+			entries = append(entries, entitlementEntry{Key: entKey, BoolValue: "true"})
 		}
+	}
+
+	if env := cfg.Platforms.MacOS.APSEnvironment; env == "development" || env == "production" {
+		entries = append(entries, entitlementEntry{
+			Key:         "com.apple.developer.aps-environment",
+			StringValue: env,
+		})
 	}
 
 	f, err := os.Create(filepath.Join(outDir, "entitlements.plist"))

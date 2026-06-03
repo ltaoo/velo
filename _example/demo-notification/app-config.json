@@ -1,0 +1,54 @@
+{
+  "app": {
+    "name": "VeloNotificationDemo",
+    "display_name": "Velo Notification Demo",
+    "description": "System notification example built with Velo",
+    "version": "1.0.0",
+    "author": "Velo",
+    "icon": "assets/appicon.png",
+    "tray_icon": "assets/appicon.png"
+  },
+  "binary": {
+    "project_name": "velo-notification-demo"
+  },
+  "platforms": {
+    "macos": {
+      "bundle_id": "com.example.velo.notification",
+      "icon_file": "assets/appicon.png",
+      "min_system_version": "10.14",
+      "category": "public.app-category.utilities",
+      "aps_environment": "development",
+      "entitlements": {
+        "network_client": true
+      }
+    },
+    "windows": {
+      "company_name": "Velo",
+      "product_name": "Velo Notification Demo",
+      "file_description": "Velo Notification Demo",
+      "internal_name": "VeloNotificationDemo",
+      "original_filename": "VeloNotificationDemo.exe",
+      "icon_files": {
+        "png": "assets/appicon.png",
+        "png16": "assets/appicon.png"
+      }
+    },
+    "linux": {
+      "icon_file": "assets/appicon.png",
+      "desktop_entry": {
+        "categories": "Utility;",
+        "keywords": "notification;toast;velo;"
+      }
+    }
+  },
+  "build": {
+    "config_files": [],
+    "exclude_files": []
+  },
+  "release": {
+    "footer": "Built with Velo"
+  },
+  "update": {
+    "enabled": false
+  }
+}
