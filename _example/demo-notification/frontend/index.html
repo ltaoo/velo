@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velo Notification Demo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <main class="shell">
+    <section class="toolbar">
+      <div>
+        <h1>Notification Demo</h1>
+        <p id="platform">Loading platform...</p>
+      </div>
+      <div class="toolbar-actions">
+        <button class="ghost" id="register-push" type="button">Register APNs</button>
+        <button class="ghost" id="cleanup" type="button">Cleanup</button>
+        <button class="ghost" id="reset" type="button">Reset</button>
+      </div>
+    </section>
+
+    <form class="panel" id="notification-form">
+      <fieldset>
+        <legend>Message Type</legend>
+        <div class="segmented" role="radiogroup" aria-label="Notification type">
+          <label><input type="radio" name="type" value="info" checked /><span>Info</span></label>
+          <label><input type="radio" name="type" value="success" /><span>Success</span></label>
+          <label><input type="radio" name="type" value="warning" /><span>Warning</span></label>
+          <label><input type="radio" name="type" value="error" /><span>Error</span></label>
+        </div>
+      </fieldset>
+
+      <div class="grid">
+        <label>
+          <span>Title</span>
+          <input id="title" name="title" type="text" maxlength="80" placeholder="Deployment finished" />
+        </label>
+
+        <label>
+          <span>Application Name</span>
+          <input id="app_name" name="app_name" type="text" maxlength="64" value="Velo Notification Demo" />
+        </label>
+      </div>
+
+      <label>
+        <span>Body</span>
+        <textarea id="body" name="body" rows="5" maxlength="240" placeholder="Your notification body"></textarea>
+      </label>
+
+      <label>
+        <span>Icon Path</span>
+        <input id="icon" name="icon" type="text" placeholder="/absolute/path/to/icon.png" />
+      </label>
+
+      <div class="actions">
+        <label class="switch">
+          <input id="sound" name="sound" type="checkbox" checked />
+          <span>Play system sound</span>
+        </label>
+        <button id="send" type="submit">Send Notification</button>
+      </div>
+    </form>
+
+    <section class="result" id="result" aria-live="polite"></section>
+    <section class="status" id="push-status"></section>
+    <section class="status" id="status"></section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
