@@ -1,0 +1,32 @@
+{
+  "app": {
+    "name": "VeloMacOSToolDemo",
+    "display_name": "Velo macOS Tool Demo",
+    "description": "Simple macOS power management controls built with Velo",
+    "version": "1.0.0",
+    "author": "Velo",
+    "icon": "assets/appicon.png",
+    "tray_icon": "assets/appicon.png"
+  },
+  "binary": {
+    "project_name": "velo-macostool-demo"
+  },
+  "platforms": {
+    "macos": {
+      "bundle_id": "com.example.velo.macostool",
+      "icon_file": "assets/appicon.png",
+      "min_system_version": "10.14",
+      "category": "public.app-category.utilities"
+    }
+  },
+  "build": {
+    "config_files": [],
+    "exclude_files": []
+  },
+  "release": {
+    "footer": "Built with Velo"
+  },
+  "update": {
+    "enabled": false
+  }
+}

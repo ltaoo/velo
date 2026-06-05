@@ -1,0 +1,39 @@
+{
+  "app": {
+    "name": "Demo IM",
+    "display_name": "Demo IM",
+    "description": "A two-process chatroom demo",
+    "version": "1.0.0",
+    "author": "Author",
+    "icon": "assets/appicon.png",
+    "tray_icon": "assets/appicon.png"
+  },
+  "binary": {
+    "project_name": "demo-im"
+  },
+  "platforms": {
+    "macos": {
+      "bundle_id": "com.example.demoim",
+      "icon_file": "assets/appicon.png",
+      "min_system_version": "10.13",
+      "category": "public.app-category.utilities"
+    },
+    "windows": {
+      "company_name": "Example Inc",
+      "product_name": "Demo IM",
+      "file_description": "Demo IM Desktop Client",
+      "internal_name": "Demo IM",
+      "original_filename": "DemoIM.exe",
+      "icon_files": {
+        "png": "assets/appicon.png"
+      }
+    }
+  },
+  "build": {
+    "config_files": [],
+    "exclude_files": []
+  },
+  "release": {
+    "footer": "Built with Velo"
+  }
+}
