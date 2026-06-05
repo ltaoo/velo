@@ -179,6 +179,11 @@ type AppConfig struct {
 	App struct {
 		Name        string `json:"name"`
 		DisplayName string `json:"display_name"`
+		Description string `json:"description"`
+		Version     string `json:"version"`
+		Author      string `json:"author"`
+		Icon        string `json:"icon"`
+		TrayIcon    string `json:"tray_icon"`
 	} `json:"app"`
 	Update buildcfg.UpdateSection `json:"update"`
 }
@@ -222,6 +227,72 @@ const (
 	ModeHttp                   // HTTP server only, no webview
 )
 
+func (m Mode) String() string {
+	switch m {
+	case ModeBridge:
+		return "ModeBridge"
+	case ModeBridgeHttp:
+		return "ModeBridgeHttp"
+	case ModeHttp:
+		return "ModeHttp"
+	default:
+		return fmt.Sprintf("Mode(%d)", m)
+	}
+}
+
+type veloRuntimeAppConfig struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	Author      string `json:"author"`
+	Icon        string `json:"icon"`
+	TrayIcon    string `json:"tray_icon"`
+}
+
+type veloRuntimeUpdateSourceConfig struct {
+	Type              string `json:"type"`
+	Priority          int    `json:"priority"`
+	Enabled           bool   `json:"enabled"`
+	NeedCheckChecksum bool   `json:"need_check_checksum"`
+}
+
+type veloRuntimeUpdateConfig struct {
+	Enabled        bool                            `json:"enabled"`
+	CheckFrequency string                          `json:"check_frequency"`
+	Channel        string                          `json:"channel"`
+	AutoDownload   bool                            `json:"auto_download"`
+	Timeout        int                             `json:"timeout"`
+	Sources        []veloRuntimeUpdateSourceConfig `json:"sources"`
+}
+
+type veloRuntimeConfig struct {
+	App    veloRuntimeAppConfig    `json:"app"`
+	Update veloRuntimeUpdateConfig `json:"update"`
+}
+
+type veloRuntimeWindowInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Pathname  string `json:"pathname"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Frameless bool   `json:"frameless"`
+	Hidden    bool   `json:"hidden"`
+}
+
+type veloRuntimeInfo struct {
+	Version   string                 `json:"version"`
+	Mode      string                 `json:"mode"`
+	ModeValue int                    `json:"mode_value"`
+	AppName   string                 `json:"app_name"`
+	Title     string                 `json:"title"`
+	Config    veloRuntimeConfig      `json:"config"`
+	Window    *veloRuntimeWindowInfo `json:"window"`
+}
+
 type Box struct {
 	get_handlers           map[string]Handler
 	post_handlers          map[string]Handler
@@ -235,6 +306,7 @@ type Box struct {
 	appName                string
 	title                  string
 	iconData               []byte
+	appConfig              *AppConfig
 	quitOnLastWindowClosed bool
 }
 
@@ -243,15 +315,21 @@ type VeloAppOpt struct {
 	AppName                string
 	Title                  string
 	IconData               []byte
+	AppConfig              *AppConfig
 	QuitOnLastWindowClosed *bool
 }
 
 func NewApp(o *VeloAppOpt) *Box {
+	appConfig := LoadAppConfig()
+	if o.AppConfig != nil {
+		appConfig = o.AppConfig
+	}
 	b := &Box{
 		get_handlers:           make(map[string]Handler),
 		post_handlers:          make(map[string]Handler),
 		frontendDir:            "frontend",
-		appName:                LoadAppConfig().displayName(),
+		appName:                appConfig.displayName(),
+		appConfig:              appConfig,
 		quitOnLastWindowClosed: true,
 	}
 	b.mode = o.Mode
@@ -271,6 +349,80 @@ func NewApp(o *VeloAppOpt) *Box {
 	b.registerStoreRoutes()
 	b.registerVeloRoutes()
 	return b
+}
+
+func (c *AppConfig) runtimeConfig() veloRuntimeConfig {
+	if c == nil {
+		return veloRuntimeConfig{}
+	}
+	sources := make([]veloRuntimeUpdateSourceConfig, 0, len(c.Update.Sources))
+	for _, source := range c.Update.Sources {
+		sources = append(sources, veloRuntimeUpdateSourceConfig{
+			Type:              source.Type,
+			Priority:          source.Priority,
+			Enabled:           source.Enabled,
+			NeedCheckChecksum: source.NeedCheckChecksum,
+		})
+	}
+	return veloRuntimeConfig{
+		App: veloRuntimeAppConfig{
+			Name:        c.App.Name,
+			DisplayName: c.App.DisplayName,
+			Description: c.App.Description,
+			Version:     c.App.Version,
+			Author:      c.App.Author,
+			Icon:        c.App.Icon,
+			TrayIcon:    c.App.TrayIcon,
+		},
+		Update: veloRuntimeUpdateConfig{
+			Enabled:        c.Update.Enabled,
+			CheckFrequency: c.Update.CheckFrequency,
+			Channel:        c.Update.Channel,
+			AutoDownload:   c.Update.AutoDownload,
+			Timeout:        c.Update.Timeout,
+			Sources:        sources,
+		},
+	}
+}
+
+func (b *Box) runtimeInfo(window *veloRuntimeWindowInfo) veloRuntimeInfo {
+	title := b.title
+	if title == "" {
+		title = b.appName
+	}
+	return veloRuntimeInfo{
+		Version:   Version,
+		Mode:      b.mode.String(),
+		ModeValue: int(b.mode),
+		AppName:   b.appName,
+		Title:     title,
+		Config:    b.appConfig.runtimeConfig(),
+		Window:    window,
+	}
+}
+
+func (b *Box) injectedRuntimeJS(window *veloRuntimeWindowInfo) string {
+	data, err := json.Marshal(b.runtimeInfo(window))
+	if err != nil {
+		return string(asset.JSRuntime)
+	}
+	return fmt.Sprintf(`Object.defineProperty(window, "__VELO__", {
+  value: %s,
+  writable: false,
+  configurable: false,
+  enumerable: false
+});
+%s`, string(data), string(asset.JSRuntime))
+}
+
+func (b *Box) webviewURL(optURL, pathname string) string {
+	if optURL != "" {
+		return optURL
+	}
+	if b.mode == ModeBridgeHttp {
+		return "http://127.0.0.1:8080" + pathname
+	}
+	return "velo://localhost" + pathname
 }
 
 // UseDatabase opens a database connection, runs migrations, and stores the
@@ -317,12 +469,24 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	if title == "" {
 		title = b.appName
 	}
+	windowURL := b.webviewURL(opt.URL, pathname)
+	windowInfo := &veloRuntimeWindowInfo{
+		ID:        id,
+		Name:      opt.Name,
+		Pathname:  pathname,
+		URL:       windowURL,
+		Title:     title,
+		Width:     opt.Width,
+		Height:    opt.Height,
+		Frameless: opt.Frameless,
+		Hidden:    opt.Hidden,
+	}
 
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
 		Pathname:               pathname,
 		IconData:               b.iconData,
-		InjectedJS:             string(asset.JSRuntime),
+		InjectedJS:             b.injectedRuntimeJS(windowInfo),
 		AppName:                b.appName,
 		Title:                  title,
 		Width:                  opt.Width,
@@ -332,13 +496,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
-	}
-	if opt.URL != "" {
-		opts.URL = opt.URL
-	} else if b.mode == ModeBridgeHttp {
-		opts.URL = "http://127.0.0.1:8080" + pathname
-	} else {
-		opts.URL = "velo://localhost" + pathname
+		URL:                    windowURL,
 	}
 	return webview.OpenWindow(opts)
 }
@@ -452,10 +610,7 @@ func (b *Box) registerStoreRoutes() {
 
 func (b *Box) registerVeloRoutes() {
 	b.Get("/api/velo/info", func(c *BoxContext) interface{} {
-		return c.Ok(H{
-			"version": Version,
-			"mode":    "development",
-		})
+		return c.Ok(b.runtimeInfo(nil))
 	})
 }
 
@@ -624,11 +779,23 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	if title == "" {
 		title = b.appName
 	}
+	windowURL := b.webviewURL(opt.URL, pathname)
+	windowInfo := &veloRuntimeWindowInfo{
+		ID:        id,
+		Name:      windowName,
+		Pathname:  pathname,
+		URL:       windowURL,
+		Title:     title,
+		Width:     width,
+		Height:    height,
+		Frameless: opt.Frameless,
+		Hidden:    opt.Hidden,
+	}
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
 		Pathname:               pathname,
 		IconData:               b.iconData,
-		InjectedJS:             string(asset.JSRuntime),
+		InjectedJS:             b.injectedRuntimeJS(windowInfo),
 		AppName:                b.appName,
 		Title:                  title,
 		Width:                  width,
@@ -640,6 +807,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
+		URL:                    windowURL,
 	}
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}

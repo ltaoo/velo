@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velo macOS Tool Demo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <main class="shell">
+    <section class="toolbar">
+      <div>
+        <h1>macOS 电源管理</h1>
+        <p id="platform">正在读取系统状态...</p>
+      </div>
+      <div class="toolbar-actions">
+        <button class="ghost" id="refresh" type="button">刷新</button>
+        <button id="apply" type="button">应用设置</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="preset-row" role="radiogroup" aria-label="Power presets">
+        <label><input type="radio" name="preset" value="pluggedNeverBatteryTimed" checked /><span>接电源不休眠</span></label>
+        <label><input type="radio" name="preset" value="balanced" /><span>均衡</span></label>
+        <label><input type="radio" name="preset" value="presentation" /><span>演示模式</span></label>
+      </div>
+
+      <div class="columns">
+        <section class="settings-block">
+          <h2>接上电源</h2>
+          <div class="field-grid">
+            <label>
+              <span>显示器关闭</span>
+              <input id="ac-display" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+            <label>
+              <span>系统休眠</span>
+              <input id="ac-system" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+            <label>
+              <span>磁盘休眠</span>
+              <input id="ac-disk" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+          </div>
+          <label class="switch">
+            <input id="ac-powernap" type="checkbox" />
+            <span>允许 Power Nap</span>
+          </label>
+        </section>
+
+        <section class="settings-block">
+          <h2>使用电池</h2>
+          <div class="field-grid">
+            <label>
+              <span>显示器关闭</span>
+              <input id="battery-display" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+            <label>
+              <span>系统休眠</span>
+              <input id="battery-system" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+            <label>
+              <span>磁盘休眠</span>
+              <input id="battery-disk" type="number" min="0" max="1440" step="1" />
+              <small>分钟，0 表示永不</small>
+            </label>
+          </div>
+          <label class="switch">
+            <input id="battery-powernap" type="checkbox" />
+            <span>允许 Power Nap</span>
+          </label>
+        </section>
+      </div>
+
+      <section class="advanced">
+        <label>
+          <span>休眠镜像模式</span>
+          <select id="hibernate-mode">
+            <option value="3">默认安全睡眠</option>
+            <option value="0">普通睡眠</option>
+            <option value="25">深度休眠</option>
+          </select>
+        </label>
+        <label class="switch">
+          <input id="standby" type="checkbox" />
+          <span>启用 Standby</span>
+        </label>
+        <label class="switch">
+          <input id="autopoweroff" type="checkbox" />
+          <span>启用 Auto Power Off</span>
+        </label>
+      </section>
+    </section>
+
+    <section class="result" id="result" aria-live="polite"></section>
+
+    <section class="status-grid">
+      <section class="status">
+        <h2>当前接电源配置</h2>
+        <pre id="ac-status">-</pre>
+      </section>
+      <section class="status">
+        <h2>当前电池配置</h2>
+        <pre id="battery-status">-</pre>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
