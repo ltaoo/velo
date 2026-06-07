@@ -18,10 +18,6 @@ const configure = {
             title: "组件示例",
             pathname: "/home/ui",
           },
-          update: {
-            title: "检查更新",
-            pathname: "/home/update",
-          },
         },
         options: {
           require: [],
@@ -44,3 +40,4 @@ const configure = {
 const result = Timeless.build(configure);
 export const routes = result.routes;
 export const routesWithPathname = result.routesWithPathname;
+routesWithPathname["/desktop"] = routesWithPathname["/home/index"];

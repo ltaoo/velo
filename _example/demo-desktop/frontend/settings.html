@@ -201,6 +201,10 @@
       max-width: 960px;
     }
 
+    .settings-panel[hidden] {
+      display: none;
+    }
+
     .settings-section {
       border-top: 1px solid var(--border);
       display: grid;
@@ -456,11 +460,99 @@
       filter: brightness(0.98);
     }
 
+    .settings-button:disabled {
+      cursor: default;
+      opacity: 0.58;
+    }
+
     .settings-message {
       color: var(--FG-1);
       flex: 1 1 220px;
       font-size: 12px;
       min-width: 0;
+    }
+
+    .settings-info-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .settings-info-row {
+      align-items: center;
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 140px minmax(0, 1fr);
+      min-height: 42px;
+      padding: 8px 10px;
+    }
+
+    .settings-info-label {
+      color: var(--FG-1);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .settings-info-value {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-update-panel {
+      display: grid;
+      gap: 10px;
+    }
+
+    .settings-update-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .settings-update-progress {
+      background: var(--BG-1);
+      border-radius: 999px;
+      height: 10px;
+      overflow: hidden;
+    }
+
+    .settings-update-progress-bar {
+      background: var(--accent);
+      height: 100%;
+      transition: width 0.2s ease;
+      width: 0;
+    }
+
+    .settings-update-message,
+    .settings-update-current {
+      color: var(--FG-1);
+      font-size: 12px;
+    }
+
+    .settings-update-release {
+      display: grid;
+      gap: 6px;
+    }
+
+    .settings-update-version {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    .settings-update-notes {
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      line-height: 1.5;
+      max-height: 180px;
+      overflow: auto;
+      padding: 10px;
+      white-space: pre-wrap;
     }
 
     @media (max-width: 620px) {
@@ -512,6 +604,14 @@
         flex: 1 1 auto;
       }
 
+      .settings-info-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .settings-update-actions {
+        display: grid;
+      }
+
       .settings-button.is-danger {
         margin-right: 0;
       }
@@ -549,14 +649,18 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H7a5 5 0 1 1 1-9.9 6 6 0 0 1 11.4 2.5A3.8 3.8 0 0 1 17.5 19z"></path></svg>
           <span>云存储</span>
         </button>
+        <button class="settings-nav-button" type="button" data-panel="about">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg>
+          <span>关于</span>
+        </button>
       </nav>
     </aside>
 
     <main class="settings-main">
       <header class="settings-header">
         <div>
-          <h1>云存储</h1>
-          <p>S3/OSS 兼容对象存储配置</p>
+          <h1 data-settings-title>云存储</h1>
+          <p data-settings-subtitle>S3/OSS 兼容对象存储配置</p>
         </div>
         <div class="setting-status" data-config-status>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
@@ -564,7 +668,7 @@
         </div>
       </header>
 
-      <div class="settings-form" data-settings-panel>
+      <div class="settings-form settings-panel" data-settings-panel="cloud-storage">
         <section class="settings-section">
           <div class="settings-profile-head">
             <div class="settings-profile-title">存储配置</div>
@@ -580,6 +684,42 @@
           <div class="settings-message" data-settings-message></div>
         </div>
       </div>
+
+      <div class="settings-form settings-panel" data-settings-panel="about" hidden>
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">应用信息</div>
+          </div>
+          <div class="settings-info-list">
+            <div class="settings-info-row">
+              <div class="settings-info-label">应用版本</div>
+              <div class="settings-info-value" data-app-version>读取中</div>
+            </div>
+            <div class="settings-info-row">
+              <div class="settings-info-label">Velo 版本</div>
+              <div class="settings-info-value" data-velo-version>读取中</div>
+            </div>
+            <div class="settings-info-row">
+              <div class="settings-info-label">运行模式</div>
+              <div class="settings-info-value" data-app-mode>读取中</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">更新</div>
+          </div>
+          <div class="settings-update-panel">
+            <div class="settings-update-actions" data-update-actions></div>
+            <div class="settings-update-progress" data-update-progress hidden>
+              <div class="settings-update-progress-bar" data-update-progress-bar></div>
+            </div>
+            <div class="settings-update-message" data-update-message>可手动检查新版本</div>
+            <div class="settings-update-release" data-update-release></div>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
 
@@ -589,14 +729,37 @@
       var STORAGE_API = "/api/settings/cloud-storage";
       var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
       var OPEN_WINDOW_API = "/api/open_window";
-      var panel = document.querySelector("[data-settings-panel]");
+      var activePanel = initialPanel();
+      var navButtons = Array.prototype.slice.call(document.querySelectorAll(".settings-nav-button[data-panel]"));
+      var panels = Array.prototype.slice.call(document.querySelectorAll("[data-settings-panel]"));
+      var headerTitle = document.querySelector("[data-settings-title]");
+      var headerSubtitle = document.querySelector("[data-settings-subtitle]");
+      var storagePanel = document.querySelector('[data-settings-panel="cloud-storage"]');
+      var aboutPanel = document.querySelector('[data-settings-panel="about"]');
       var message = document.querySelector("[data-settings-message]");
       var status = document.querySelector("[data-config-status]");
       var statusText = document.querySelector("[data-config-status-text]");
       var storageList = document.querySelector("[data-storage-list]");
+      var appVersion = document.querySelector("[data-app-version]");
+      var veloVersion = document.querySelector("[data-velo-version]");
+      var appMode = document.querySelector("[data-app-mode]");
+      var updateActions = document.querySelector("[data-update-actions]");
+      var updateMessage = document.querySelector("[data-update-message]");
+      var updateProgress = document.querySelector("[data-update-progress]");
+      var updateProgressBar = document.querySelector("[data-update-progress-bar]");
+      var updateRelease = document.querySelector("[data-update-release]");
+      var appInfo = null;
+      var updateState = {
+        info: null,
+        message: "",
+        progress: 0,
+        status: "idle",
+      };
       var state = normalizeSettings(null);
 
       render();
+      loadAppInfo();
+      bindUpdateMessages();
       loadConfig().then(function (settings) {
         state = normalizeSettings(settings);
         render();
@@ -604,7 +767,13 @@
         setMessage("读取配置失败: " + errorMessage(err), "warning");
       });
 
-      panel.addEventListener("click", function (event) {
+      document.querySelector(".settings-nav").addEventListener("click", function (event) {
+        var button = event.target.closest("[data-panel]");
+        if (!button) return;
+        setActivePanel(button.dataset.panel || "cloud-storage");
+      });
+
+      storagePanel.addEventListener("click", function (event) {
         var action = event.target.closest("[data-action]");
         if (!action) return;
 
@@ -634,11 +803,31 @@
         }
       });
 
+      aboutPanel.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) return;
+
+        if (action.dataset.action === "check-update") {
+          checkUpdate();
+          return;
+        }
+
+        if (action.dataset.action === "download-update") {
+          downloadUpdate();
+          return;
+        }
+
+        if (action.dataset.action === "apply-update") {
+          applyUpdate();
+        }
+      });
+
       window.addEventListener("focus", function () {
         loadConfig().then(function (settings) {
           state = normalizeSettings(settings);
           render();
         }, function (_) { });
+        loadAppInfo();
       });
 
       function activateStorage(storageId) {
@@ -717,9 +906,219 @@
         return typeof invoke === "function";
       }
 
+      function loadAppInfo() {
+        if (!canUseNativeStorage()) {
+          appInfo = {
+            mode: "browser",
+            velo: "不可用",
+            version: "不可用",
+          };
+          renderAbout();
+          return;
+        }
+        callStorage("/api/app", "GET").then(function (data) {
+          appInfo = data || {};
+          renderAbout();
+        }, function () {
+          appInfo = {
+            mode: "读取失败",
+            velo: "读取失败",
+            version: "读取失败",
+          };
+          renderAbout();
+        });
+      }
+
+      function bindUpdateMessages() {
+        if (!window.onGoMessage) return;
+        window.onGoMessage(function (payload) {
+          if (!payload || payload.type !== "download_progress") return;
+          updateState.progress = Math.round(payload.percentage || 0);
+          var speed = payload.speed || 0;
+          var speedText = speed > 1048576
+            ? (speed / 1048576).toFixed(1) + " MB/s"
+            : (speed / 1024).toFixed(0) + " KB/s";
+          updateState.message = "正在下载更新... " + updateState.progress + "% (" + speedText + ")";
+          renderUpdate();
+        });
+      }
+
+      function checkUpdate() {
+        if (!canUseNativeStorage()) {
+          updateState.status = "idle";
+          updateState.message = "当前环境不支持检查更新";
+          renderUpdate();
+          return;
+        }
+        updateState.status = "checking";
+        updateState.message = "正在检查更新...";
+        updateState.info = null;
+        updateState.progress = 0;
+        renderUpdate();
+
+        callStorage("/api/update/check", "GET").then(function (data) {
+          if (data && data.hasUpdate) {
+            updateState.status = "checked";
+            updateState.info = data;
+            updateState.message = "发现新版本: " + data.version;
+          } else {
+            updateState.status = "idle";
+            updateState.message = "当前已是最新版本 (" + ((data && data.currentVersion) || "未知") + ")";
+          }
+          renderUpdate();
+        }, function (err) {
+          updateState.status = "idle";
+          updateState.message = "检查失败: " + errorMessage(err);
+          renderUpdate();
+        });
+      }
+
+      function downloadUpdate() {
+        if (!canUseNativeStorage()) {
+          updateState.status = "checked";
+          updateState.message = "当前环境不支持下载更新";
+          renderUpdate();
+          return;
+        }
+        updateState.status = "downloading";
+        updateState.progress = 0;
+        updateState.message = "正在下载更新... 0%";
+        renderUpdate();
+
+        callStorage("/api/update/download", "GET").then(function (data) {
+          if (data && data.success) {
+            updateState.progress = 100;
+            updateState.status = "downloaded";
+            updateState.message = "下载完成，可以应用更新";
+          } else {
+            updateState.status = "checked";
+            updateState.message = "下载失败: " + ((data && data.error) || "未知错误");
+          }
+          renderUpdate();
+        }, function (err) {
+          updateState.status = "checked";
+          updateState.message = "下载失败: " + errorMessage(err);
+          renderUpdate();
+        });
+      }
+
+      function applyUpdate() {
+        if (!canUseNativeStorage()) {
+          updateState.status = "downloaded";
+          updateState.message = "当前环境不支持应用更新";
+          renderUpdate();
+          return;
+        }
+        updateState.status = "applying";
+        updateState.message = "正在应用更新并重启...";
+        renderUpdate();
+
+        callStorage("/api/update/restart", "GET").then(function (data) {
+          if (!data || !data.success) {
+            updateState.status = "downloaded";
+            updateState.message = "应用失败: " + ((data && data.error) || "未知错误");
+            renderUpdate();
+          }
+        }, function (err) {
+          updateState.status = "downloaded";
+          updateState.message = "应用失败: " + errorMessage(err);
+          renderUpdate();
+        });
+      }
+
       function render() {
+        renderShell();
         renderStorageList();
         renderStatus(state);
+        renderAbout();
+      }
+
+      function setActivePanel(panelName) {
+        activePanel = panelName === "about" ? "about" : "cloud-storage";
+        render();
+        replacePanelQuery();
+      }
+
+      function renderShell() {
+        var isAbout = activePanel === "about";
+        navButtons.forEach(function (button) {
+          button.classList.toggle("is-active", button.dataset.panel === activePanel);
+        });
+        panels.forEach(function (panel) {
+          panel.hidden = panel.dataset.settingsPanel !== activePanel;
+        });
+        headerTitle.textContent = isAbout ? "关于" : "云存储";
+        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : "S3/OSS 兼容对象存储配置";
+        status.hidden = isAbout;
+      }
+
+      function renderAbout() {
+        appVersion.textContent = appInfo && appInfo.version ? appInfo.version : "读取中";
+        veloVersion.textContent = appInfo && appInfo.velo ? appInfo.velo : "读取中";
+        appMode.textContent = appInfo && appInfo.mode ? appInfo.mode : "读取中";
+        renderUpdate();
+      }
+
+      function renderUpdate() {
+        updateActions.innerHTML = updateActionsTemplate(updateState.status);
+        updateMessage.textContent = updateState.message || "可手动检查新版本";
+        updateProgress.hidden = updateState.status !== "downloading" && updateState.progress <= 0;
+        updateProgressBar.style.width = updateState.progress + "%";
+        updateRelease.innerHTML = updateState.info ? updateReleaseTemplate(updateState.info) : "";
+      }
+
+      function updateActionsTemplate(updateStatus) {
+        if (updateStatus === "checking") {
+          return '<button class="settings-button is-secondary" type="button" disabled>检查中...</button>';
+        }
+        if (updateStatus === "checked") {
+          return [
+            '<button class="settings-button is-secondary" type="button" data-action="check-update">重新检查</button>',
+            '<button class="settings-button is-primary" type="button" data-action="download-update">下载更新</button>',
+          ].join("");
+        }
+        if (updateStatus === "downloading") {
+          return '<button class="settings-button is-secondary" type="button" disabled>下载中...</button>';
+        }
+        if (updateStatus === "downloaded") {
+          return [
+            '<button class="settings-button is-secondary" type="button" data-action="check-update">重新检查</button>',
+            '<button class="settings-button is-primary" type="button" data-action="apply-update">应用更新并重启</button>',
+          ].join("");
+        }
+        if (updateStatus === "applying") {
+          return '<button class="settings-button is-secondary" type="button" disabled>应用中...</button>';
+        }
+        return '<button class="settings-button is-secondary" type="button" data-action="check-update">检查更新</button>';
+      }
+
+      function updateReleaseTemplate(info) {
+        return [
+          '<div class="settings-update-version">新版本 ' + escapeHTML(info.version || "") + '</div>',
+          '<div class="settings-update-current">当前版本 ' + escapeHTML(info.currentVersion || "") + '</div>',
+          '<div class="settings-update-notes">' + escapeHTML(info.releaseNotes || "暂无更新说明") + '</div>',
+        ].join("");
+      }
+
+      function initialPanel() {
+        try {
+          var params = new URLSearchParams(window.location.search || "");
+          return params.get("panel") === "about" ? "about" : "cloud-storage";
+        } catch (_) {
+          return "cloud-storage";
+        }
+      }
+
+      function replacePanelQuery() {
+        try {
+          var url = new URL(window.location.href);
+          if (activePanel === "about") {
+            url.searchParams.set("panel", "about");
+          } else {
+            url.searchParams.delete("panel");
+          }
+          window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        } catch (_) { }
       }
 
       function renderStorageList() {

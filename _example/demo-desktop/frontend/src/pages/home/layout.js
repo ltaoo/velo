@@ -3,7 +3,6 @@ import { RouterSubViews } from "../../components/sub-views.js";
 const nav_menus = [
   { id: "root.home_layout.index", icon: "home", label: "首页" },
   { id: "settings", icon: "explore", label: "设置" },
-  { id: "root.home_layout.update", icon: "settings", label: "更新" },
 ];
 const icons = {
   home: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>',
@@ -36,75 +35,8 @@ export function HomeLayoutView(props) {
       },
     },
     [
-      View({ class: "sidebar-wrapper w-[72px]" }, [
-        View(
-          {
-            class:
-              "w-[72px] h-full bg-[var(--BG-1)] flex flex-col items-center py-4 border-r border-[var(--border)]",
-          },
-          [
-            View({ class: "mb-6" }, [
-              View({ class: "w-10 h-10 flex items-center justify-center" }, [
-                DangerouslyInnerHTML(LogoSVG),
-              ]),
-            ]),
-            For({
-              class: "flex-1 flex flex-col gap-2 w-full",
-              each: nav_menus,
-              render(menu) {
-                return View(
-                  {
-                    class: classnames(
-                      computed({ curView: curSubView }, (draft) => {
-                        const isSelected =
-                          draft.curView.name === menu.id ||
-                          menu.id.startsWith(draft.curView.name);
-                        return [
-                          "w-full py-3 flex flex-col items-center gap-1 border-none bg-transparent cursor-pointer transition-all duration-200 rounded-none hover:bg-[var(--BG-3)]",
-                          isSelected
-                            ? "text-[var(--GREEN)] bg-[var(--BG-3)]"
-                            : "text-[var(--FG-1)] hover:text-[var(--FG-0)]",
-                        ].join(" ");
-                      }),
-                    ),
-                    dataset: { id: menu.id, label: menu.label },
-                    onClick() {
-                      console.log("Navigate to:", menu);
-                      if (menu.id === "settings") {
-                        invoke("/api/open_window", {
-                          method: "GET",
-                          args: { pathname: "/settings" },
-                        }).catch((err) => {
-                          console.error("open window error", err);
-                        });
-                        return;
-                      }
-                      props.history.push(menu.id);
-                    },
-                  },
-                  [
-                    DangerouslyInnerHTML(icons[menu.icon]),
-                    View({ class: "text-[10px] font-medium" }, [
-                      Txt(menu.label),
-                    ]),
-                  ],
-                );
-              },
-            }),
-            View({ class: "mt-auto" }, [
-              View(
-                {
-                  class:
-                    "w-9 h-9 rounded-full bg-[var(--GREEN)] text-white flex items-center justify-center text-sm font-semibold",
-                },
-                [View({ class: "avatar-letter" }, [Txt("U")])],
-              ),
-            ]),
-          ],
-        ),
-      ]),
       RouterSubViews({
-        class: "absolute inset-0 left-[72px] right-0 h-full",
+        class: "absolute inset-0 right-0 h-full",
         view: view,
         app: props.app,
         history: props.history,

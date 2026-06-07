@@ -85,6 +85,7 @@ ol {
 .memo-editor-host.mini-editor .ProseMirror {
   background: transparent;
   color: var(--FG-0);
+  counter-reset: memo-editor-line;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: var(--input-line-height);
@@ -93,7 +94,7 @@ ol {
   overflow-wrap: anywhere;
   overflow-y: auto;
   outline: none;
-  padding: 14px 16px;
+  padding: 14px 16px 14px 58px;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -104,13 +105,31 @@ ol {
 }
 
 .memo-editor-host.mini-editor .ProseMirror p {
+  counter-increment: memo-editor-line;
   margin: 0;
+  min-height: calc(1em * var(--input-line-height));
+  position: relative;
+}
+
+.memo-editor-host.mini-editor .ProseMirror p::before {
+  color: var(--FG-2);
+  content: counter(memo-editor-line);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  left: -42px;
+  line-height: var(--input-line-height);
+  pointer-events: none;
+  position: absolute;
+  text-align: right;
+  user-select: none;
+  width: 28px;
 }
 
 .memo-editor-host.mini-editor::before {
   color: var(--FG-2);
   content: attr(data-placeholder);
-  left: 16px;
+  left: 58px;
   pointer-events: none;
   position: absolute;
   top: 14px;
@@ -421,20 +440,29 @@ ol {
 .mini-editor .mini-markdown-link-token.vim-cursor-char,
 .mini-editor .mini-markdown-image-token.vim-cursor-char {
   background: var(--memo-accent);
-  box-shadow:
-    0 0 0 1px var(--memo-accent),
-    0 0 0 3px rgba(15, 159, 110, 0.24);
+  box-shadow: inset 0 0 0 1px var(--memo-accent-strong);
   color: #fff;
   text-decoration: none;
 }
 
 .vim-empty-line-cursor {
-  background: var(--memo-accent);
-  box-shadow: 0 0 0 3px rgba(15, 159, 110, 0.24);
-  display: inline-block;
-  height: 1.15em;
+  display: inline;
+  height: 0;
+  line-height: 0;
   pointer-events: none;
-  vertical-align: -0.16em;
+  position: relative;
+  width: 0;
+}
+
+.vim-empty-line-cursor::after {
+  background: var(--memo-accent);
+  box-shadow: inset 0 0 0 1px var(--memo-accent-strong);
+  content: "";
+  height: 1em;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0.1em;
   width: 0.62em;
 }
 
@@ -605,7 +633,8 @@ ol {
   min-height: 0;
 }
 
-.memo-shell {
+.memo-shell,
+.memo-window-shell {
   --memo-accent: #0f9f6e;
   --memo-accent-strong: #08784f;
   --memo-accent-soft: rgba(15, 159, 110, 0.12);
@@ -616,6 +645,9 @@ ol {
   --memo-warn-soft: rgba(180, 83, 9, 0.13);
   --memo-warn-border: rgba(180, 83, 9, 0.28);
   --memo-radius: 8px;
+}
+
+.memo-shell {
   --memo-sidebar-width: clamp(172px, 18vw, 220px);
   --memo-inspector-width: clamp(220px, 22vw, 300px);
   background:
@@ -634,7 +666,8 @@ ol {
   width: 100%;
 }
 
-.memo-shell svg {
+.memo-shell svg,
+.memo-window-shell svg {
   display: inline-block;
   fill: none;
   height: 16px;
@@ -643,6 +676,111 @@ ol {
   stroke-linejoin: round;
   stroke-width: 2;
   width: 16px;
+}
+
+body.memo-window-page {
+  background: transparent;
+}
+
+body.memo-window-page #root {
+  background: transparent;
+}
+
+.memo-window-shell {
+  background: var(--border);
+  border: 0;
+  border-radius: 10px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+  color: var(--FG-0);
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px;
+  width: 100%;
+}
+
+body.is-fixed-window .memo-window-shell {
+  background: var(--memo-accent-border);
+  box-shadow:
+    0 18px 55px rgba(0, 0, 0, 0.24);
+}
+
+.memo-window-titlebar {
+  align-items: center;
+  background: var(--BG-2);
+  border-bottom: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 78px minmax(0, 1fr) 42px;
+  height: 44px;
+  min-width: 0;
+  padding: 0 8px 0 14px;
+  user-select: none;
+}
+
+.memo-window-native-controls {
+  height: 100%;
+  pointer-events: none;
+}
+
+.memo-window-drag-region {
+  height: 100%;
+  min-width: 0;
+}
+
+.memo-window-title-actions {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.memo-window-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--FG-1);
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.memo-window-icon-button:hover,
+.memo-window-icon-button.is-active {
+  background: var(--memo-accent-soft);
+  color: var(--memo-accent-strong);
+}
+
+.memo-window-body {
+  background: var(--BG-2);
+  border-radius: 0 0 9px 9px;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+}
+
+.memo-window-card {
+  border: 0;
+  border-radius: 0;
+  min-height: 100%;
+}
+
+.memo-window-empty {
+  align-items: center;
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: var(--memo-radius);
+  color: var(--FG-1);
+  display: flex;
+  font-size: 13px;
+  justify-content: center;
+  min-height: 180px;
+  padding: 18px;
 }
 
 .memo-sidebar,
@@ -715,6 +853,10 @@ ol {
   display: grid;
   gap: 4px;
   margin-bottom: 26px;
+}
+
+.memo-collection-nav {
+  margin-bottom: 0;
 }
 
 .memo-nav-button,
@@ -817,6 +959,168 @@ ol {
 .memo-pinned-list {
   display: grid;
   gap: 6px;
+}
+
+.memo-calendar {
+  display: grid;
+  gap: 10px;
+}
+
+.memo-calendar-head {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+}
+
+.memo-calendar-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: center;
+}
+
+.memo-calendar-title strong {
+  color: var(--FG-0);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.memo-calendar-title span {
+  color: var(--FG-1);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-calendar-toolbar {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.memo-calendar-toolbar.is-single {
+  grid-template-columns: 1fr;
+}
+
+.memo-calendar-nav,
+.memo-calendar-today,
+.memo-calendar-clear,
+.memo-calendar-day {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  justify-content: center;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.memo-calendar-nav {
+  height: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.memo-calendar-nav:hover,
+.memo-calendar-today:hover,
+.memo-calendar-clear:hover,
+.memo-calendar-day:hover {
+  background: var(--memo-accent-soft);
+  border-color: var(--memo-accent-border);
+  color: var(--memo-accent-strong);
+}
+
+.memo-calendar-today,
+.memo-calendar-clear {
+  font-size: 12px;
+  font-weight: 700;
+  height: 30px;
+  padding: 0 8px;
+}
+
+.memo-calendar-clear {
+  color: var(--memo-warn);
+}
+
+.memo-calendar-weekdays,
+.memo-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.memo-calendar-weekdays {
+  color: var(--FG-1);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.memo-calendar-weekdays span {
+  line-height: 22px;
+}
+
+.memo-calendar-grid {
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.memo-calendar-day {
+  aspect-ratio: 1;
+  background: var(--BG-1);
+  border: 0;
+  border-radius: 0;
+  color: var(--FG-0);
+  flex-direction: column;
+  font-size: 12px;
+  gap: 1px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 2px;
+  position: relative;
+}
+
+.memo-calendar-day.is-outside {
+  color: var(--FG-1);
+  opacity: 0.48;
+}
+
+.memo-calendar-day.is-today span {
+  align-items: center;
+  background: var(--memo-blue);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 5px;
+}
+
+.memo-calendar-day.is-selected {
+  background: var(--memo-accent-soft);
+  box-shadow: inset 0 0 0 2px var(--memo-accent-border);
+  color: var(--memo-accent-strong);
+}
+
+.memo-calendar-day strong {
+  background: var(--memo-accent);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  min-width: 14px;
+  padding: 2px 4px;
 }
 
 .memo-tag-filter,
@@ -1187,8 +1491,20 @@ ol {
   gap: 14px;
 }
 
+.memo-list.is-resource-list {
+  gap: 14px;
+}
+
 .memo-card {
   padding: 14px;
+}
+
+.memo-window-body .memo-window-card {
+  background: var(--BG-2);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 100%;
 }
 
 .memo-card.is-pinned {
@@ -1276,6 +1592,35 @@ ol {
   overflow-wrap: anywhere;
 }
 
+.memo-line-list {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.memo-source-line {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.memo-line-number {
+  color: var(--FG-2);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.62;
+  pointer-events: none;
+  text-align: right;
+  user-select: none;
+}
+
+.memo-line-body {
+  min-width: 0;
+}
+
 .memo-content p,
 .memo-content blockquote,
 .memo-content pre,
@@ -1287,6 +1632,20 @@ ol {
 .memo-content h4,
 .memo-content h5 {
   margin: 0 0 8px;
+}
+
+.memo-line-body > p,
+.memo-line-body > blockquote,
+.memo-line-body > pre,
+.memo-line-body > ul,
+.memo-line-body > ol,
+.memo-line-body > figure,
+.memo-line-body > .memo-ref-card,
+.memo-line-body > h3,
+.memo-line-body > h4,
+.memo-line-body > h5,
+.memo-line-body > .memo-task-line {
+  margin: 0;
 }
 
 .memo-content h3,
@@ -1310,6 +1669,23 @@ ol {
   padding: 10px;
 }
 
+.memo-line-body > .memo-code-line {
+  border-radius: 4px;
+  line-height: 1.62;
+  padding: 1px 8px;
+  white-space: pre-wrap;
+}
+
+.memo-line-body > .memo-code-line code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.memo-line-body > .memo-code-line.is-fence {
+  color: #9ca3af;
+}
+
 .memo-content code {
   background: var(--BG-3);
   border-radius: 4px;
@@ -1329,6 +1705,28 @@ ol {
 
 .memo-content a {
   color: var(--memo-blue);
+}
+
+.memo-line-list-item {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  padding-left: var(--memo-list-indent, 0);
+}
+
+.memo-line-list-item.is-ul::before {
+  color: var(--FG-1);
+  content: "•";
+}
+
+.memo-line-list-marker {
+  color: var(--FG-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.memo-line-list-content {
+  min-width: 0;
 }
 
 .memo-ref-chip {
@@ -1681,6 +2079,98 @@ ol {
   padding: 12px;
 }
 
+.memo-resource-card {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: var(--memo-radius);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.memo-resource-target {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--FG-0);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 58px;
+  min-width: 0;
+  padding: 10px 12px;
+  position: relative;
+  text-decoration: none;
+}
+
+.memo-resource-target.has-editor-open {
+  padding-right: 152px;
+}
+
+.memo-resource-target:hover {
+  border-color: var(--memo-accent-border);
+  text-decoration: none;
+}
+
+.memo-resource-icon {
+  align-items: center;
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--memo-accent-strong);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.memo-resource-icon svg {
+  height: 18px;
+  width: 18px;
+}
+
+.memo-resource-preview {
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: block;
+  height: 44px;
+  overflow: hidden;
+  width: 58px;
+}
+
+.memo-resource-preview img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.memo-resource-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.memo-resource-title {
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-resource-url {
+  color: var(--FG-1);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memo-todo-card.is-complete {
   opacity: 0.68;
 }
@@ -1710,7 +2200,8 @@ ol {
   text-decoration: line-through;
 }
 
-.memo-todo-source {
+.memo-todo-source,
+.memo-resource-source {
   align-items: center;
   border-top: 1px solid var(--border);
   display: grid;
@@ -1871,9 +2362,15 @@ ol {
   margin-top: 10px;
 }
 
-.memo-card-tags button {
+.memo-card-tags button,
+.memo-card-tags span {
   background: var(--memo-accent-soft);
+  border-radius: 999px;
   color: var(--memo-accent-strong);
+  display: inline-flex;
+  font-size: 12px;
+  justify-content: center;
+  line-height: 24px;
   min-height: 24px;
   padding: 0 8px;
 }
@@ -2093,12 +2590,26 @@ ol {
     min-width: 0;
   }
 
-  .memo-todo-source {
+  .memo-todo-source,
+  .memo-resource-source {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr);
   }
 
   .memo-todo-meta {
     justify-content: flex-start;
+  }
+
+  .memo-resource-target.has-editor-open {
+    padding-bottom: 46px;
+    padding-right: 12px;
+  }
+
+  .memo-resource-target .memo-file-open-vscode {
+    bottom: 10px;
+    left: 12px;
+    right: auto;
+    top: auto;
+    transform: none;
   }
 }
