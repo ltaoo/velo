@@ -4,8 +4,8 @@
   "description": "Frontend application",
   "type": "module",
   "scripts": {
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint": "eslint index.js",
+    "lint:fix": "eslint index.js --fix"
   },
   "devDependencies": {
     "eslint": "^8.56.0"

@@ -44,6 +44,13 @@ body {
   gap: 10px;
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 h1,
 h2,
 p {
@@ -79,6 +86,42 @@ p {
   display: grid;
   gap: 18px;
   padding: 22px;
+}
+
+.keyboard-panel {
+  margin-top: 16px;
+}
+
+.keyboard-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keyboard-meta span {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.keyboard-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.keyboard-message.ok {
+  color: var(--ok);
+}
+
+.keyboard-message.error {
+  color: var(--danger);
 }
 
 .preset-row {
@@ -215,6 +258,14 @@ button:hover {
   background: var(--accent-strong);
 }
 
+.danger {
+  background: var(--danger);
+}
+
+.danger:hover {
+  background: #9f3030;
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.7;
@@ -270,11 +321,13 @@ pre {
 
 @media (max-width: 760px) {
   .toolbar,
+  .section-head,
   .advanced {
     align-items: stretch;
   }
 
   .toolbar,
+  .section-head,
   .toolbar-actions,
   .columns,
   .advanced,
@@ -284,6 +337,7 @@ pre {
   }
 
   .toolbar,
+  .section-head,
   .toolbar-actions {
     display: grid;
   }

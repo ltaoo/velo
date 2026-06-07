@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,6 +46,11 @@ var Version = "1.0.0"
 const (
 	defaultPortA = 49310
 	defaultPortB = 49311
+)
+
+var (
+	veloModeFlag   = flag.String("velo-mode", firstText(os.Getenv("VELO_IM_MODE"), "bridge"), "velo mode: bridge, bridge-http, http")
+	wsSelfTestFlag = flag.Bool("ws-self-test", false, "run ModeHttp WebSocket transport self-test and exit")
 )
 
 type runtimeConfig struct {
@@ -114,16 +122,24 @@ func main() {
 	if err != nil {
 		fatal(logger, "failed to start peer listener: "+err.Error())
 	}
+	appMode, err := parseVeloMode(*veloModeFlag)
+	if err != nil {
+		fatal(logger, err.Error())
+	}
+	if *wsSelfTestFlag {
+		appMode = velo.ModeHttp
+	}
 	logger.Info().
 		Str("role", cfg.Role).
 		Str("name", cfg.DisplayName).
 		Int("listen", cfg.ListenPort).
 		Int("peer", cfg.PeerPort).
+		Str("velo_mode", appMode.String()).
 		Msg("demo-im runtime ready")
 
 	quitOnLastWindowClosed := true
 	opt := velo.VeloAppOpt{
-		Mode:                   velo.ModeBridge,
+		Mode:                   appMode,
 		IconData:               appIcon,
 		QuitOnLastWindowClosed: &quitOnLastWindowClosed,
 	}
@@ -133,7 +149,7 @@ func main() {
 	startPeerServer(listener, cfg, state, b, logger)
 	startPeerMonitor(context.Background(), cfg, state, b, logger)
 
-	registerRoutes(b, cfg, state, logger)
+	registerRoutes(b, cfg, state, logger, appMode)
 
 	b.NewWebview(&velo.VeloWebviewOpt{
 		Name:       "demo-im-" + cfg.Role,
@@ -146,7 +162,28 @@ func main() {
 		Hidden:     false,
 	})
 
+	if *wsSelfTestFlag {
+		if err := runWSTransportSelfTest(b, logger); err != nil {
+			fatal(logger, "ws transport self-test failed: "+err.Error())
+		}
+		logger.Info().Msg("ws transport self-test passed")
+		return
+	}
+
 	b.Run()
+}
+
+func parseVeloMode(value string) (velo.Mode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "bridge":
+		return velo.ModeBridge, nil
+	case "bridge-http", "bridge_http", "bridgehttp":
+		return velo.ModeBridgeHttp, nil
+	case "http":
+		return velo.ModeHttp, nil
+	default:
+		return velo.ModeBridge, fmt.Errorf("unknown velo mode %q", value)
+	}
 }
 
 func resolveRuntimeConfig() (*runtimeConfig, net.Listener, error) {
@@ -260,7 +297,7 @@ func newRuntimeConfig(role, displayName string, listenPort, peerPort int) *runti
 	}
 }
 
-func registerRoutes(b *velo.Box, cfg *runtimeConfig, state *chatState, logger *zerolog.Logger) {
+func registerRoutes(b *velo.Box, cfg *runtimeConfig, state *chatState, logger *zerolog.Logger, appMode velo.Mode) {
 	b.Get("/api/app", func(c *velo.BoxContext) interface{} {
 		messages, peerOnline, peerName := state.Snapshot()
 		return c.Ok(velo.H{
@@ -288,7 +325,9 @@ func registerRoutes(b *velo.Box, cfg *runtimeConfig, state *chatState, logger *z
 	})
 
 	b.Get("/api/window/show", func(c *velo.BoxContext) interface{} {
-		b.Webview.Show()
+		if appMode != velo.ModeHttp && b.Webview != nil {
+			b.Webview.Show()
+		}
 		return c.Ok(velo.H{"success": true})
 	})
 
@@ -533,4 +572,251 @@ func newID(prefix string) string {
 		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 	}
 	return prefix + "-" + hex.EncodeToString(buf)
+}
+
+const (
+	selfTestWSOpcodeText = 0x1
+)
+
+type selfTestWSClient struct {
+	conn   net.Conn
+	reader *bufio.Reader
+}
+
+func runWSTransportSelfTest(b *velo.Box, logger *zerolog.Logger) error {
+	go b.Run()
+
+	client, err := dialVeloWSWithRetry(5 * time.Second)
+	if err != nil {
+		return err
+	}
+	defer client.close()
+
+	if err := client.sendInvoke("self-app", "/api/app", map[string]interface{}{}); err != nil {
+		return err
+	}
+	if err := client.waitForCallback("self-app", 3*time.Second); err != nil {
+		return err
+	}
+	logger.Info().Msg("ws self-test invoke /api/app passed")
+
+	if err := client.sendInvoke("self-send", "/api/message/send", map[string]interface{}{
+		"text": "ws self-test " + time.Now().Format(time.RFC3339Nano),
+	}); err != nil {
+		return err
+	}
+	if err := client.waitForCallbackAndMessage("self-send", "message_sent", 5*time.Second); err != nil {
+		return err
+	}
+	logger.Info().Msg("ws self-test invoke /api/message/send and SendMessage push passed")
+	return nil
+}
+
+func dialVeloWSWithRetry(timeout time.Duration) (*selfTestWSClient, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		client, err := dialVeloWS()
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("timeout")
+	}
+	return nil, fmt.Errorf("connect to ws://127.0.0.1:8080%s: %w", velo.VeloWebSocketPath, lastErr)
+}
+
+func dialVeloWS() (*selfTestWSClient, error) {
+	conn, err := net.Dial("tcp", "127.0.0.1:8080")
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	keyBytes := make([]byte, 16)
+	if _, err := rand.Read(keyBytes); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	key := base64.StdEncoding.EncodeToString(keyBytes)
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n", velo.VeloWebSocketPath, key)
+	if _, err := io.WriteString(conn, req); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	reader := bufio.NewReader(conn)
+	status, err := reader.ReadString('\n')
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if !strings.Contains(status, "101") {
+		conn.Close()
+		return nil, fmt.Errorf("websocket handshake returned %s", strings.TrimSpace(status))
+	}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+
+	return &selfTestWSClient{conn: conn, reader: reader}, nil
+}
+
+func (c *selfTestWSClient) sendInvoke(id, method string, args interface{}) error {
+	payload, err := json.Marshal(map[string]interface{}{
+		"id":      id,
+		"method":  method,
+		"headers": map[string][]string{"Content-Type": {"application/json"}},
+		"args":    args,
+	})
+	if err != nil {
+		return err
+	}
+	return writeSelfTestWSFrame(c.conn, selfTestWSOpcodeText, payload)
+}
+
+func (c *selfTestWSClient) waitForCallback(id string, timeout time.Duration) error {
+	return c.waitForCallbackAndMessage(id, "", timeout)
+}
+
+func (c *selfTestWSClient) waitForCallbackAndMessage(id, messageType string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	gotCallback := false
+	gotMessage := messageType == ""
+
+	for time.Now().Before(deadline) {
+		if err := c.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+			return err
+		}
+		opcode, payload, err := readSelfTestWSFrame(c.reader)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+			return err
+		}
+		if opcode != selfTestWSOpcodeText {
+			continue
+		}
+
+		var packet struct {
+			Type    string          `json:"type"`
+			ID      string          `json:"id"`
+			Result  json.RawMessage `json:"result"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(payload, &packet); err != nil {
+			return err
+		}
+
+		if packet.Type == "__velo_callback" && packet.ID == id {
+			var result velo.BoxResult
+			if err := json.Unmarshal(packet.Result, &result); err != nil {
+				return err
+			}
+			if result.Code != 0 {
+				return fmt.Errorf("callback %s failed: %s", id, result.Msg)
+			}
+			gotCallback = true
+		}
+
+		if packet.Type == "__velo_message" && messageType != "" {
+			var msg struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(packet.Payload, &msg); err != nil {
+				return err
+			}
+			if msg.Type == messageType {
+				gotMessage = true
+			}
+		}
+
+		if gotCallback && gotMessage {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for callback=%v message=%v", gotCallback, gotMessage)
+}
+
+func (c *selfTestWSClient) close() {
+	_ = c.conn.Close()
+}
+
+func readSelfTestWSFrame(r *bufio.Reader) (byte, []byte, error) {
+	first, err := r.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	second, err := r.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	opcode := first & 0x0f
+	length := uint64(second & 0x7f)
+	switch length {
+	case 126:
+		var buf [2]byte
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return 0, nil, err
+		}
+		length = uint64(binary.BigEndian.Uint16(buf[:]))
+	case 127:
+		var buf [8]byte
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return 0, nil, err
+		}
+		length = binary.BigEndian.Uint64(buf[:])
+	}
+
+	payload := make([]byte, int(length))
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return 0, nil, err
+	}
+	return opcode, payload, nil
+}
+
+func writeSelfTestWSFrame(w io.Writer, opcode byte, payload []byte) error {
+	header := []byte{0x80 | opcode}
+	length := len(payload)
+	switch {
+	case length < 126:
+		header = append(header, 0x80|byte(length))
+	case length <= 0xffff:
+		header = append(header, 0x80|126, 0, 0)
+		binary.BigEndian.PutUint16(header[len(header)-2:], uint16(length))
+	default:
+		header = append(header, 0x80|127, 0, 0, 0, 0, 0, 0, 0, 0)
+		binary.BigEndian.PutUint64(header[len(header)-8:], uint64(length))
+	}
+
+	mask := [4]byte{1, 2, 3, 4}
+	masked := make([]byte, len(payload))
+	for i := range payload {
+		masked[i] = payload[i] ^ mask[i%4]
+	}
+
+	if _, err := w.Write(header); err != nil {
+		return err
+	}
+	if _, err := w.Write(mask[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(masked)
+	return err
 }
