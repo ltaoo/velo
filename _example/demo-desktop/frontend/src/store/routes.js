@@ -30,6 +30,13 @@ const configure = {
           require: [],
         },
       },
+      vault_picker: {
+        title: "选择 Vault",
+        pathname: "/vault-picker",
+        options: {
+          require: [],
+        },
+      },
       notfound: {
         title: "404",
         pathname: "/notfound",

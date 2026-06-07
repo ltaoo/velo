@@ -690,7 +690,7 @@
         var isLocal = isLocalProvider(config && config.provider);
         endpointLabel.textContent = isLocal ? "本地根目录" : "Endpoint";
         bucketLabel.textContent = isLocal ? "Bucket / 目录名" : "Bucket";
-        form.elements.endpoint.placeholder = isLocal ? (defaults.localRoot || "workdir/storage") : "https://s3.example.com";
+        form.elements.endpoint.placeholder = isLocal ? (defaults.localRoot || "vault/storage") : "https://s3.example.com";
         form.elements.bucket.placeholder = isLocal ? (defaults.memoBucket || "memos") : "memo-assets";
         remoteSection.hidden = isLocal;
         if (isLocal) {

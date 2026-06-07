@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -50,12 +53,29 @@ var Version = "1.0.0"
 var Mode = "dev"
 
 const cloudStorageSettingsKey = "demo-desktop:settings:cloud-storage:v1"
+const globalVeloDirName = ".velo"
+const globalVaultDataFileName = "data.json"
+const vaultConfigDirName = ".velo"
+const vaultMemoDirName = "memo"
+const vaultSchemaVersion = 1
+
+var memoTagPattern = regexp.MustCompile(`(?:^|\s)#([\p{L}\p{N}_-]+)`)
+var memoReferencePattern = regexp.MustCompile(`!?\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`)
+var memoMarkdownURLPattern = regexp.MustCompile(`!?\[[^\]]*\]\(([^)]*)\)`)
+var memoAssetTokenPattern = regexp.MustCompile("@assets/[A-Za-z0-9_-]+/[^\\s\\]\\)<>'\"`]+")
 
 var memoWindowCache = struct {
 	sync.RWMutex
 	items map[string]MemoWindowPayload
 }{
 	items: make(map[string]MemoWindowPayload),
+}
+
+var vaultRuntime = struct {
+	sync.RWMutex
+	active *VaultContext
+}{
+	active: nil,
 }
 
 type MemoWindowPayload struct {
@@ -85,6 +105,87 @@ type CloudStorageSettings struct {
 	ActiveStorageID     string      `json:"activeStorageId"`
 	DefaultsInitialized bool        `json:"defaultsInitialized,omitempty"`
 	Storages            []OSSConfig `json:"storages"`
+}
+
+type VaultRegistry struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	ActiveVaultID string       `json:"activeVaultId"`
+	Vaults        []VaultEntry `json:"vaults"`
+}
+
+type VaultEntry struct {
+	ID           string `json:"id"`
+	LastOpenedAt string `json:"lastOpenedAt"`
+	Name         string `json:"name"`
+	Path         string `json:"path"`
+}
+
+type VaultFile struct {
+	CreatedAt     string `json:"createdAt"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	SchemaVersion int    `json:"schemaVersion"`
+	UpdatedAt     string `json:"updatedAt"`
+}
+
+type VaultContext struct {
+	Entry   VaultEntry `json:"entry"`
+	RootDir string     `json:"rootDir"`
+	VeloDir string     `json:"veloDir"`
+	MemoDir string     `json:"memoDir"`
+}
+
+type VaultOpenRequest struct {
+	Path string `json:"path"`
+}
+
+type MemoRecord struct {
+	Archived   bool     `json:"archived"`
+	Content    string   `json:"content"`
+	CreatedAt  string   `json:"createdAt"`
+	ID         string   `json:"id"`
+	Path       string   `json:"path"`
+	Pinned     bool     `json:"pinned"`
+	References []string `json:"references"`
+	Tags       []string `json:"tags"`
+	UpdatedAt  string   `json:"updatedAt"`
+	Visibility string   `json:"visibility"`
+}
+
+type MemoCreateRequest struct {
+	Content    string `json:"content"`
+	Visibility string `json:"visibility"`
+}
+
+type MemoUpdateRequest struct {
+	Archived   *bool   `json:"archived"`
+	Content    *string `json:"content"`
+	ID         string  `json:"id"`
+	Pinned     *bool   `json:"pinned"`
+	Visibility *string `json:"visibility"`
+}
+
+type MemoDeleteRequest struct {
+	CleanupAssets *bool  `json:"cleanupAssets"`
+	ID            string `json:"id"`
+}
+
+type MemoDeleteResult struct {
+	AssetErrors   []string `json:"assetErrors,omitempty"`
+	AssetsDeleted int      `json:"assetsDeleted"`
+	AssetsSkipped int      `json:"assetsSkipped"`
+}
+
+type MemoDeleteOptions struct {
+	CleanupAssets   bool
+	Parent          context.Context
+	StorageSettings json.RawMessage
+	StorePath       string
+}
+
+type memoAssetReference struct {
+	Key       string
+	StorageID string
 }
 
 type OSSUploadRequest struct {
@@ -169,6 +270,1040 @@ func projectDir() string {
 	return filepath.Dir(filename)
 }
 
+func globalVeloDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, globalVeloDirName), nil
+}
+
+func globalVaultDataPath() (string, error) {
+	dir, err := globalVeloDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, globalVaultDataFileName), nil
+}
+
+func loadVaultRegistry() (VaultRegistry, error) {
+	path, err := globalVaultDataPath()
+	if err != nil {
+		return VaultRegistry{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return VaultRegistry{SchemaVersion: vaultSchemaVersion, Vaults: []VaultEntry{}}, nil
+	}
+	if err != nil {
+		return VaultRegistry{}, err
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return VaultRegistry{SchemaVersion: vaultSchemaVersion, Vaults: []VaultEntry{}}, nil
+	}
+
+	var registry VaultRegistry
+	if err := json.Unmarshal(raw, &registry); err != nil {
+		return VaultRegistry{}, fmt.Errorf("read vault registry: %w", err)
+	}
+	registry = normalizeVaultRegistry(registry)
+	return registry, nil
+}
+
+func normalizeVaultRegistry(registry VaultRegistry) VaultRegistry {
+	if registry.SchemaVersion == 0 {
+		registry.SchemaVersion = vaultSchemaVersion
+	}
+	next := make([]VaultEntry, 0, len(registry.Vaults))
+	seen := make(map[string]bool)
+	for _, entry := range registry.Vaults {
+		entry.ID = strings.TrimSpace(entry.ID)
+		entry.Path = strings.TrimSpace(entry.Path)
+		if entry.ID == "" || entry.Path == "" {
+			continue
+		}
+		cleanPath, err := cleanVaultPath(entry.Path)
+		if err == nil {
+			entry.Path = cleanPath
+		}
+		if entry.Name == "" {
+			entry.Name = vaultDisplayName(entry.Path)
+		}
+		key := entry.ID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		next = append(next, entry)
+	}
+	registry.Vaults = next
+	if registry.ActiveVaultID != "" && !vaultRegistryHasID(registry, registry.ActiveVaultID) {
+		registry.ActiveVaultID = ""
+	}
+	return registry
+}
+
+func saveVaultRegistry(registry VaultRegistry) error {
+	path, err := globalVaultDataPath()
+	if err != nil {
+		return err
+	}
+	registry = normalizeVaultRegistry(registry)
+	if registry.SchemaVersion == 0 {
+		registry.SchemaVersion = vaultSchemaVersion
+	}
+	return writeJSONFileAtomic(path, registry)
+}
+
+func writeJSONFileAtomic(path string, value interface{}) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func activeVaultFromRegistry(registry VaultRegistry) (VaultEntry, bool) {
+	activeID := strings.TrimSpace(registry.ActiveVaultID)
+	if activeID == "" {
+		return VaultEntry{}, false
+	}
+	for _, entry := range registry.Vaults {
+		if entry.ID == activeID {
+			return entry, true
+		}
+	}
+	return VaultEntry{}, false
+}
+
+func loadStartupVault() (*VaultContext, error) {
+	registry, err := loadVaultRegistry()
+	if err != nil {
+		return nil, err
+	}
+	entry, ok := activeVaultFromRegistry(registry)
+	if !ok {
+		return nil, nil
+	}
+	ctx, _, err := openVaultDirectory(entry.Path, false)
+	if err != nil {
+		return nil, err
+	}
+	return ctx, nil
+}
+
+func openVaultDirectory(value string, createIfMissing bool) (*VaultContext, bool, error) {
+	rootDir, err := cleanVaultPath(value)
+	if err != nil {
+		return nil, false, err
+	}
+	info, err := os.Stat(rootDir)
+	if err != nil {
+		return nil, false, fmt.Errorf("vault directory is not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, false, fmt.Errorf("vault path is not a directory")
+	}
+	if err := ensureDirectoryWritable(rootDir); err != nil {
+		return nil, false, err
+	}
+
+	veloDir := filepath.Join(rootDir, vaultConfigDirName)
+	veloInfo, err := os.Stat(veloDir)
+	existingVault := false
+	if err == nil {
+		if !veloInfo.IsDir() {
+			return nil, false, fmt.Errorf(".velo exists but is not a directory")
+		}
+		existingVault = true
+	} else if os.IsNotExist(err) {
+		if !createIfMissing {
+			return nil, false, fmt.Errorf("vault config directory does not exist")
+		}
+		if err := os.MkdirAll(veloDir, 0755); err != nil {
+			return nil, false, fmt.Errorf("create .velo directory: %w", err)
+		}
+	} else {
+		return nil, false, fmt.Errorf("stat .velo directory: %w", err)
+	}
+
+	memoDir := filepath.Join(rootDir, vaultMemoDirName)
+	if err := os.MkdirAll(memoDir, 0755); err != nil {
+		return nil, false, fmt.Errorf("create memo directory: %w", err)
+	}
+
+	vaultFile, err := loadOrCreateVaultFile(rootDir, veloDir)
+	if err != nil {
+		return nil, false, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	entry := VaultEntry{
+		ID:           vaultFile.ID,
+		LastOpenedAt: now,
+		Name:         firstNonEmpty(vaultFile.Name, vaultDisplayName(rootDir)),
+		Path:         rootDir,
+	}
+	return &VaultContext{
+		Entry:   entry,
+		RootDir: rootDir,
+		VeloDir: veloDir,
+		MemoDir: memoDir,
+	}, existingVault, nil
+}
+
+func cleanVaultPath(value string) (string, error) {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		return "", fmt.Errorf("vault path is required")
+	}
+	if strings.HasPrefix(path, "~"+string(filepath.Separator)) || path == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if path == "~" {
+			path = homeDir
+		} else {
+			path = filepath.Join(homeDir, strings.TrimPrefix(path, "~"+string(filepath.Separator)))
+		}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func ensureDirectoryWritable(dir string) error {
+	probe := filepath.Join(dir, ".velo-write-test-"+randomVaultSuffix())
+	if err := os.WriteFile(probe, []byte("ok"), 0600); err != nil {
+		return fmt.Errorf("vault directory is not writable: %w", err)
+	}
+	_ = os.Remove(probe)
+	return nil
+}
+
+func loadOrCreateVaultFile(rootDir string, veloDir string) (VaultFile, error) {
+	path := filepath.Join(veloDir, "vault.json")
+	raw, err := os.ReadFile(path)
+	if err == nil && len(bytes.TrimSpace(raw)) > 0 {
+		var file VaultFile
+		if err := json.Unmarshal(raw, &file); err != nil {
+			return VaultFile{}, fmt.Errorf("read vault config: %w", err)
+		}
+		changed := false
+		if strings.TrimSpace(file.ID) == "" {
+			file.ID = newVaultID()
+			changed = true
+		}
+		if strings.TrimSpace(file.Name) == "" {
+			file.Name = vaultDisplayName(rootDir)
+			changed = true
+		}
+		if file.SchemaVersion == 0 {
+			file.SchemaVersion = vaultSchemaVersion
+			changed = true
+		}
+		if file.CreatedAt == "" {
+			file.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			changed = true
+		}
+		if changed {
+			file.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			if err := writeJSONFileAtomic(path, file); err != nil {
+				return VaultFile{}, err
+			}
+		}
+		return file, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return VaultFile{}, fmt.Errorf("read vault config: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	file := VaultFile{
+		CreatedAt:     now,
+		ID:            newVaultID(),
+		Name:          vaultDisplayName(rootDir),
+		SchemaVersion: vaultSchemaVersion,
+		UpdatedAt:     now,
+	}
+	if err := writeJSONFileAtomic(path, file); err != nil {
+		return VaultFile{}, fmt.Errorf("write vault config: %w", err)
+	}
+	return file, nil
+}
+
+func registerActiveVault(ctx *VaultContext) (VaultRegistry, error) {
+	registry, err := loadVaultRegistry()
+	if err != nil {
+		return VaultRegistry{}, err
+	}
+	registry.SchemaVersion = vaultSchemaVersion
+	registry.ActiveVaultID = ctx.Entry.ID
+	updated := false
+	for i, entry := range registry.Vaults {
+		if entry.ID == ctx.Entry.ID || samePath(entry.Path, ctx.Entry.Path) {
+			registry.Vaults[i] = ctx.Entry
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		registry.Vaults = append(registry.Vaults, ctx.Entry)
+	}
+	sort.SliceStable(registry.Vaults, func(i, j int) bool {
+		return registry.Vaults[i].LastOpenedAt > registry.Vaults[j].LastOpenedAt
+	})
+	if err := saveVaultRegistry(registry); err != nil {
+		return VaultRegistry{}, err
+	}
+	return registry, nil
+}
+
+func setActiveVault(ctx *VaultContext) {
+	vaultRuntime.Lock()
+	vaultRuntime.active = ctx
+	vaultRuntime.Unlock()
+}
+
+func activeVaultSnapshot() *VaultContext {
+	vaultRuntime.RLock()
+	defer vaultRuntime.RUnlock()
+	if vaultRuntime.active == nil {
+		return nil
+	}
+	cp := *vaultRuntime.active
+	return &cp
+}
+
+func vaultRegistryHasID(registry VaultRegistry, id string) bool {
+	for _, entry := range registry.Vaults {
+		if entry.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func samePath(a string, b string) bool {
+	cleanA, errA := cleanVaultPath(a)
+	cleanB, errB := cleanVaultPath(b)
+	if errA == nil {
+		a = cleanA
+	}
+	if errB == nil {
+		b = cleanB
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func vaultDisplayName(path string) string {
+	name := strings.TrimSpace(filepath.Base(path))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "Vault"
+	}
+	return name
+}
+
+func newVaultID() string {
+	return "vault_" + randomVaultSuffix()
+}
+
+func randomVaultSuffix() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func requireActiveVault() (*VaultContext, error) {
+	ctx := activeVaultSnapshot()
+	if ctx == nil || strings.TrimSpace(ctx.RootDir) == "" {
+		return nil, fmt.Errorf("vault is not selected")
+	}
+	return ctx, nil
+}
+
+func listVaultMemos(ctx *VaultContext) ([]MemoRecord, error) {
+	memos := []MemoRecord{}
+	if err := filepath.WalkDir(ctx.MemoDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+			return nil
+		}
+		memo, err := readMemoFile(ctx, path)
+		if err != nil {
+			return err
+		}
+		memos = append(memos, memo)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(memos, func(i, j int) bool {
+		left := memoSortTime(memos[i])
+		right := memoSortTime(memos[j])
+		if left.Equal(right) {
+			return memos[i].ID > memos[j].ID
+		}
+		return left.After(right)
+	})
+	return memos, nil
+}
+
+func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, error) {
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		return MemoRecord{}, fmt.Errorf("memo content is required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	memo := MemoRecord{
+		Archived:   false,
+		Content:    content,
+		CreatedAt:  now,
+		ID:         newMemoID(),
+		Pinned:     false,
+		UpdatedAt:  "",
+		Visibility: normalizeMemoVisibility(req.Visibility),
+	}
+	memo.Tags = extractMemoTags(memo.Content)
+	memo.References = extractMemoReferences(memo.Content)
+	memo.Path = memoRelativePath(memo)
+	if err := writeMemoRecord(ctx, memo); err != nil {
+		return MemoRecord{}, err
+	}
+	return memo, nil
+}
+
+func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, error) {
+	id := strings.TrimSpace(req.ID)
+	if id == "" {
+		return MemoRecord{}, fmt.Errorf("memo id is required")
+	}
+	path, err := findMemoFilePath(ctx, id)
+	if err != nil {
+		return MemoRecord{}, err
+	}
+	memo, err := readMemoFile(ctx, path)
+	if err != nil {
+		return MemoRecord{}, err
+	}
+	if req.Content != nil {
+		content := strings.TrimSpace(*req.Content)
+		if content == "" {
+			return MemoRecord{}, fmt.Errorf("memo content is required")
+		}
+		memo.Content = content
+	}
+	if req.Visibility != nil {
+		memo.Visibility = normalizeMemoVisibility(*req.Visibility)
+	}
+	if req.Pinned != nil {
+		memo.Pinned = *req.Pinned
+	}
+	if req.Archived != nil {
+		memo.Archived = *req.Archived
+	}
+	memo.Tags = extractMemoTags(memo.Content)
+	memo.References = extractMemoReferences(memo.Content)
+	memo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	memo.Path = relativeVaultPath(ctx, path)
+	if err := writeMemoRecord(ctx, memo); err != nil {
+		return MemoRecord{}, err
+	}
+	return memo, nil
+}
+
+func deleteVaultMemo(ctx *VaultContext, id string) error {
+	_, err := deleteVaultMemoWithOptions(ctx, id, MemoDeleteOptions{})
+	return err
+}
+
+func deleteVaultMemoWithAssets(parent context.Context, ctx *VaultContext, id string, storageSettings json.RawMessage, storePath string) (MemoDeleteResult, error) {
+	return deleteVaultMemoWithOptions(ctx, id, MemoDeleteOptions{
+		CleanupAssets:   true,
+		Parent:          parent,
+		StorageSettings: storageSettings,
+		StorePath:       storePath,
+	})
+}
+
+func deleteVaultMemoWithOptions(ctx *VaultContext, id string, options MemoDeleteOptions) (MemoDeleteResult, error) {
+	result := MemoDeleteResult{}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return result, fmt.Errorf("memo id is required")
+	}
+	path, err := findMemoFilePath(ctx, id)
+	if err != nil {
+		return result, err
+	}
+	memo, err := readMemoFile(ctx, path)
+	if err != nil {
+		return result, err
+	}
+
+	assetsToDelete := []memoAssetReference{}
+	if options.CleanupAssets {
+		assets := extractMemoAssetReferences(memo.Content)
+		if len(assets) > 0 {
+			shared, err := memoAssetReferencesInOtherMemos(ctx, memo.ID)
+			if err != nil {
+				return result, err
+			}
+			for _, asset := range assets {
+				if shared[memoAssetReferenceID(asset)] {
+					result.AssetsSkipped++
+					continue
+				}
+				assetsToDelete = append(assetsToDelete, asset)
+			}
+		}
+	}
+
+	if err := os.Remove(path); err != nil {
+		return result, err
+	}
+
+	if len(assetsToDelete) > 0 {
+		cleanup := deleteMemoAssetReferences(options.Parent, options.StorageSettings, options.StorePath, assetsToDelete)
+		result.AssetsDeleted += cleanup.AssetsDeleted
+		result.AssetsSkipped += cleanup.AssetsSkipped
+		result.AssetErrors = append(result.AssetErrors, cleanup.AssetErrors...)
+	}
+	return result, nil
+}
+
+func readMemoFile(ctx *VaultContext, path string) (MemoRecord, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return MemoRecord{}, err
+	}
+	info, _ := os.Stat(path)
+	meta, content := parseMemoMarkdown(string(raw))
+	createdAt := firstNonEmpty(meta["createdAt"], meta["created_at"])
+	if createdAt == "" && info != nil {
+		createdAt = info.ModTime().UTC().Format(time.RFC3339Nano)
+	}
+	id := strings.TrimSpace(meta["id"])
+	if id == "" {
+		id = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	memo := MemoRecord{
+		Archived:   parseMemoBool(meta["archived"]),
+		Content:    strings.TrimSpace(content),
+		CreatedAt:  createdAt,
+		ID:         id,
+		Path:       relativeVaultPath(ctx, path),
+		Pinned:     parseMemoBool(meta["pinned"]),
+		References: parseMemoList(meta, "references"),
+		Tags:       parseMemoList(meta, "tags"),
+		UpdatedAt:  firstNonEmpty(meta["updatedAt"], meta["updated_at"]),
+		Visibility: normalizeMemoVisibility(meta["visibility"]),
+	}
+	if len(memo.Tags) == 0 {
+		memo.Tags = extractMemoTags(memo.Content)
+	}
+	if len(memo.References) == 0 {
+		memo.References = extractMemoReferences(memo.Content)
+	}
+	return memo, nil
+}
+
+func writeMemoRecord(ctx *VaultContext, memo MemoRecord) error {
+	if memo.ID == "" {
+		return fmt.Errorf("memo id is required")
+	}
+	if memo.Path == "" {
+		memo.Path = memoRelativePath(memo)
+	}
+	target, err := safeVaultRelativePath(ctx.RootDir, memo.Path)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(target, ctx.MemoDir+string(filepath.Separator)) && target != ctx.MemoDir {
+		return fmt.Errorf("memo path must be inside memo directory")
+	}
+	return writeTextFileAtomic(target, renderMemoMarkdownFile(memo))
+}
+
+func writeTextFileAtomic(path string, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(text), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func renderMemoMarkdownFile(memo MemoRecord) string {
+	tags := uniqueStrings(memo.Tags)
+	refs := uniqueStrings(memo.References)
+	lines := []string{
+		"---",
+		"schemaVersion: " + fmt.Sprintf("%d", vaultSchemaVersion),
+		"id: " + yamlQuote(memo.ID),
+		"createdAt: " + yamlQuote(memo.CreatedAt),
+		"updatedAt: " + yamlQuote(memo.UpdatedAt),
+		"visibility: " + yamlQuote(normalizeMemoVisibility(memo.Visibility)),
+		"pinned: " + fmt.Sprintf("%t", memo.Pinned),
+		"archived: " + fmt.Sprintf("%t", memo.Archived),
+	}
+	if len(tags) == 0 {
+		lines = append(lines, "tags: []")
+	} else {
+		lines = append(lines, "tags:")
+		for _, tag := range tags {
+			lines = append(lines, "  - "+yamlQuote(tag))
+		}
+	}
+	if len(refs) == 0 {
+		lines = append(lines, "references: []")
+	} else {
+		lines = append(lines, "references:")
+		for _, ref := range refs {
+			lines = append(lines, "  - "+yamlQuote(ref))
+		}
+	}
+	lines = append(lines, "---", "", strings.TrimSpace(memo.Content), "")
+	return strings.Join(lines, "\n")
+}
+
+func parseMemoMarkdown(raw string) (map[string]string, string) {
+	meta := map[string]string{}
+	text := strings.ReplaceAll(raw, "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return meta, text
+	}
+	end := strings.Index(text[4:], "\n---")
+	if end < 0 {
+		return meta, text
+	}
+	frontmatter := text[4 : 4+end]
+	contentStart := 4 + end + len("\n---")
+	if strings.HasPrefix(text[contentStart:], "\n") {
+		contentStart++
+	}
+	currentListKey := ""
+	for _, rawLine := range strings.Split(frontmatter, "\n") {
+		line := strings.TrimRight(rawLine, " \t")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if currentListKey != "" && strings.HasPrefix(trimmed, "- ") {
+			value := yamlUnquote(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+			if meta[currentListKey] == "" {
+				meta[currentListKey] = value
+			} else {
+				meta[currentListKey] += "\n" + value
+			}
+			continue
+		}
+		currentListKey = ""
+		index := strings.Index(trimmed, ":")
+		if index < 0 {
+			continue
+		}
+		key := strings.TrimSpace(trimmed[:index])
+		value := strings.TrimSpace(trimmed[index+1:])
+		if value == "" {
+			currentListKey = key
+			meta[key] = ""
+			continue
+		}
+		if value == "[]" {
+			meta[key] = ""
+			continue
+		}
+		meta[key] = yamlUnquote(value)
+	}
+	return meta, text[contentStart:]
+}
+
+func parseMemoBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "y":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseMemoList(meta map[string]string, key string) []string {
+	value := strings.TrimSpace(meta[key])
+	if value == "" {
+		return []string{}
+	}
+	return uniqueStrings(strings.Split(value, "\n"))
+}
+
+func memoRelativePath(memo MemoRecord) string {
+	created := parseMemoTime(memo.CreatedAt)
+	if created.IsZero() {
+		created = time.Now()
+	}
+	return filepath.ToSlash(filepath.Join(
+		vaultMemoDirName,
+		fmt.Sprintf("%04d", created.Year()),
+		fmt.Sprintf("%02d", int(created.Month())),
+		sanitizeMemoID(memo.ID)+".md",
+	))
+}
+
+func findMemoFilePath(ctx *VaultContext, id string) (string, error) {
+	targetID := strings.TrimSpace(id)
+	var found string
+	err := filepath.WalkDir(ctx.MemoDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+			return nil
+		}
+		memo, err := readMemoFile(ctx, path)
+		if err != nil {
+			return err
+		}
+		if memo.ID == targetID {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if found == "" {
+		return "", fmt.Errorf("memo not found: %s", targetID)
+	}
+	return found, nil
+}
+
+func safeVaultRelativePath(rootDir string, relativePath string) (string, error) {
+	clean := filepath.Clean(strings.TrimSpace(relativePath))
+	if clean == "." || clean == "" {
+		return "", fmt.Errorf("relative path is required")
+	}
+	if filepath.IsAbs(clean) {
+		return "", fmt.Errorf("absolute path is not allowed")
+	}
+	target := filepath.Join(rootDir, clean)
+	rel, err := filepath.Rel(rootDir, target)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes vault")
+	}
+	return target, nil
+}
+
+func relativeVaultPath(ctx *VaultContext, path string) string {
+	rel, err := filepath.Rel(ctx.RootDir, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+func extractMemoTags(content string) []string {
+	matches := memoTagPattern.FindAllStringSubmatch(content, -1)
+	tags := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			tags = append(tags, match[1])
+		}
+	}
+	return uniqueStrings(tags)
+}
+
+func extractMemoReferences(content string) []string {
+	matches := memoReferencePattern.FindAllStringSubmatch(content, -1)
+	refs := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			ref := strings.TrimSpace(match[1])
+			if ref != "" {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return uniqueStrings(refs)
+}
+
+func extractMemoAssetReferences(content string) []memoAssetReference {
+	seen := map[string]bool{}
+	refs := []memoAssetReference{}
+	markdownRanges := [][2]int{}
+	add := func(value string) {
+		ref, ok := parseMemoAssetReference(value)
+		if !ok {
+			return
+		}
+		id := memoAssetReferenceID(ref)
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		refs = append(refs, ref)
+	}
+
+	for _, match := range memoMarkdownURLPattern.FindAllStringSubmatchIndex(content, -1) {
+		if len(match) >= 4 {
+			markdownRanges = append(markdownRanges, [2]int{match[0], match[1]})
+			add(content[match[2]:match[3]])
+		}
+	}
+	for _, match := range memoAssetTokenPattern.FindAllStringIndex(content, -1) {
+		if len(match) != 2 || memoByteRangeContains(markdownRanges, match[0]) {
+			continue
+		}
+		add(content[match[0]:match[1]])
+	}
+	return refs
+}
+
+func memoByteRangeContains(ranges [][2]int, index int) bool {
+	for _, item := range ranges {
+		if index >= item[0] && index < item[1] {
+			return true
+		}
+	}
+	return false
+}
+
+func parseMemoAssetReference(value string) (memoAssetReference, bool) {
+	text := strings.TrimSpace(value)
+	if strings.HasPrefix(text, "<") && strings.HasSuffix(text, ">") {
+		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(text, "<"), ">"))
+	}
+	if !strings.HasPrefix(strings.ToLower(text), "@assets/") {
+		return memoAssetReference{}, false
+	}
+	parts := strings.SplitN(text[len("@assets/"):], "/", 2)
+	if len(parts) != 2 {
+		return memoAssetReference{}, false
+	}
+	storageID := sanitizeStorageID(parts[0])
+	key := cleanOSSObjectPath(decodeMemoAssetReferenceKey(parts[1]))
+	if storageID == "" || key == "" {
+		return memoAssetReference{}, false
+	}
+	return memoAssetReference{Key: key, StorageID: storageID}, true
+}
+
+func decodeMemoAssetReferenceKey(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "%28", "("), "%29", ")")
+}
+
+func memoAssetReferenceID(ref memoAssetReference) string {
+	return sanitizeStorageID(ref.StorageID) + "/" + cleanOSSObjectPath(ref.Key)
+}
+
+func memoAssetReferencesInOtherMemos(ctx *VaultContext, targetID string) (map[string]bool, error) {
+	refs := map[string]bool{}
+	if err := filepath.WalkDir(ctx.MemoDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+			return nil
+		}
+		memo, err := readMemoFile(ctx, path)
+		if err != nil {
+			return err
+		}
+		if memo.ID == targetID {
+			return nil
+		}
+		for _, ref := range extractMemoAssetReferences(memo.Content) {
+			refs[memoAssetReferenceID(ref)] = true
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+func deleteMemoAssetReferences(parent context.Context, rawSettings json.RawMessage, storePath string, refs []memoAssetReference) MemoDeleteResult {
+	result := MemoDeleteResult{}
+	if len(refs) == 0 {
+		return result
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	settings, err := loadStoredCloudStorageSettings(rawSettings)
+	if err != nil {
+		result.AssetsSkipped = len(refs)
+		result.AssetErrors = append(result.AssetErrors, fmt.Sprintf("read storage settings: %v", err))
+		return result
+	}
+	settings, _, err = prepareCloudStorageSettings(settings, storePath, len(settings.Storages) == 0)
+	if err != nil {
+		result.AssetsSkipped = len(refs)
+		result.AssetErrors = append(result.AssetErrors, fmt.Sprintf("prepare storage settings: %v", err))
+		return result
+	}
+
+	configs := map[string]OSSConfig{}
+	for _, ref := range refs {
+		storageID := sanitizeStorageID(ref.StorageID)
+		cfg, ok := configs[storageID]
+		if !ok {
+			var err error
+			cfg, err = activeOSSConfig(settings, storageID)
+			if err != nil {
+				result.AssetsSkipped++
+				result.AssetErrors = append(result.AssetErrors, fmt.Sprintf("%s: %v", assetRef(storageID, ref.Key), err))
+				continue
+			}
+			configs[storageID] = cfg
+		}
+
+		resp, err := deleteOSSFile(parent, cfg, OSSFileDeleteRequest{Path: ref.Key, StorageID: storageID})
+		if err != nil {
+			result.AssetsSkipped++
+			result.AssetErrors = append(result.AssetErrors, fmt.Sprintf("%s: %v", assetRef(storageID, ref.Key), err))
+			continue
+		}
+		result.AssetsDeleted += ossDeletedCount(resp)
+	}
+	return result
+}
+
+func ossDeletedCount(resp velo.H) int {
+	if resp == nil {
+		return 1
+	}
+	switch value := resp["deleted"].(type) {
+	case int:
+		if value > 0 {
+			return value
+		}
+	case int64:
+		if value > 0 {
+			return int(value)
+		}
+	case float64:
+		if value > 0 {
+			return int(value)
+		}
+	}
+	return 1
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool)
+	next := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		next = append(next, value)
+	}
+	return next
+}
+
+func normalizeMemoVisibility(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "PUBLIC":
+		return "PUBLIC"
+	case "PROTECTED":
+		return "PROTECTED"
+	default:
+		return "PRIVATE"
+	}
+}
+
+func newMemoID() string {
+	return "memo_" + time.Now().UTC().Format("20060102T150405") + "_" + randomVaultSuffix()
+}
+
+func sanitizeMemoID(value string) string {
+	id := strings.TrimSpace(value)
+	if id == "" {
+		return newMemoID()
+	}
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	next := strings.Trim(b.String(), "-")
+	if next == "" {
+		return newMemoID()
+	}
+	return next
+}
+
+func parseMemoTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
+func memoSortTime(memo MemoRecord) time.Time {
+	for _, value := range []string{memo.UpdatedAt, memo.CreatedAt} {
+		if t := parseMemoTime(value); !t.IsZero() {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func yamlQuote(value string) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
+}
+
+func yamlUnquote(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var out string
+	if err := json.Unmarshal([]byte(value), &out); err == nil {
+		return out
+	}
+	return strings.Trim(value, `"'`)
+}
+
 func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
 	appCfg := velo.LoadAppConfig(appConfigData)
 	updateConfig := appCfg.Update.ToUpdaterConfig()
@@ -207,8 +1342,23 @@ func main() {
 	quitOnLastWindowClosed := true
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
-	if Mode == "dev" {
-		b.Store = store.NewWithDir(projectDir())
+	initialPathname := "/vault-picker"
+	if startupVault, err := loadStartupVault(); err != nil {
+		logger.Warn().Msgf("Active vault unavailable: %v", err)
+	} else if startupVault != nil {
+		setActiveVault(startupVault)
+		if _, err := registerActiveVault(startupVault); err != nil {
+			logger.Warn().Msgf("Failed to update active vault registry: %v", err)
+		}
+		b.Store = store.NewWithDir(startupVault.VeloDir)
+		initialPathname = "/desktop"
+		logger.Info().Msgf("Active vault: %s", startupVault.RootDir)
+	} else if dir, err := globalVeloDir(); err == nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			logger.Warn().Msgf("Failed to create global velo dir: %v", err)
+		} else {
+			b.Store = store.NewWithDir(dir)
+		}
 	}
 	logger.Info().Msgf("Store path: %s", b.Store.Path())
 
@@ -218,6 +1368,130 @@ func main() {
 
 	b.Get("/api/app", func(c *velo.BoxContext) interface{} {
 		return c.Ok(velo.H{"version": Version, "velo": velo.GetVersion(), "mode": Mode})
+	})
+
+	b.Get("/api/vault/status", func(c *velo.BoxContext) interface{} {
+		registry, err := loadVaultRegistry()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		dataPath, err := globalVaultDataPath()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		_, statErr := os.Stat(dataPath)
+		return c.Ok(velo.H{
+			"active":         activeVaultSnapshot(),
+			"activeVaultId":  registry.ActiveVaultID,
+			"dataFileExists": statErr == nil,
+			"dataPath":       dataPath,
+			"vaults":         registry.Vaults,
+		})
+	})
+
+	b.Get("/api/vault/select-directory", func(c *velo.BoxContext) interface{} {
+		path, err := selectVaultDirectory()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"path": path})
+	})
+
+	b.Post("/api/vault/open", func(c *velo.BoxContext) interface{} {
+		var req VaultOpenRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		ctx, existing, err := openVaultDirectory(req.Path, true)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		registry, err := registerActiveVault(ctx)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		setActiveVault(ctx)
+		b.Store = store.NewWithDir(ctx.VeloDir)
+		return c.Ok(velo.H{
+			"active":   ctx,
+			"created":  !existing,
+			"existing": existing,
+			"registry": registry,
+		})
+	})
+
+	b.Get("/api/memos", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		memos, err := listVaultMemos(ctx)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"memos": memos})
+	})
+
+	b.Post("/api/memos/create", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoCreateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		memo, err := createVaultMemo(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"memo": memo})
+	})
+
+	b.Post("/api/memos/update", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoUpdateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		memo, err := updateVaultMemo(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"memo": memo})
+	})
+
+	b.Post("/api/memos/delete", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoDeleteRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		cleanupAssets := true
+		if req.CleanupAssets != nil {
+			cleanupAssets = *req.CleanupAssets
+		}
+		result, err := deleteVaultMemoWithOptions(ctx, req.ID, MemoDeleteOptions{
+			CleanupAssets:   cleanupAssets,
+			Parent:          c.Context(),
+			StorageSettings: b.Store.Get(cloudStorageSettingsKey),
+			StorePath:       b.Store.Path(),
+		})
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{
+			"assetErrors":   result.AssetErrors,
+			"assetsDeleted": result.AssetsDeleted,
+			"assetsSkipped": result.AssetsSkipped,
+			"success":       true,
+		})
 	})
 
 	b.Get("/api/window/show", func(c *velo.BoxContext) interface{} {
@@ -784,7 +2058,7 @@ func main() {
 		Name:       "desktop",
 		Title:      "App-Main",
 		FrontendFS: frontend_folder,
-		Pathname:   "/desktop",
+		Pathname:   initialPathname,
 		Width:      1024,
 		Height:     768,
 		OnDragDrop: func(event string, payload string) {
@@ -2267,6 +3541,15 @@ func prepareCloudStorageSettings(settings CloudStorageSettings, storePath string
 			changed = true
 		}
 	}
+	defaultRoot := defaultLocalStorageRoot(storePath)
+	legacyRoot := legacyDefaultLocalStorageRoot(storePath)
+	for i := range settings.Storages {
+		cfg := settings.Storages[i]
+		if cfg.ID == "memo-local" && isLocalOSSConfig(cfg) && samePath(cfg.Endpoint, legacyRoot) && !samePath(cfg.Endpoint, defaultRoot) {
+			settings.Storages[i].Endpoint = defaultRoot
+			changed = true
+		}
+	}
 	if !settings.DefaultsInitialized {
 		settings.DefaultsInitialized = true
 		changed = true
@@ -2303,11 +3586,41 @@ func defaultLocalMemoOSSConfig(storePath string) OSSConfig {
 }
 
 func defaultLocalStorageRoot(storePath string) string {
+	if vault := activeVaultSnapshot(); vault != nil && strings.TrimSpace(vault.RootDir) != "" {
+		return filepath.Join(vault.RootDir, "storage")
+	}
+	if root := vaultRootFromStorePath(storePath); root != "" {
+		return filepath.Join(root, "storage")
+	}
+	base := filepath.Dir(strings.TrimSpace(storePath))
+	if base == "" || base == "." {
+		base = projectDir()
+	}
+	return filepath.Join(base, "storage")
+}
+
+func legacyDefaultLocalStorageRoot(storePath string) string {
 	base := filepath.Dir(strings.TrimSpace(storePath))
 	if base == "" || base == "." {
 		base = projectDir()
 	}
 	return filepath.Join(base, "workdir", "storage")
+}
+
+func vaultRootFromStorePath(storePath string) string {
+	path := strings.TrimSpace(storePath)
+	if path == "" {
+		return ""
+	}
+	configDir := filepath.Dir(path)
+	if filepath.Base(configDir) != vaultConfigDirName {
+		return ""
+	}
+	root := filepath.Dir(configDir)
+	if root == "." || root == string(filepath.Separator) {
+		return ""
+	}
+	return root
 }
 
 func activeOSSConfig(settings CloudStorageSettings, storageID string) (OSSConfig, error) {
