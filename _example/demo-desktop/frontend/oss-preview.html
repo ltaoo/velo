@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSS 文件预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #ededed;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #ffffff;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.58);
+      --border: #dedede;
+      --accent: #0f9f6e;
+      --accent-strong: #08784f;
+      --accent-soft: rgba(15, 159, 110, 0.12);
+      --danger: #c93a32;
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --background: #111111;
+      --BG-0: #151515;
+      --BG-1: #1d1d1d;
+      --BG-2: #191919;
+      --FG-0: rgba(255, 255, 255, 0.86);
+      --FG-1: rgba(255, 255, 255, 0.56);
+      --border: rgba(255, 255, 255, 0.11);
+      --accent: #20b883;
+      --accent-strong: #7ee0bd;
+      --accent-soft: rgba(32, 184, 131, 0.15);
+      --danger: #ff746c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+    }
+
+    body {
+      background: var(--background);
+      color: var(--FG-0);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .preview-shell {
+      background: var(--BG-0);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100%;
+      min-width: 0;
+    }
+
+    .preview-header {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 16px 18px;
+    }
+
+    .preview-title {
+      min-width: 0;
+    }
+
+    .preview-title h1 {
+      font-size: 20px;
+      line-height: 1.2;
+      margin: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview-meta {
+      color: var(--FG-1);
+      font-size: 12px;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .preview-button {
+      align-items: center;
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: inline-flex;
+      justify-content: center;
+      min-height: 32px;
+      padding: 0 11px;
+      white-space: nowrap;
+    }
+
+    .preview-button:hover {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+    }
+
+    .preview-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+
+    .preview-empty {
+      color: var(--FG-1);
+      font-size: 13px;
+      padding: 28px;
+      text-align: center;
+    }
+
+    .preview-body pre {
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      margin: 0;
+      min-height: calc(100vh - 124px);
+      overflow: auto;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .preview-body img,
+    .preview-body object {
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: block;
+      height: calc(100vh - 124px);
+      max-width: 100%;
+      width: 100%;
+    }
+
+    .preview-body img {
+      object-fit: contain;
+    }
+  </style>
+</head>
+
+<body>
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || !saved) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute("data-theme", theme);
+        } else {
+          root.style.colorScheme = saved;
+          root.setAttribute("data-theme", saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
+
+  <div class="preview-shell">
+    <header class="preview-header">
+      <div class="preview-title">
+        <h1 data-preview-title>OSS 文件预览</h1>
+        <div class="preview-meta" data-preview-meta></div>
+      </div>
+      <button class="preview-button" type="button" data-action="copy-path">复制路径</button>
+    </header>
+    <main class="preview-body" data-preview-body>
+      <div class="preview-empty">正在读取预览...</div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var FILE_PREVIEW_API = "/api/oss/files/preview";
+      var params = new URLSearchParams(window.location.search);
+      var storageId = sanitizeStorageId(params.get("storageId") || "");
+      var objectPath = normalizeObjectPath(params.get("objectPath") || "");
+      var title = document.querySelector("[data-preview-title]");
+      var meta = document.querySelector("[data-preview-meta]");
+      var body = document.querySelector("[data-preview-body]");
+
+      document.body.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) return;
+        if (action.dataset.action === "copy-path") {
+          copyText(objectPath);
+        }
+      });
+
+      renderHeader(null);
+      if (!storageId || !objectPath) {
+        renderError("缺少 storageId 或 objectPath");
+        return;
+      }
+      loadPreview();
+
+      function loadPreview() {
+        body.innerHTML = '<div class="preview-empty">正在读取预览...</div>';
+        callStorage(FILE_PREVIEW_API, "POST", {
+          path: objectPath,
+          storageId: storageId,
+        }).then(function (preview) {
+          renderHeader(preview);
+          renderPreview(preview || {});
+        }, function (err) {
+          renderError("预览失败: " + errorMessage(err));
+        });
+      }
+
+      function renderHeader(preview) {
+        var name = (preview && preview.name) || fileNameFromPath(objectPath) || "OSS 文件预览";
+        title.textContent = name;
+        meta.textContent = [storageId, objectPath, preview && preview.mimeType, preview && formatBytes(preview.size)].filter(Boolean).join(" · ");
+      }
+
+      function renderPreview(preview) {
+        var name = preview.name || fileNameFromPath(preview.path || objectPath);
+        if (preview.type === "text") {
+          body.innerHTML = '<pre>' + escapeHTML(preview.content || "") + '</pre>';
+          return;
+        }
+        if (preview.type === "image") {
+          body.innerHTML = '<img alt="' + escapeAttr(name) + '" src="data:' + escapeAttr(preview.mimeType || "application/octet-stream") + ';base64,' + escapeAttr(preview.content || "") + '" />';
+          return;
+        }
+        if (preview.type === "pdf") {
+          body.innerHTML = '<object type="application/pdf" data="data:application/pdf;base64,' + escapeAttr(preview.content || "") + '"></object>';
+          return;
+        }
+        body.innerHTML = '<div class="preview-empty">该文件类型不支持内联预览，大小 ' + escapeHTML(formatBytes(preview.size || 0)) + '</div>';
+      }
+
+      function renderError(message) {
+        body.innerHTML = '<div class="preview-empty" style="color: var(--danger);">' + escapeHTML(message) + '</div>';
+      }
+
+      function callStorage(url, method, args) {
+        return invoke(url, { method: method, args: args }).then(function (resp) {
+          if (!resp || resp.code !== 0) {
+            throw new Error((resp && resp.msg) || "storage request failed");
+          }
+          return resp.data;
+        });
+      }
+
+      function copyText(value) {
+        if (!value) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value);
+          return;
+        }
+        var textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          document.execCommand("copy");
+        } finally {
+          textarea.remove();
+        }
+      }
+
+      function normalizeObjectPath(value) {
+        var parts = String(value || "")
+          .trim()
+          .replace(/\\/g, "/")
+          .replace(/^\/+|\/+$/g, "")
+          .split("/");
+        var clean = [];
+        parts.forEach(function (part) {
+          part = part.trim();
+          if (!part || part === ".") return;
+          if (part === "..") {
+            clean.pop();
+            return;
+          }
+          clean.push(part);
+        });
+        return clean.join("/");
+      }
+
+      function fileNameFromPath(value) {
+        var path = normalizeObjectPath(value);
+        if (!path) return "";
+        var parts = path.split("/");
+        return parts[parts.length - 1] || path;
+      }
+
+      function sanitizeStorageId(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      }
+
+      function formatBytes(value) {
+        var size = Number(value) || 0;
+        var units = ["B", "KB", "MB", "GB", "TB"];
+        var index = 0;
+        while (size >= 1024 && index < units.length - 1) {
+          size = size / 1024;
+          index += 1;
+        }
+        return (index === 0 ? String(size) : size.toFixed(size >= 10 ? 1 : 2)) + " " + units[index];
+      }
+
+      function errorMessage(err) {
+        return (err && err.message) || err || "未知错误";
+      }
+
+      function escapeHTML(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function escapeAttr(value) {
+        return escapeHTML(value).replace(/`/g, "&#96;");
+      }
+    })();
+  </script>
+</body>
+
+</html>

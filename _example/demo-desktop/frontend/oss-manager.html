@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSS 文件管理</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #ededed;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #ffffff;
+      --BG-3: #f0f2f1;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.58);
+      --FG-2: rgba(0, 0, 0, 0.34);
+      --border: #dedede;
+      --accent: #0f9f6e;
+      --accent-strong: #08784f;
+      --accent-soft: rgba(15, 159, 110, 0.12);
+      --danger: #c93a32;
+      --danger-soft: rgba(201, 58, 50, 0.1);
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --background: #111111;
+      --BG-0: #151515;
+      --BG-1: #1d1d1d;
+      --BG-2: #191919;
+      --BG-3: #242424;
+      --FG-0: rgba(255, 255, 255, 0.86);
+      --FG-1: rgba(255, 255, 255, 0.56);
+      --FG-2: rgba(255, 255, 255, 0.34);
+      --border: rgba(255, 255, 255, 0.11);
+      --accent: #20b883;
+      --accent-strong: #7ee0bd;
+      --accent-soft: rgba(32, 184, 131, 0.15);
+      --danger: #ff746c;
+      --danger-soft: rgba(255, 116, 108, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+    }
+
+    body {
+      background: var(--background);
+      color: var(--FG-0);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .manager-shell {
+      background: var(--BG-0);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      height: 100%;
+      min-width: 0;
+    }
+
+    .manager-header {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 16px 18px;
+    }
+
+    .manager-title {
+      min-width: 0;
+    }
+
+    .manager-title h1 {
+      font-size: 20px;
+      line-height: 1.2;
+      margin: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-meta {
+      color: var(--FG-1);
+      font-size: 12px;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-storage {
+      align-items: center;
+      display: inline-flex;
+      gap: 8px;
+      min-width: 280px;
+    }
+
+    .manager-select,
+    .manager-input {
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      min-height: 34px;
+      outline: 0;
+      padding: 0 10px;
+      width: 100%;
+    }
+
+    .manager-select:focus,
+    .manager-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .manager-toolbar {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 18px;
+    }
+
+    .manager-button {
+      align-items: center;
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: inline-flex;
+      gap: 8px;
+      justify-content: center;
+      min-height: 32px;
+      padding: 0 11px;
+      white-space: nowrap;
+    }
+
+    .manager-button.is-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .manager-button.is-danger {
+      color: var(--danger);
+    }
+
+    .manager-button:disabled {
+      cursor: default;
+      opacity: 0.52;
+    }
+
+    .manager-message {
+      color: var(--FG-1);
+      flex: 1 1 220px;
+      font-size: 12px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-path {
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-1);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      min-height: 32px;
+      overflow-wrap: anywhere;
+      padding: 7px 10px;
+      width: 100%;
+    }
+
+    .manager-content {
+      display: grid;
+      gap: 0;
+      grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
+      min-width: 0;
+    }
+
+    .manager-list-pane {
+      min-height: 0;
+      min-width: 0;
+      overflow: auto;
+      padding: 16px 18px;
+    }
+
+    .manager-list {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: visible;
+      width: 100%;
+    }
+
+    .manager-empty {
+      color: var(--FG-1);
+      font-size: 13px;
+      padding: 22px;
+      text-align: center;
+    }
+
+    .manager-row {
+      align-items: center;
+      background: var(--BG-2);
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 0;
+      grid-template-columns: minmax(220px, 1fr) 108px 108px 148px 132px;
+      min-height: 44px;
+    }
+
+    .manager-row:first-child {
+      border-top: 0;
+    }
+
+    .manager-row.is-header {
+      background: var(--BG-1);
+      color: var(--FG-1);
+      font-size: 12px;
+      font-weight: 700;
+      min-height: 34px;
+    }
+
+    .manager-row>.manager-name,
+    .manager-row>.manager-cell,
+    .manager-row>.manager-row-actions,
+    .manager-row.is-header>span {
+      border-left: 1px solid var(--border);
+      min-height: 44px;
+      padding: 7px 10px;
+    }
+
+    .manager-row>:first-child {
+      border-left: 0;
+    }
+
+    .manager-row.is-header>span {
+      align-items: center;
+      display: flex;
+      min-height: 34px;
+      padding-bottom: 6px;
+      padding-top: 6px;
+    }
+
+    .manager-name {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      color: var(--FG-0);
+      display: inline-flex;
+      gap: 8px;
+      min-width: 0;
+      padding: 7px 10px;
+      text-align: left;
+    }
+
+    .manager-name:hover {
+      color: var(--accent-strong);
+    }
+
+    .manager-kind {
+      color: var(--FG-2);
+      flex: 0 0 auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      width: 28px;
+    }
+
+    .manager-name-text,
+    .manager-cell {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-cell {
+      align-items: center;
+      color: var(--FG-1);
+      display: flex;
+      font-size: 12px;
+    }
+
+    .manager-row-actions {
+      align-items: center;
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+      min-width: 0;
+      overflow: visible;
+      position: relative;
+    }
+
+    .manager-action {
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-1);
+      min-height: 28px;
+      padding: 0 8px;
+      white-space: nowrap;
+    }
+
+    .manager-action:hover {
+      color: var(--accent-strong);
+    }
+
+    .manager-action.is-danger {
+      color: var(--danger);
+    }
+
+    .manager-dropdown {
+      display: inline-flex;
+      position: relative;
+    }
+
+    .manager-menu {
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
+      display: grid;
+      gap: 2px;
+      min-width: 148px;
+      padding: 4px;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 20;
+    }
+
+    .manager-menu[hidden] {
+      display: none;
+    }
+
+    .manager-menu-item {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      color: var(--FG-0);
+      display: flex;
+      min-height: 30px;
+      padding: 0 9px;
+      text-align: left;
+      white-space: nowrap;
+      width: 100%;
+    }
+
+    .manager-menu-item:hover {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .manager-menu-item.is-danger {
+      color: var(--danger);
+    }
+
+    .manager-menu-item.is-danger:hover {
+      background: var(--danger-soft);
+    }
+
+    .manager-preview {
+      display: grid;
+      gap: 10px;
+    }
+
+    .manager-preview-head {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .manager-preview-title {
+      font-weight: 700;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .manager-preview pre {
+      background: var(--BG-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      margin: 0;
+      max-height: calc(100vh - 190px);
+      overflow: auto;
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .manager-preview img,
+    .manager-preview object {
+      background: var(--BG-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      max-height: calc(100vh - 190px);
+      max-width: 100%;
+      width: 100%;
+    }
+
+    .manager-preview img {
+      object-fit: contain;
+    }
+
+    @media (max-width: 760px) {
+      .manager-header,
+      .manager-content {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .manager-storage {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .manager-row,
+      .manager-row.is-header {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .manager-row.is-header {
+        display: none;
+      }
+
+      .manager-row>.manager-name,
+      .manager-row>.manager-cell,
+      .manager-row>.manager-row-actions {
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .manager-row>:first-child {
+        border-top: 0;
+      }
+
+      .manager-row-actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || !saved) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute("data-theme", theme);
+        } else {
+          root.style.colorScheme = saved;
+          root.setAttribute("data-theme", saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
+
+  <div class="manager-shell">
+    <header class="manager-header">
+      <div class="manager-title">
+        <h1 data-manager-title>OSS 文件管理</h1>
+        <div class="manager-meta" data-manager-meta></div>
+      </div>
+      <label class="manager-storage">
+        <select class="manager-select" data-storage-select></select>
+      </label>
+    </header>
+
+    <div class="manager-toolbar">
+      <button class="manager-button" type="button" data-action="file-root">根目录</button>
+      <button class="manager-button" type="button" data-action="file-prefix">Path Prefix</button>
+      <button class="manager-button" type="button" data-action="file-up">上级</button>
+      <button class="manager-button" type="button" data-action="file-refresh">刷新</button>
+      <button class="manager-button" type="button" data-action="file-mkdir">新建文件夹</button>
+      <button class="manager-button is-primary" type="button" data-action="file-upload">上传文件</button>
+      <div class="manager-message" data-manager-message></div>
+      <div class="manager-path" data-file-path>/</div>
+    </div>
+
+    <main class="manager-content">
+      <section class="manager-list-pane">
+        <div class="manager-list" data-file-list>
+          <div class="manager-empty">正在读取配置...</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
+      var STORAGE_API = "/api/settings/cloud-storage";
+      var FILE_LIST_API = "/api/oss/files/list";
+      var FILE_MKDIR_API = "/api/oss/files/mkdir";
+      var FILE_DELETE_API = "/api/oss/files/delete";
+      var FILE_UPLOAD_API = "/api/oss/files/upload";
+      var FILE_PICK_API = "/api/file/select-data-url";
+      var OPEN_WINDOW_API = "/api/open_window";
+
+      var title = document.querySelector("[data-manager-title]");
+      var meta = document.querySelector("[data-manager-meta]");
+      var storageSelect = document.querySelector("[data-storage-select]");
+      var message = document.querySelector("[data-manager-message]");
+      var filePath = document.querySelector("[data-file-path]");
+      var fileList = document.querySelector("[data-file-list]");
+      var requestedStorageId = sanitizeStorageId(new URLSearchParams(window.location.search).get("storageId") || "");
+      var state = {
+        error: "",
+        items: [],
+        loadedStorageId: "",
+        loading: false,
+        path: "",
+        openMenuId: "",
+        selectedStorageId: requestedStorageId,
+        settings: normalizeSettings(null),
+      };
+
+      loadConfig().then(function (settings) {
+        state.settings = normalizeSettings(settings);
+        ensureSelectedStorage();
+        render();
+        loadFiles(selectedStoragePrefix());
+      }, function (err) {
+        state.error = "读取配置失败: " + errorMessage(err);
+        render();
+      });
+
+      document.body.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) {
+          if (!event.target.closest("[data-menu-content]") && state.openMenuId) {
+            state.openMenuId = "";
+            render();
+          }
+          return;
+        }
+        if (action.dataset.action === "menu-toggle") {
+          state.openMenuId = state.openMenuId === action.dataset.menuId ? "" : action.dataset.menuId;
+          render();
+          return;
+        }
+        state.openMenuId = "";
+        if (action.dataset.action === "file-root") {
+          loadFiles("");
+          return;
+        }
+        if (action.dataset.action === "file-prefix") {
+          loadFiles(selectedStoragePrefix());
+          return;
+        }
+        if (action.dataset.action === "file-up") {
+          loadFiles(parentObjectPath(state.path));
+          return;
+        }
+        if (action.dataset.action === "file-refresh") {
+          loadFiles(state.path);
+          return;
+        }
+        if (action.dataset.action === "file-upload") {
+          uploadFileToCurrentPath();
+          return;
+        }
+        if (action.dataset.action === "file-mkdir") {
+          createFolderInCurrentPath();
+          return;
+        }
+        if (action.dataset.action === "file-open-folder") {
+          loadFiles(action.dataset.filePath || "");
+          return;
+        }
+        if (action.dataset.action === "file-preview") {
+          openPreviewWindow(action.dataset.filePath || "");
+          return;
+        }
+        if (action.dataset.action === "file-open-url") {
+          openURL(action.dataset.fileUrl || "");
+          return;
+        }
+        if (action.dataset.action === "file-copy") {
+          copyText(action.dataset.copyValue || "", action.dataset.copyLabel || "内容");
+          return;
+        }
+        if (action.dataset.action === "file-delete") {
+          deleteFile(action.dataset.filePath || "", action.dataset.fileDir === "true");
+        }
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && state.openMenuId) {
+          state.openMenuId = "";
+          render();
+        }
+      });
+
+      storageSelect.addEventListener("change", function () {
+        state.selectedStorageId = sanitizeStorageId(storageSelect.value);
+        state.items = [];
+        state.loadedStorageId = "";
+        state.openMenuId = "";
+        state.error = "";
+        render();
+        loadFiles(selectedStoragePrefix());
+      });
+
+      function loadConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_API, "GET").then(function (data) {
+            if (data && data.found && data.config) {
+              return normalizeSettings(data.config);
+            }
+            return normalizeSettings(loadLocalConfig());
+          }, function () {
+            return loadLocalConfig();
+          });
+        }
+        return Promise.resolve(loadLocalConfig());
+      }
+
+      function loadLocalConfig() {
+        try {
+          return normalizeSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
+        } catch (_) {
+          return normalizeSettings(null);
+        }
+      }
+
+      function callStorage(url, method, args) {
+        return invoke(url, { method: method, args: args }).then(function (resp) {
+          if (!resp || resp.code !== 0) {
+            throw new Error((resp && resp.msg) || "storage request failed");
+          }
+          return resp.data;
+        });
+      }
+
+      function canUseNativeStorage() {
+        return typeof invoke === "function";
+      }
+
+      function render() {
+        renderStorageSelect();
+        renderHeader();
+        renderControls();
+        renderFileList();
+      }
+
+      function renderStorageSelect() {
+        if (!state.settings.storages.length) {
+          storageSelect.innerHTML = '<option value="">暂无存储</option>';
+          storageSelect.disabled = true;
+          return;
+        }
+        storageSelect.disabled = false;
+        storageSelect.innerHTML = state.settings.storages.map(function (storage) {
+          return '<option value="' + escapeAttr(storage.id) + '">' + escapeHTML(storage.name || storage.id) + '</option>';
+        }).join("");
+        storageSelect.value = state.selectedStorageId;
+      }
+
+      function renderHeader() {
+        var storage = selectedStorage();
+        if (!storage) {
+          title.textContent = "OSS 文件管理";
+          meta.textContent = "未配置";
+          return;
+        }
+        title.textContent = storage.name || storage.id;
+        meta.textContent = [storage.id, providerLabel(storage.provider), storage.bucket, storage.publicBaseUrl].filter(Boolean).join(" · ");
+      }
+
+      function renderControls() {
+        var storage = selectedStorage();
+        var missing = missingFileAccessFields(storage);
+        var disabled = state.loading || !storage || missing.length > 0 || !canUseNativeStorage();
+        Array.prototype.forEach.call(document.querySelectorAll("[data-action]"), function (button) {
+          button.disabled = disabled;
+        });
+        filePath.textContent = state.path ? "/" + state.path : "/";
+      }
+
+      function renderFileList() {
+        var storage = selectedStorage();
+        var missing = missingFileAccessFields(storage);
+        if (!storage) {
+          fileList.innerHTML = '<div class="manager-empty">暂无可管理的存储</div>';
+          return;
+        }
+        if (!canUseNativeStorage()) {
+          fileList.innerHTML = '<div class="manager-empty">当前运行环境不支持文件管理</div>';
+          return;
+        }
+        if (missing.length) {
+          fileList.innerHTML = '<div class="manager-empty">配置缺少: ' + escapeHTML(missing.join(", ")) + '</div>';
+          return;
+        }
+        if (state.loading) {
+          fileList.innerHTML = '<div class="manager-empty">正在读取文件列表...</div>';
+          return;
+        }
+        if (state.error) {
+          fileList.innerHTML = '<div class="manager-empty">' + escapeHTML(state.error) + '</div>';
+          return;
+        }
+        if (state.loadedStorageId !== storage.id) {
+          fileList.innerHTML = '<div class="manager-empty">点击刷新读取当前 Bucket</div>';
+          return;
+        }
+        if (!state.items.length) {
+          fileList.innerHTML = '<div class="manager-empty">当前目录为空</div>';
+          return;
+        }
+        fileList.innerHTML = [
+          '<div class="manager-row is-header">',
+          '<span>名称</span><span>类型</span><span>大小</span><span>修改时间</span><span></span>',
+          '</div>',
+          state.items.map(renderFileRow).join(""),
+        ].join("");
+      }
+
+      function renderFileRow(item) {
+        item = normalizeFileItem(item);
+        var isDir = item.isDir;
+        var path = item.path;
+        var name = item.name || path || "/";
+        var type = isDir ? "folder" : (item.type || "file");
+        var action = isDir ? "file-open-folder" : "file-preview";
+        var menuId = menuIdForPath(path);
+        var actions = [];
+        if (!isDir) {
+          actions.push('<button class="manager-action" type="button" data-action="file-preview" data-file-path="' + escapeAttr(path) + '">预览</button>');
+        }
+        actions.push(renderMoreMenu(item, menuId));
+        return [
+          '<div class="manager-row">',
+          '<button class="manager-name" type="button" data-action="' + action + '" data-file-path="' + escapeAttr(path) + '">',
+          '<span class="manager-kind" aria-hidden="true">' + (isDir ? "DIR" : "FILE") + '</span>',
+          '<span class="manager-name-text">' + escapeHTML(name) + '</span>',
+          '</button>',
+          '<span class="manager-cell">' + escapeHTML(typeLabel(type)) + '</span>',
+          '<span class="manager-cell">' + (isDir ? "-" : escapeHTML(formatBytes(item.size))) + '</span>',
+          '<span class="manager-cell">' + escapeHTML(formatDate(item.modTime)) + '</span>',
+          '<span class="manager-row-actions">' + actions.join("") + '</span>',
+          '</div>',
+        ].join("");
+      }
+
+      function renderMoreMenu(item, menuId) {
+        var isDir = item.isDir;
+        var path = item.path;
+        var menuItems = [];
+        if (!isDir && item.url) {
+          menuItems.push('<button class="manager-menu-item" type="button" data-action="file-open-url" data-file-url="' + escapeAttr(item.url) + '">打开</button>');
+          menuItems.push('<button class="manager-menu-item" type="button" data-action="file-copy" data-copy-label="URL" data-copy-value="' + escapeAttr(item.url) + '">复制 URL</button>');
+        }
+        if (!isDir && item.ref) {
+          menuItems.push('<button class="manager-menu-item" type="button" data-action="file-copy" data-copy-label="@assets" data-copy-value="' + escapeAttr(item.ref) + '">复制引用</button>');
+        }
+        menuItems.push('<button class="manager-menu-item is-danger" type="button" data-action="file-delete" data-file-dir="' + (isDir ? "true" : "false") + '" data-file-path="' + escapeAttr(path) + '">删除</button>');
+        return [
+          '<span class="manager-dropdown">',
+          '<button class="manager-action" type="button" aria-haspopup="menu" aria-expanded="' + (state.openMenuId === menuId ? "true" : "false") + '" data-action="menu-toggle" data-menu-id="' + escapeAttr(menuId) + '">更多</button>',
+          '<span class="manager-menu" role="menu" data-menu-content data-menu-id="' + escapeAttr(menuId) + '"' + (state.openMenuId === menuId ? "" : " hidden") + '>',
+          menuItems.join(""),
+          '</span>',
+          '</span>',
+        ].join("");
+      }
+
+      function loadFiles(path) {
+        var storage = selectedStorage();
+        var missing = missingFileAccessFields(storage);
+        if (!storage || !storage.id) {
+          state.error = "请选择一个存储";
+          render();
+          return Promise.resolve();
+        }
+        if (missing.length) {
+          state.error = "缺少: " + missing.join(", ");
+          render();
+          return Promise.resolve();
+        }
+        state.loading = true;
+        state.error = "";
+        state.openMenuId = "";
+        state.path = normalizeObjectPath(path);
+        render();
+        return callStorage(FILE_LIST_API, "POST", {
+          path: state.path,
+          storageId: storage.id,
+        }).then(function (data) {
+          state.items = (Array.isArray(data && data.list) ? data.list : []).map(normalizeFileItem);
+          state.loadedStorageId = storage.id;
+          state.path = normalizeObjectPath((data && data.path) || state.path);
+          state.error = "";
+        }, function (err) {
+          state.items = [];
+          state.loadedStorageId = storage.id;
+          state.error = "读取文件列表失败: " + errorMessage(err);
+        }).finally(function () {
+          state.loading = false;
+          render();
+        });
+      }
+
+      function openPreviewWindow(path) {
+        var storage = selectedStorage();
+        if (!storage || !storage.id || !path) return;
+        state.openMenuId = "";
+        render();
+        return callStorage(OPEN_WINDOW_API + "?pathname=/oss-preview&storageId=" + encodeURIComponent(storage.id) + "&objectPath=" + encodeURIComponent(path), "GET").then(function () {
+          setMessage("已打开预览窗口", "ready");
+        }, function (err) {
+          setMessage("打开预览失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function uploadFileToCurrentPath() {
+        var storage = selectedStorage();
+        if (!storage || !storage.id) return;
+        state.loading = true;
+        state.error = "";
+        state.openMenuId = "";
+        render();
+        callStorage(FILE_PICK_API, "GET").then(function (data) {
+          if (!data || !data.file) throw new Error("未选择文件");
+          return callStorage(FILE_UPLOAD_API, "POST", {
+            content_base64: data.file.dataURL,
+            name: data.file.name,
+            path: state.path,
+            storageId: storage.id,
+            type: data.file.type,
+          });
+        }).then(function () {
+          setMessage("文件已上传", "ready");
+          return loadFiles(state.path);
+        }, function (err) {
+          state.error = "上传失败: " + errorMessage(err);
+        }).finally(function () {
+          state.loading = false;
+          render();
+        });
+      }
+
+      function createFolderInCurrentPath() {
+        var storage = selectedStorage();
+        if (!storage || !storage.id) return;
+        var name = window.prompt("文件夹名称");
+        if (!name) return;
+        state.loading = true;
+        state.error = "";
+        state.openMenuId = "";
+        render();
+        callStorage(FILE_MKDIR_API, "POST", {
+          name: name,
+          path: state.path,
+          storageId: storage.id,
+        }).then(function () {
+          setMessage("文件夹已创建", "ready");
+          return loadFiles(state.path);
+        }, function (err) {
+          state.error = "创建文件夹失败: " + errorMessage(err);
+        }).finally(function () {
+          state.loading = false;
+          render();
+        });
+      }
+
+      function deleteFile(path, isDir) {
+        var storage = selectedStorage();
+        if (!storage || !storage.id || !path) return;
+        var label = isDir ? "文件夹" : "文件";
+        if (!window.confirm("删除" + label + " " + path + "?")) return;
+        state.loading = true;
+        state.error = "";
+        state.openMenuId = "";
+        render();
+        callStorage(FILE_DELETE_API, "POST", {
+          isDir: Boolean(isDir),
+          path: path,
+          storageId: storage.id,
+        }).then(function () {
+          setMessage("已删除", "warning");
+          return loadFiles(state.path);
+        }, function (err) {
+          state.error = "删除失败: " + errorMessage(err);
+        }).finally(function () {
+          state.loading = false;
+          render();
+        });
+      }
+
+      function selectedStorage() {
+        return state.settings.storages.find(function (storage) {
+          return storage.id === state.selectedStorageId;
+        }) || null;
+      }
+
+      function ensureSelectedStorage() {
+        if (state.settings.storages.some(function (storage) { return storage.id === state.selectedStorageId; })) {
+          return;
+        }
+        state.selectedStorageId = state.settings.activeStorageId || ((state.settings.storages[0] && state.settings.storages[0].id) || "");
+      }
+
+      function selectedStoragePrefix() {
+        var storage = selectedStorage();
+        return normalizeObjectPath(storage && storage.pathPrefix);
+      }
+
+      function missingFileAccessFields(config) {
+        if (!config) {
+          return ["Storage ID", "Endpoint", "Bucket", "Access Key ID", "Secret Access Key"];
+        }
+        var labels = [];
+        if (!config.id) labels.push("Storage ID");
+        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
+        if (!config.bucket) labels.push("Bucket");
+        if (!isLocalProvider(config.provider)) {
+          if (!config.accessKeyId) labels.push("Access Key ID");
+          if (!config.secretAccessKey) labels.push("Secret Access Key");
+        }
+        return labels;
+      }
+
+      function normalizeFileItem(item) {
+        var raw = item && typeof item === "object" ? item : {};
+        var path = normalizeObjectPath(firstValue(raw, ["path", "Path", "key", "Key", "id", "ID", "prefix", "Prefix"]));
+        var isDirValue = firstValue(raw, ["isDir", "is_dir", "IsDir", "isDirectory", "IsDirectory"]);
+        var isDir = isDirValue === true || isDirValue === "true" || String(firstValue(raw, ["type", "Type"])).toLowerCase() === "folder";
+        if (!isDir && String(firstValue(raw, ["key", "Key", "prefix", "Prefix", "path", "Path"])).endsWith("/")) {
+          isDir = true;
+        }
+        var name = String(firstValue(raw, ["name", "Name", "fileName", "filename"]) || "").trim();
+        if (!name) {
+          name = fileNameFromPath(path);
+        }
+        var size = numberValue(firstValue(raw, ["size", "Size", "contentLength", "ContentLength", "content_length"]));
+        return {
+          id: String(firstValue(raw, ["id", "ID"]) || path),
+          isDir: isDir,
+          modTime: String(firstValue(raw, ["modTime", "mod_time", "ModTime", "lastModified", "LastModified"]) || ""),
+          name: name,
+          path: path,
+          ref: String(firstValue(raw, ["ref", "Ref"]) || ""),
+          size: size,
+          type: String(firstValue(raw, ["type", "Type", "contentType", "ContentType"]) || (isDir ? "folder" : "file")),
+          url: String(firstValue(raw, ["url", "URL"]) || ""),
+        };
+      }
+
+      function firstValue(source, keys) {
+        for (var i = 0; i < keys.length; i += 1) {
+          if (Object.prototype.hasOwnProperty.call(source, keys[i]) && source[keys[i]] !== null && source[keys[i]] !== undefined) {
+            return source[keys[i]];
+          }
+        }
+        return "";
+      }
+
+      function numberValue(value) {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        var parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+
+      function normalizeSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var storages;
+        if (Array.isArray(raw.storages)) {
+          storages = raw.storages.map(normalizeProfile).filter(function (storage) {
+            return storage.id;
+          });
+        } else if (hasLegacyConfig(raw)) {
+          storages = [normalizeProfile(Object.assign({ id: "default", name: "默认存储" }, raw), 0)];
+        } else {
+          storages = [];
+        }
+
+        var used = Object.create(null);
+        storages = storages.map(function (storage, index) {
+          var baseId = sanitizeStorageId(storage.id || storage.name || storage.provider || storage.bucket || "storage-" + (index + 1));
+          if (!baseId) baseId = "storage-" + (index + 1);
+          used[baseId] = (used[baseId] || 0) + 1;
+          if (used[baseId] > 1) baseId = baseId + "-" + used[baseId];
+          storage.id = baseId;
+          if (!storage.name) storage.name = storage.bucket || storage.provider || storage.id;
+          return storage;
+        });
+
+        var activeStorageId = sanitizeStorageId(raw.activeStorageId || "");
+        if (!storages.some(function (storage) { return storage.id === activeStorageId; })) {
+          var enabled = storages.find(function (storage) { return storage.enabled; });
+          activeStorageId = enabled ? enabled.id : ((storages[0] && storages[0].id) || "");
+        }
+        return {
+          activeStorageId: activeStorageId,
+          defaultsInitialized: Boolean(raw.defaultsInitialized),
+          storages: storages,
+        };
+      }
+
+      function normalizeProfile(profile) {
+        var raw = profile && typeof profile === "object" ? profile : {};
+        return {
+          accessKeyId: String(raw.accessKeyId || "").trim(),
+          bucket: String(raw.bucket || "").trim(),
+          enabled: Boolean(raw.enabled),
+          endpoint: String(raw.endpoint || "").trim(),
+          forcePathStyle: raw.forcePathStyle !== false,
+          id: sanitizeStorageId(raw.id || ""),
+          name: String(raw.name || "").trim(),
+          pathPrefix: String(raw.pathPrefix || "").trim(),
+          provider: String(raw.provider || "s3").trim() || "s3",
+          publicBaseUrl: String(raw.publicBaseUrl || "").trim(),
+          region: String(raw.region || "").trim(),
+          secretAccessKey: String(raw.secretAccessKey || ""),
+          sessionToken: String(raw.sessionToken || "").trim(),
+          useSSL: raw.useSSL !== false,
+        };
+      }
+
+      function hasLegacyConfig(config) {
+        return Boolean(config && typeof config === "object" && (
+          config.enabled ||
+          config.endpoint ||
+          config.bucket ||
+          config.accessKeyId ||
+          config.secretAccessKey ||
+          config.sessionToken ||
+          config.region ||
+          config.pathPrefix ||
+          config.publicBaseUrl
+        ));
+      }
+
+      function normalizeObjectPath(value) {
+        var parts = String(value || "")
+          .trim()
+          .replace(/\\/g, "/")
+          .replace(/^\/+|\/+$/g, "")
+          .split("/");
+        var clean = [];
+        parts.forEach(function (part) {
+          part = part.trim();
+          if (!part || part === ".") return;
+          if (part === "..") {
+            clean.pop();
+            return;
+          }
+          clean.push(part);
+        });
+        return clean.join("/");
+      }
+
+      function parentObjectPath(value) {
+        var path = normalizeObjectPath(value);
+        if (!path) return "";
+        var parts = path.split("/");
+        parts.pop();
+        return parts.join("/");
+      }
+
+      function fileNameFromPath(value) {
+        var path = normalizeObjectPath(value);
+        if (!path) return "/";
+        var parts = path.split("/");
+        return parts[parts.length - 1] || path;
+      }
+
+      function menuIdForPath(value) {
+        var path = normalizeObjectPath(value) || "root";
+        return "menu-" + path.replace(/[^a-z0-9_-]+/gi, "-");
+      }
+
+      function typeLabel(type) {
+        if (!type) return "file";
+        if (type === "folder") return "folder";
+        if (type.indexOf("/") >= 0) return type.split("/")[1] || type;
+        return type;
+      }
+
+      function formatBytes(value) {
+        var size = Number(value) || 0;
+        var units = ["B", "KB", "MB", "GB", "TB"];
+        var index = 0;
+        while (size >= 1024 && index < units.length - 1) {
+          size = size / 1024;
+          index += 1;
+        }
+        return (index === 0 ? String(size) : size.toFixed(size >= 10 ? 1 : 2)) + " " + units[index];
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        var date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString("zh-CN", {
+          hour12: false,
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      function openURL(url) {
+        if (!url) return;
+        window.open(url, "_blank", "noopener");
+      }
+
+      function copyText(value, label) {
+        if (!value) return;
+        var done = function () {
+          setMessage("已复制 " + label, "ready");
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(done, function () {
+            copyTextFallback(value);
+            done();
+          });
+          return;
+        }
+        copyTextFallback(value);
+        done();
+      }
+
+      function copyTextFallback(value) {
+        var textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          document.execCommand("copy");
+        } finally {
+          textarea.remove();
+        }
+      }
+
+      function providerLabel(provider) {
+        var labels = {
+          "aliyun-oss": "Aliyun OSS",
+          "aws-s3": "AWS S3",
+          "custom": "Custom",
+          "local": "Local",
+          "local-oss": "Local",
+          "qiniu-kodo": "Qiniu Kodo",
+          "s3": "S3",
+          "tencent-cos": "Tencent COS",
+        };
+        return labels[provider] || provider;
+      }
+
+      function isLocalProvider(provider) {
+        var value = String(provider || "").trim().toLowerCase();
+        return value === "local" || value === "local-oss";
+      }
+
+      function sanitizeStorageId(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      }
+
+      function setMessage(text, tone) {
+        message.textContent = text || "";
+        message.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
+      }
+
+      function errorMessage(err) {
+        return (err && err.message) || err || "未知错误";
+      }
+
+      function escapeHTML(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function escapeAttr(value) {
+        return escapeHTML(value).replace(/`/g, "&#96;");
+      }
+    })();
+  </script>
+</body>
+
+</html>

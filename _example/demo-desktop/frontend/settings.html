@@ -198,7 +198,7 @@
     .settings-form {
       display: grid;
       gap: 14px;
-      max-width: 760px;
+      max-width: 960px;
     }
 
     .settings-section {
@@ -211,6 +211,106 @@
     .settings-section:first-child {
       border-top: 0;
       padding-top: 0;
+    }
+
+    .settings-profile-head {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+    }
+
+    .settings-profile-title {
+      color: var(--FG-1);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .settings-storage-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .settings-storage-row {
+      align-items: stretch;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .settings-storage-item {
+      align-items: center;
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: grid;
+      gap: 4px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      min-height: 48px;
+      padding: 8px 10px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .settings-storage-manage {
+      align-items: center;
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: inline-flex;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 12px;
+      white-space: nowrap;
+    }
+
+    .settings-storage-manage:hover {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+    }
+
+    .settings-storage-actions {
+      display: inline-grid;
+      gap: 8px;
+      grid-auto-flow: column;
+    }
+
+    .settings-storage-item.is-selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
+    .settings-storage-item-main {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .settings-storage-item-name {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-storage-item-meta {
+      color: var(--FG-1);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-storage-badge {
+      background: var(--accent-soft);
+      border-radius: 999px;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 8px;
+      white-space: nowrap;
     }
 
     .settings-section-head {
@@ -391,8 +491,21 @@
         grid-template-columns: minmax(0, 1fr);
       }
 
+      .settings-profile-head {
+        align-items: stretch;
+        display: grid;
+      }
+
       .settings-actions {
         justify-content: stretch;
+      }
+
+      .settings-storage-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .settings-storage-actions {
+        grid-auto-flow: row;
       }
 
       .settings-button {
@@ -451,129 +564,22 @@
         </div>
       </header>
 
-      <form class="settings-form" data-cloud-form>
+      <div class="settings-form" data-settings-panel>
         <section class="settings-section">
-          <div class="settings-section-head">
-            <span class="settings-section-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"></path><path d="M3 8h18"></path><path d="M3 16h18"></path></svg>
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">存储配置</div>
+            <span>
+              <button class="settings-button is-secondary" type="button" data-action="add-storage">新增远端</button>
+              <button class="settings-button is-secondary" type="button" data-action="add-local-storage">新增本地</button>
             </span>
-            <div class="settings-section-title">连接</div>
           </div>
-          <div class="settings-grid">
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>存储类型</span>
-                <span class="settings-required">必填</span>
-              </span>
-              <select class="settings-select" name="provider">
-                <option value="s3">S3 Compatible</option>
-                <option value="aws-s3">AWS S3</option>
-                <option value="aliyun-oss">Aliyun OSS</option>
-                <option value="tencent-cos">Tencent COS</option>
-                <option value="qiniu-kodo">Qiniu Kodo</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>Region</span>
-              </span>
-              <input class="settings-input" name="region" placeholder="us-east-1" autocomplete="off" />
-            </label>
-            <label class="settings-field is-wide">
-              <span class="settings-label-row">
-                <span>Endpoint</span>
-                <span class="settings-required">必填</span>
-              </span>
-              <input class="settings-input" name="endpoint" placeholder="https://s3.example.com" autocomplete="off" />
-            </label>
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>Bucket</span>
-                <span class="settings-required">必填</span>
-              </span>
-              <input class="settings-input" name="bucket" placeholder="memo-assets" autocomplete="off" />
-            </label>
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>Path Prefix</span>
-              </span>
-              <input class="settings-input" name="pathPrefix" placeholder="uploads/" autocomplete="off" />
-            </label>
-            <label class="settings-field is-wide">
-              <span class="settings-label-row">
-                <span>Public Base URL</span>
-              </span>
-              <input class="settings-input" name="publicBaseUrl" placeholder="https://cdn.example.com" autocomplete="off" />
-            </label>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <div class="settings-section-head">
-            <span class="settings-section-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
-            </span>
-            <div class="settings-section-title">凭证</div>
-          </div>
-          <div class="settings-grid">
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>Access Key ID</span>
-                <span class="settings-required">必填</span>
-              </span>
-              <input class="settings-input" name="accessKeyId" autocomplete="off" />
-            </label>
-            <label class="settings-field">
-              <span class="settings-label-row">
-                <span>Secret Access Key</span>
-                <span class="settings-required">必填</span>
-              </span>
-              <span class="settings-secret">
-                <input class="settings-input" name="secretAccessKey" type="password" autocomplete="new-password" />
-                <button class="settings-button is-secondary" type="button" data-action="toggle-secret">显示</button>
-              </span>
-            </label>
-            <label class="settings-field is-wide">
-              <span class="settings-label-row">
-                <span>Session Token</span>
-              </span>
-              <textarea class="settings-textarea" name="sessionToken" autocomplete="off"></textarea>
-            </label>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <div class="settings-section-head">
-            <span class="settings-section-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
-            </span>
-            <div class="settings-section-title">选项</div>
-          </div>
-          <div class="settings-checks">
-            <label class="settings-check">
-              <input type="checkbox" name="enabled" />
-              <span>启用</span>
-            </label>
-            <label class="settings-check">
-              <input type="checkbox" name="useSSL" />
-              <span>SSL</span>
-            </label>
-            <label class="settings-check">
-              <input type="checkbox" name="forcePathStyle" />
-              <span>Path Style</span>
-            </label>
-          </div>
+          <div class="settings-storage-list" data-storage-list></div>
         </section>
 
         <div class="settings-actions">
-          <button class="settings-button is-danger" type="button" data-action="delete-config">删除配置</button>
           <div class="settings-message" data-settings-message></div>
-          <button class="settings-button is-secondary" type="button" data-action="reset-defaults">重置</button>
-          <button class="settings-button is-secondary" type="button" data-action="validate-config">检查</button>
-          <button class="settings-button is-primary" type="submit">保存</button>
         </div>
-      </form>
+      </div>
     </main>
   </div>
 
@@ -582,102 +588,94 @@
       var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
       var STORAGE_API = "/api/settings/cloud-storage";
       var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
-      var STORAGE_DELETE_API = "/api/settings/cloud-storage/delete";
-      var defaults = {
-        accessKeyId: "",
-        bucket: "",
-        enabled: false,
-        endpoint: "",
-        forcePathStyle: true,
-        pathPrefix: "",
-        provider: "s3",
-        publicBaseUrl: "",
-        region: "",
-        secretAccessKey: "",
-        sessionToken: "",
-        useSSL: true,
-      };
-
-      var form = document.querySelector("[data-cloud-form]");
+      var OPEN_WINDOW_API = "/api/open_window";
+      var panel = document.querySelector("[data-settings-panel]");
       var message = document.querySelector("[data-settings-message]");
       var status = document.querySelector("[data-config-status]");
       var statusText = document.querySelector("[data-config-status-text]");
+      var storageList = document.querySelector("[data-storage-list]");
+      var state = normalizeSettings(null);
 
-      writeForm(defaults);
-      renderStatus(readForm());
-      loadConfig().then(function (config) {
-        writeForm(config);
-        renderStatus(readForm());
+      render();
+      loadConfig().then(function (settings) {
+        state = normalizeSettings(settings);
+        render();
       }, function (err) {
         setMessage("读取配置失败: " + errorMessage(err), "warning");
       });
 
-      form.addEventListener("submit", function (event) {
-        event.preventDefault();
-        var config = readForm();
-        setControlsDisabled(true);
-        saveConfig(config).then(function () {
-          renderStatus(config);
-          setMessage("已保存", "ready");
-        }, function (err) {
-          setMessage("保存失败: " + errorMessage(err), "warning");
-        }).finally(function () {
-          setControlsDisabled(false);
-        });
-      });
-
-      form.addEventListener("click", function (event) {
+      panel.addEventListener("click", function (event) {
         var action = event.target.closest("[data-action]");
         if (!action) return;
 
-        if (action.dataset.action === "toggle-secret") {
-          toggleSecret(action);
+        if (action.dataset.action === "manage-storage") {
+          openStorageManager(action.dataset.storageId || "");
           return;
         }
 
-        if (action.dataset.action === "reset-defaults") {
-          writeForm(defaults);
-          renderStatus(readForm());
-          setMessage("已重置为默认值", "");
+        if (action.dataset.action === "edit-storage") {
+          openStorageEditor(action.dataset.storageId || "", "");
           return;
         }
 
-        if (action.dataset.action === "validate-config") {
-          validateAndReport(readForm());
+        if (action.dataset.action === "add-storage") {
+          openStorageEditor("", "s3");
           return;
         }
 
-        if (action.dataset.action === "delete-config") {
-          setControlsDisabled(true);
-          deleteConfig().then(function () {
-            writeForm(defaults);
-            renderStatus(readForm());
-            setMessage("已删除配置", "warning");
-          }, function (err) {
-            setMessage("删除失败: " + errorMessage(err), "warning");
-          }).finally(function () {
-            setControlsDisabled(false);
+        if (action.dataset.action === "add-local-storage") {
+          openStorageEditor("", "local");
+          return;
+        }
+
+        if (action.dataset.action === "activate-storage") {
+          activateStorage(action.dataset.storageId || "");
+          return;
+        }
+      });
+
+      window.addEventListener("focus", function () {
+        loadConfig().then(function (settings) {
+          state = normalizeSettings(settings);
+          render();
+        }, function (_) { });
+      });
+
+      function activateStorage(storageId) {
+        var id = sanitizeStorageId(storageId);
+        if (!id || id === state.activeStorageId) return;
+        var exists = state.storages.some(function (storage) {
+          return storage.id === id;
+        });
+        if (!exists) return;
+        state.activeStorageId = id;
+        state.storages = state.storages.map(function (storage) {
+          return Object.assign({}, storage, {
+            enabled: storage.id === id,
           });
-        }
-      });
-
-      form.addEventListener("input", function () {
-        renderStatus(readForm());
-        setMessage("未保存的更改", "");
-      });
-
-      form.addEventListener("change", function () {
-        renderStatus(readForm());
-        setMessage("未保存的更改", "");
-      });
+        });
+        render();
+        setMessage("正在切换启用存储...", "");
+        saveConfig(state).then(function (saved) {
+          state = normalizeSettings(saved || state);
+          render();
+          setMessage("已启用 " + (activeStorage(state) || {}).name, "ready");
+        }, function (err) {
+          setMessage("启用失败: " + errorMessage(err), "warning");
+          return loadConfig().then(function (settings) {
+            state = normalizeSettings(settings);
+            render();
+          });
+        });
+      }
 
       function loadConfig() {
         if (canUseNativeStorage()) {
           return callStorage(STORAGE_API, "GET").then(function (data) {
             if (data && data.found && data.config) {
-              return Object.assign({}, defaults, data.config);
+              return normalizeSettings(data.config);
             }
-            return Object.assign({}, defaults);
+            return normalizeSettings(loadLocalConfig());
           }, function () {
             return loadLocalConfig();
           });
@@ -688,26 +686,22 @@
       function loadLocalConfig() {
         try {
           var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-          return Object.assign({}, defaults, saved || {});
+          return normalizeSettings(saved);
         } catch (_) {
-          return Object.assign({}, defaults);
+          return normalizeSettings(null);
         }
       }
 
-      function saveConfig(config) {
+      function saveConfig(settings) {
+        var next = normalizeSettings(settings);
         if (canUseNativeStorage()) {
-          return callStorage(STORAGE_SAVE_API, "POST", config);
+          return callStorage(STORAGE_SAVE_API, "POST", next).then(function (data) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return data && data.config ? data.config : next;
+          });
         }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-        return Promise.resolve();
-      }
-
-      function deleteConfig() {
-        localStorage.removeItem(STORAGE_KEY);
-        if (canUseNativeStorage()) {
-          return callStorage(STORAGE_DELETE_API, "GET");
-        }
-        return Promise.resolve();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        return Promise.resolve(next);
       }
 
       function callStorage(url, method, args) {
@@ -723,43 +717,64 @@
         return typeof invoke === "function";
       }
 
-      function readForm() {
-        return {
-          accessKeyId: form.elements.accessKeyId.value.trim(),
-          bucket: form.elements.bucket.value.trim(),
-          enabled: form.elements.enabled.checked,
-          endpoint: form.elements.endpoint.value.trim(),
-          forcePathStyle: form.elements.forcePathStyle.checked,
-          pathPrefix: form.elements.pathPrefix.value.trim(),
-          provider: form.elements.provider.value,
-          publicBaseUrl: form.elements.publicBaseUrl.value.trim(),
-          region: form.elements.region.value.trim(),
-          secretAccessKey: form.elements.secretAccessKey.value,
-          sessionToken: form.elements.sessionToken.value.trim(),
-          useSSL: form.elements.useSSL.checked,
-        };
+      function render() {
+        renderStorageList();
+        renderStatus(state);
       }
 
-      function writeForm(config) {
-        var next = Object.assign({}, defaults, config || {});
-        form.elements.accessKeyId.value = next.accessKeyId;
-        form.elements.bucket.value = next.bucket;
-        form.elements.enabled.checked = Boolean(next.enabled);
-        form.elements.endpoint.value = next.endpoint;
-        form.elements.forcePathStyle.checked = Boolean(next.forcePathStyle);
-        form.elements.pathPrefix.value = next.pathPrefix;
-        form.elements.provider.value = next.provider;
-        form.elements.publicBaseUrl.value = next.publicBaseUrl;
-        form.elements.region.value = next.region;
-        form.elements.secretAccessKey.value = next.secretAccessKey;
-        form.elements.sessionToken.value = next.sessionToken;
-        form.elements.useSSL.checked = Boolean(next.useSSL);
+      function renderStorageList() {
+        if (!state.storages.length) {
+          storageList.innerHTML = '<div class="settings-storage-item"><span class="settings-storage-item-main"><span class="settings-storage-item-name">暂无存储</span><span class="settings-storage-item-meta">点击新增存储开始配置</span></span></div>';
+          return;
+        }
+        storageList.innerHTML = state.storages.map(function (storage) {
+          var active = storage.id === state.activeStorageId;
+          var meta = [storage.id, providerLabel(storage.provider), storage.bucket].filter(Boolean).join(" · ");
+          return [
+            '<div class="settings-storage-row">',
+            '<button class="settings-storage-item ' + (active ? "is-selected" : "") + '" type="button" data-action="activate-storage" data-storage-id="' + escapeAttr(storage.id) + '">',
+            '<span class="settings-storage-item-main">',
+            '<span class="settings-storage-item-name">' + escapeHTML(storage.name || storage.id) + '</span>',
+            '<span class="settings-storage-item-meta">' + escapeHTML(meta || "未配置") + '</span>',
+            '</span>',
+            active ? '<span class="settings-storage-badge">启用</span>' : '',
+            '</button>',
+            '<span class="settings-storage-actions">',
+            '<button class="settings-storage-manage" type="button" data-action="edit-storage" data-storage-id="' + escapeAttr(storage.id) + '">编辑</button>',
+            '<button class="settings-storage-manage" type="button" data-action="manage-storage" data-storage-id="' + escapeAttr(storage.id) + '">管理</button>',
+            '</span>',
+            '</div>',
+          ].join("");
+        }).join("");
       }
 
-      function renderStatus(config) {
-        var missing = missingFields(config);
+      function openStorageManager(storageId) {
+        var id = sanitizeStorageId(storageId);
+        if (!id) return;
+        callStorage(OPEN_WINDOW_API + "?pathname=/oss-manager&storageId=" + encodeURIComponent(id), "GET").then(function () {
+          setMessage("已打开文件管理窗口", "ready");
+        }, function (err) {
+          setMessage("打开文件管理失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function openStorageEditor(storageId, provider) {
+        var id = sanitizeStorageId(storageId);
+        var query = "?pathname=/oss-storage-editor";
+        if (id) query += "&storageId=" + encodeURIComponent(id);
+        if (provider) query += "&provider=" + encodeURIComponent(provider);
+        callStorage(OPEN_WINDOW_API + query, "GET").then(function () {
+          setMessage(id ? "已打开编辑窗口" : "已打开新增窗口", "ready");
+        }, function (err) {
+          setMessage("打开编辑窗口失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function renderStatus(settings) {
+        var active = activeStorage(settings);
+        var missing = active ? missingFields(active) : [];
         status.classList.remove("is-ready", "is-warning");
-        if (!config.enabled && !hasAnyConfig(config)) {
+        if (!active || !hasAnyConfig(active)) {
           statusText.textContent = "未配置";
           return;
         }
@@ -769,31 +784,31 @@
           return;
         }
         status.classList.add("is-ready");
-        statusText.textContent = config.enabled ? "已启用" : "已保存";
-      }
-
-      function validateAndReport(config) {
-        var missing = missingFields(config);
-        if (missing.length) {
-          setMessage("缺少: " + missing.join(", "), "warning");
-          return false;
-        }
-        setMessage("配置完整", "ready");
-        return true;
+        statusText.textContent = active.enabled ? "已启用" : "已保存";
       }
 
       function missingFields(config) {
+        if (!config) {
+          return ["名称", "Storage ID", "存储类型", "Endpoint", "Bucket", "Access Key ID", "Secret Access Key"];
+        }
         var labels = [];
+        if (!config.name) labels.push("名称");
+        if (!config.id) labels.push("Storage ID");
         if (!config.provider) labels.push("存储类型");
-        if (!config.endpoint) labels.push("Endpoint");
+        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
         if (!config.bucket) labels.push("Bucket");
-        if (!config.accessKeyId) labels.push("Access Key ID");
-        if (!config.secretAccessKey) labels.push("Secret Access Key");
+        if (!isLocalProvider(config.provider)) {
+          if (!config.accessKeyId) labels.push("Access Key ID");
+          if (!config.secretAccessKey) labels.push("Secret Access Key");
+        }
         return labels;
       }
 
       function hasAnyConfig(config) {
+        if (!config) return false;
         return [
+          config.id,
+          config.name,
           config.endpoint,
           config.bucket,
           config.accessKeyId,
@@ -805,26 +820,130 @@
         ].some(Boolean);
       }
 
+      function normalizeSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var storages;
+        if (Array.isArray(raw.storages)) {
+          storages = raw.storages.map(normalizeProfile).filter(function (storage) {
+            return storage.id;
+          });
+        } else if (hasLegacyConfig(raw)) {
+          storages = [normalizeProfile(Object.assign({ id: "default", name: "默认存储" }, raw), 0)];
+        } else {
+          storages = [];
+        }
+
+        var used = Object.create(null);
+        storages = storages.map(function (storage, index) {
+          var baseId = sanitizeStorageId(storage.id || storage.name || storage.provider || storage.bucket || "storage-" + (index + 1));
+          if (!baseId) baseId = "storage-" + (index + 1);
+          used[baseId] = (used[baseId] || 0) + 1;
+          if (used[baseId] > 1) baseId = baseId + "-" + used[baseId];
+          storage.id = baseId;
+          if (!storage.name) storage.name = storage.bucket || storage.provider || storage.id;
+          return storage;
+        });
+
+        var activeStorageId = sanitizeStorageId(raw.activeStorageId || "");
+        if (!storages.some(function (storage) { return storage.id === activeStorageId; })) {
+          var enabled = storages.find(function (storage) { return storage.enabled; });
+          activeStorageId = enabled ? enabled.id : ((storages[0] && storages[0].id) || "");
+        }
+        return {
+          activeStorageId: activeStorageId,
+          defaultsInitialized: Boolean(raw.defaultsInitialized),
+          storages: storages,
+        };
+      }
+
+      function normalizeProfile(profile) {
+        var raw = profile && typeof profile === "object" ? profile : {};
+        return {
+          accessKeyId: String(raw.accessKeyId || "").trim(),
+          bucket: String(raw.bucket || "").trim(),
+          enabled: Boolean(raw.enabled),
+          endpoint: String(raw.endpoint || "").trim(),
+          forcePathStyle: raw.forcePathStyle !== false,
+          id: sanitizeStorageId(raw.id || ""),
+          name: String(raw.name || "").trim(),
+          pathPrefix: String(raw.pathPrefix || "").trim(),
+          provider: String(raw.provider || "s3").trim() || "s3",
+          publicBaseUrl: String(raw.publicBaseUrl || "").trim(),
+          region: String(raw.region || "").trim(),
+          secretAccessKey: String(raw.secretAccessKey || ""),
+          sessionToken: String(raw.sessionToken || "").trim(),
+          useSSL: raw.useSSL !== false,
+        };
+      }
+
+      function hasLegacyConfig(config) {
+        return Boolean(config && typeof config === "object" && (
+          config.enabled ||
+          config.endpoint ||
+          config.bucket ||
+          config.accessKeyId ||
+          config.secretAccessKey ||
+          config.sessionToken ||
+          config.region ||
+          config.pathPrefix ||
+          config.publicBaseUrl
+        ));
+      }
+
+      function activeStorage(settings) {
+        var next = normalizeSettings(settings);
+        return next.storages.find(function (storage) {
+          return storage.id === next.activeStorageId;
+        }) || null;
+      }
+
+      function sanitizeStorageId(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      }
+
+      function providerLabel(provider) {
+        var labels = {
+          "aliyun-oss": "Aliyun OSS",
+          "aws-s3": "AWS S3",
+          "custom": "Custom",
+          "local": "Local",
+          "local-oss": "Local",
+          "qiniu-kodo": "Qiniu Kodo",
+          "s3": "S3",
+          "tencent-cos": "Tencent COS",
+        };
+        return labels[provider] || provider;
+      }
+
+      function isLocalProvider(provider) {
+        var value = String(provider || "").trim().toLowerCase();
+        return value === "local" || value === "local-oss";
+      }
+
       function setMessage(text, tone) {
         message.textContent = text || "";
         message.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
-      }
-
-      function setControlsDisabled(disabled) {
-        Array.prototype.forEach.call(form.elements, function (el) {
-          el.disabled = disabled;
-        });
       }
 
       function errorMessage(err) {
         return (err && err.message) || err || "未知错误";
       }
 
-      function toggleSecret(button) {
-        var input = form.elements.secretAccessKey;
-        var nextType = input.type === "password" ? "text" : "password";
-        input.type = nextType;
-        button.textContent = nextType === "password" ? "显示" : "隐藏";
+      function escapeHTML(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function escapeAttr(value) {
+        return escapeHTML(value).replace(/`/g, "&#96;");
       }
     })();
   </script>
