@@ -13,6 +13,8 @@
   };
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
+  const LINE_JUMP_COUNT = 10;
+  const VIM_PLUGIN_VERSION = "20260607-vim-jump-shift-key";
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -67,6 +69,8 @@
     if (event.ctrlKey && event.key.toLowerCase() === "a") return "Ctrl-a";
     if (event.ctrlKey && event.key.toLowerCase() === "r") return "Ctrl-r";
     if (event.metaKey || event.altKey || event.ctrlKey) return null;
+    if (event.shiftKey && (event.code === "KeyD" || event.key.toLowerCase() === "d")) return "D";
+    if (event.shiftKey && (event.code === "KeyU" || event.key.toLowerCase() === "u")) return "U";
     if (event.key.length === 1) return event.key;
     return null;
   }
@@ -131,6 +135,20 @@
       before: 0,
       after: state.doc.content.size,
     };
+  }
+
+  function textblockInsertEnd(state, pos) {
+    const block = textblockInfo(state, pos);
+    const hardBreak = state.schema && state.schema.nodes && state.schema.nodes.hard_break;
+    if (!hardBreak || !block.node.isTextblock) return block.end;
+
+    let end = block.end;
+    for (let index = block.node.childCount - 1; index >= 0; index -= 1) {
+      const child = block.node.child(index);
+      if (child.type !== hardBreak) break;
+      end -= child.nodeSize;
+    }
+    return clamp(end, block.start, block.end);
   }
 
   function textblockListForDoc(doc) {
@@ -499,6 +517,10 @@
       case "K":
       case "ArrowUp":
         return moveVerticalPos(view, -1, count);
+      case "D":
+        return moveVerticalPos(view, 1, count * LINE_JUMP_COUNT);
+      case "U":
+        return moveVerticalPos(view, -1, count * LINE_JUMP_COUNT);
       case "w":
         return wordForwardPos(state, pos, count);
       case "b":
@@ -1321,7 +1343,7 @@
       return joinLines(view, count, { type: "command", key: "J", count });
     }
 
-    if ("hjklJKweb0^$".includes(key) || key.startsWith("Arrow")) {
+    if ("hjklJKDUweb0^$".includes(key) || key.startsWith("Arrow")) {
       const target = motionTarget(view, key, count);
       if (target != null) {
         const cursorTarget = key === "$" ? charBeforePositionInBlock(state, target) : target;
@@ -1334,7 +1356,7 @@
     if (key === "a") return enterInsertAt(view, moveHorizontalPos(state, state.selection.from, 1));
     if (key === "I") return enterInsertAt(view, firstNonBlankInBlock(state, state.selection.from));
     if (key === "A" || key === "Ctrl-a") {
-      return enterInsertAt(view, textblockInfo(state, state.selection.from).end);
+      return enterInsertAt(view, textblockInsertEnd(state, state.selection.from));
     }
     if (key === "o") {
       return insertNewParagraph(view, true, { type: "newParagraph", after: true, count, text: "" });
@@ -1399,7 +1421,7 @@
       });
     }
 
-    if ("hjklJKweb0^$G".includes(key) || key.startsWith("Arrow")) {
+    if ("hjklJKDUweb0^$G".includes(key) || key.startsWith("Arrow")) {
       const target = motionTarget(view, key, count);
       if (target == null) return true;
       const head = key === "e" && target >= pluginState.visualAnchor
@@ -1472,7 +1494,7 @@
     if (pluginState.mode === MODES.INSERT) {
       if (key === "Ctrl-a") {
         event.preventDefault();
-        return enterInsertAt(view, textblockInfo(view.state, view.state.selection.from).end);
+        return enterInsertAt(view, textblockInsertEnd(view.state, view.state.selection.from));
       }
       if (key === "Esc" || key === "Ctrl-[") {
         event.preventDefault();
@@ -1676,4 +1698,5 @@
 
   window.createVimPlugin = createVimPlugin;
   window.vimPluginKey = vimPluginKey;
+  window.vimPluginVersion = VIM_PLUGIN_VERSION;
 })();
