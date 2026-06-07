@@ -493,6 +493,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
+		Name:                   opt.Name,
 		Pathname:               pathname,
 		IconData:               b.iconData,
 		InjectedJS:             b.injectedRuntimeJS(windowInfo),
@@ -832,6 +833,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
+		Name:                   windowName,
 		Pathname:               pathname,
 		IconData:               b.iconData,
 		InjectedJS:             b.injectedRuntimeJS(windowInfo),

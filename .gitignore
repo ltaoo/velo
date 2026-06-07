@@ -33,3 +33,6 @@ vendor/
 
 # Frontend assets
 _example/frontendserver/frontend/public/timeless/
+
+workdir
+

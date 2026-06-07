@@ -140,14 +140,14 @@ func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
 
 func applicationDidFinishLaunching(self, _cmd, app, options uintptr) uintptr {
 	fmt.Println("Velo: applicationDidFinishLaunching")
-	
+
 	// Create and setup the window
 	initWindow()
-	
+
 	// Assign the window to the delegate
 	// self.window = appWindow
 	uikit.ID(self).Send(uikit.RegisterName("setWindow:"), appWindow)
-	
+
 	return 1 // true
 }
 
@@ -248,10 +248,10 @@ func initWindow() {
 	// Create Root View Controller (Navigation Controller)
 	vc, wv := createWebviewController(webview_opts, rect)
 	wkWebView = wv
-	
+
 	// Initialize UINavigationController with rootViewController
 	navController = uikit.GetClass("UINavigationController").Send(uikit.RegisterName("alloc")).Send(uikit.RegisterName("initWithRootViewController:"), vc)
-	
+
 	// Set Root VC
 	win.Send(uikit.RegisterName("setRootViewController:"), navController)
 
@@ -263,17 +263,20 @@ func setTitle(title string)        {}
 func setSize(width, height int)    {}
 func setMinSize(width, height int) {}
 func setMaxSize(width, height int) {}
-func setPosition(x, y int)         {}
-func getPosition() (int, int)      { return 0, 0 }
-func getSize() (int, int)          { return 0, 0 }
-func show()                        {}
-func hide()                        {}
-func minimize()                    {}
-func maximize()                    {}
-func fullscreen()                  {}
-func unFullscreen()                {}
-func restore()                     {}
-func setAlwaysOnTop(onTop bool)    {}
+func focus_window(opts *BoxWebviewOptions) bool {
+	return false
+}
+func setPosition(x, y int)      {}
+func getPosition() (int, int)   { return 0, 0 }
+func getSize() (int, int)       { return 0, 0 }
+func show()                     {}
+func hide()                     {}
+func minimize()                 {}
+func maximize()                 {}
+func fullscreen()               {}
+func unFullscreen()             {}
+func restore()                  {}
+func setAlwaysOnTop(onTop bool) {}
 func setURL(url string) {
 	if wkWebView != 0 {
 		nsURL := uikit.GetClass("NSURL").Send(uikit.RegisterName("URLWithString:"), uikit.NSString(url))

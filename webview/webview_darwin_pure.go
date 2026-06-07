@@ -27,7 +27,12 @@ var (
 	webviewMap = make(map[uintptr]*BoxWebviewOptions)
 	// Map webview pointer to its parent NSWindow for window operations (e.g. drag)
 	nsWindowMap = make(map[uintptr]cocoa.ID)
-	mapLock     sync.RWMutex
+	// Maps for named-window reuse. Keyed by BoxWebviewOptions.Name.
+	namedWebViewMap   = make(map[string]cocoa.ID)
+	webviewNameMap    = make(map[uintptr]string)
+	windowWebViewMap  = make(map[uintptr]cocoa.ID)
+	windowDelegateMap = make(map[uintptr]cocoa.ID)
+	mapLock           sync.RWMutex
 
 	quitOnLastWindowClosed = true
 )
@@ -62,6 +67,12 @@ func init() {
 	cocoa.RegisterClassPair(appDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloAppDelegate registered")
 
+	// Register VeloWindowDelegate class for named-window cleanup on close.
+	windowDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloWindowDelegate", 0)
+	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowWillClose:"), windowWillClose, "v@:@")
+	cocoa.RegisterClassPair(windowDelegateClass)
+	fmt.Fprintln(os.Stderr, "DEBUG: VeloWindowDelegate registered")
+
 	// Register VeloWebView class (subclass of WKWebView with drag-drop support)
 	webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
 	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingEntered:"), veloWebViewDraggingEntered, "Q@:@")
@@ -78,6 +89,11 @@ func applicationShouldTerminateAfterLastWindowClosed(self, _cmd, app uintptr) ui
 		return 1
 	}
 	return 0
+}
+
+func windowWillClose(self, _cmd, notification uintptr) {
+	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
+	cleanupWindow(nsWindow)
 }
 
 // Callback for webView:startURLSchemeTask:
@@ -414,6 +430,78 @@ func open_window(opts *BoxWebviewOptions) {
 	}
 }
 
+func focus_window(opts *BoxWebviewOptions) bool {
+	if opts == nil || strings.TrimSpace(opts.Name) == "" {
+		return false
+	}
+
+	name := strings.TrimSpace(opts.Name)
+	mapLock.Lock()
+	wkWebView := namedWebViewMap[name]
+	nsWindow := cocoa.ID(0)
+	if wkWebView != 0 {
+		nsWindow = nsWindowMap[uintptr(wkWebView)]
+	}
+	if wkWebView == 0 || nsWindow == 0 {
+		if wkWebView != 0 {
+			delete(namedWebViewMap, name)
+			delete(webviewNameMap, uintptr(wkWebView))
+			delete(webviewMap, uintptr(wkWebView))
+			delete(nsWindowMap, uintptr(wkWebView))
+		}
+		mapLock.Unlock()
+		return false
+	}
+	webviewMap[uintptr(wkWebView)] = opts
+	mapLock.Unlock()
+
+	cocoa.DispatchMain(func() {
+		if opts.Title != "" {
+			nsWindow.Send(cocoa.RegisterName("setTitle:"), cocoa.StringToNSString(opts.Title))
+		}
+		if opts.URL != "" {
+			loadURLInWebView(wkWebView, opts.URL)
+		}
+		if nsWindow.Send(cocoa.RegisterName("isMiniaturized")) != 0 {
+			nsWindow.Send(cocoa.RegisterName("deminiaturize:"), 0)
+		}
+		nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+		nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
+		nsWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+	})
+	return true
+}
+
+func cleanupWindow(nsWindow cocoa.ID) {
+	if nsWindow == 0 {
+		return
+	}
+	mapLock.Lock()
+	defer mapLock.Unlock()
+
+	wkWebView := windowWebViewMap[uintptr(nsWindow)]
+	delete(windowWebViewMap, uintptr(nsWindow))
+	delete(windowDelegateMap, uintptr(nsWindow))
+	if wkWebView == 0 {
+		return
+	}
+
+	delete(webviewMap, uintptr(wkWebView))
+	delete(nsWindowMap, uintptr(wkWebView))
+	if name := webviewNameMap[uintptr(wkWebView)]; name != "" {
+		if namedWebViewMap[name] == wkWebView {
+			delete(namedWebViewMap, name)
+		}
+		delete(webviewNameMap, uintptr(wkWebView))
+	}
+	if globalWindow == nsWindow {
+		globalWindow = 0
+	}
+	if globalWebView == wkWebView {
+		globalWebView = 0
+	}
+}
+
 // NSDraggingDestination callbacks for VeloWebView
 
 func hasDraggedFiles(sender uintptr) bool {
@@ -547,6 +635,8 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 
 	// Set Title
 	nsWindow.Send(cocoa.RegisterName("setTitle:"), cocoa.StringToNSString(opts.Title))
+	windowDelegate := cocoa.GetClass("VeloWindowDelegate").Send(cocoa.RegisterName("alloc")).Send(cocoa.RegisterName("init"))
+	nsWindow.Send(cocoa.RegisterName("setDelegate:"), windowDelegate)
 
 	// Center window
 	nsWindow.Send(cocoa.RegisterName("center"))
@@ -641,6 +731,12 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	mapLock.Lock()
 	webviewMap[uintptr(wkWebView)] = opts
 	nsWindowMap[uintptr(wkWebView)] = nsWindow
+	windowWebViewMap[uintptr(nsWindow)] = wkWebView
+	windowDelegateMap[uintptr(nsWindow)] = windowDelegate
+	if name := strings.TrimSpace(opts.Name); name != "" {
+		namedWebViewMap[name] = wkWebView
+		webviewNameMap[uintptr(wkWebView)] = name
+	}
 	mapLock.Unlock()
 
 	// Set as content view
@@ -654,7 +750,15 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 
 	// Load URL
 	fmt.Fprintf(os.Stderr, "DEBUG: Loading URL: %s\n", opts.URL)
-	nsURL := cocoa.GetClass("NSURL").Send(cocoa.RegisterName("URLWithString:"), cocoa.StringToNSString(opts.URL))
+	loadURLInWebView(wkWebView, opts.URL)
+	fmt.Fprintln(os.Stderr, "DEBUG: URL request loaded (sent)")
+}
+
+func loadURLInWebView(wkWebView cocoa.ID, rawURL string) {
+	if wkWebView == 0 || strings.TrimSpace(rawURL) == "" {
+		return
+	}
+	nsURL := cocoa.GetClass("NSURL").Send(cocoa.RegisterName("URLWithString:"), cocoa.StringToNSString(rawURL))
 	fmt.Fprintf(os.Stderr, "DEBUG: nsURL: %d\n", nsURL)
 	if nsURL == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: nsURL is nil")
@@ -665,7 +769,6 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		fmt.Fprintln(os.Stderr, "ERROR: req is nil")
 	}
 	wkWebView.Send(cocoa.RegisterName("loadRequest:"), req)
-	fmt.Fprintln(os.Stderr, "DEBUG: URL request loaded (sent)")
 }
 
 func close_webview() {
@@ -896,9 +999,7 @@ func setAlwaysOnTop(on bool) {
 func setURL(u string) {
 	cocoa.DispatchMain(func() {
 		if globalWebView != 0 {
-			nsURL := cocoa.GetClass("NSURL").Send(cocoa.RegisterName("URLWithString:"), cocoa.StringToNSString(u))
-			req := cocoa.GetClass("NSURLRequest").Send(cocoa.RegisterName("requestWithURL:"), nsURL)
-			globalWebView.Send(cocoa.RegisterName("loadRequest:"), req)
+			loadURLInWebView(globalWebView, u)
 		}
 	})
 }

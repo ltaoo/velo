@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSS 存储编辑</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #ededed;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #ffffff;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.58);
+      --border: #dedede;
+      --accent: #0f9f6e;
+      --accent-strong: #08784f;
+      --accent-soft: rgba(15, 159, 110, 0.12);
+      --danger: #c93a32;
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --background: #111111;
+      --BG-0: #151515;
+      --BG-1: #1d1d1d;
+      --BG-2: #191919;
+      --FG-0: rgba(255, 255, 255, 0.86);
+      --FG-1: rgba(255, 255, 255, 0.56);
+      --border: rgba(255, 255, 255, 0.11);
+      --accent: #20b883;
+      --accent-strong: #7ee0bd;
+      --accent-soft: rgba(32, 184, 131, 0.15);
+      --danger: #ff746c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+    }
+
+    body {
+      background: var(--background);
+      color: var(--FG-0);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .editor-shell {
+      background: var(--BG-0);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100%;
+      min-width: 0;
+    }
+
+    .editor-header {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      padding: 16px 18px;
+    }
+
+    .editor-header h1 {
+      font-size: 20px;
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    .editor-header p {
+      color: var(--FG-1);
+      font-size: 12px;
+      margin: 4px 0 0;
+    }
+
+    .editor-main {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+
+    .editor-form {
+      display: grid;
+      gap: 14px;
+    }
+
+    .editor-section {
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      padding-top: 16px;
+    }
+
+    .editor-section:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .editor-section-title {
+      color: var(--FG-1);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .editor-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .editor-field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .editor-field.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .editor-label-row {
+      align-items: center;
+      color: var(--FG-1);
+      display: flex;
+      font-size: 12px;
+      font-weight: 700;
+      justify-content: space-between;
+      min-height: 18px;
+    }
+
+    .editor-required {
+      color: var(--accent-strong);
+    }
+
+    .editor-input,
+    .editor-select,
+    .editor-textarea {
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      min-height: 36px;
+      outline: 0;
+      padding: 0 10px;
+      width: 100%;
+    }
+
+    .editor-textarea {
+      line-height: 1.5;
+      min-height: 72px;
+      padding: 9px 10px;
+      resize: vertical;
+    }
+
+    .editor-input:focus,
+    .editor-select:focus,
+    .editor-textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .editor-secret {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .editor-checks {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .editor-check {
+      align-items: center;
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: flex;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 10px;
+    }
+
+    .editor-check input {
+      accent-color: var(--accent);
+      height: 15px;
+      width: 15px;
+    }
+
+    .editor-actions {
+      align-items: center;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      padding-top: 16px;
+    }
+
+    .editor-button {
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: inline-flex;
+      gap: 8px;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 12px;
+      white-space: nowrap;
+    }
+
+    .editor-button.is-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .editor-button.is-secondary {
+      background: var(--BG-2);
+      color: var(--FG-0);
+    }
+
+    .editor-button.is-danger {
+      background: transparent;
+      color: var(--danger);
+      margin-right: auto;
+    }
+
+    .editor-message {
+      color: var(--FG-1);
+      flex: 1 1 220px;
+      font-size: 12px;
+      min-width: 0;
+    }
+
+    @media (max-width: 620px) {
+      .editor-header {
+        align-items: flex-start;
+        display: grid;
+      }
+
+      .editor-grid,
+      .editor-checks {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .editor-actions {
+        justify-content: stretch;
+      }
+
+      .editor-button {
+        flex: 1 1 auto;
+      }
+
+      .editor-button.is-danger {
+        margin-right: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || !saved) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute("data-theme", theme);
+        } else {
+          root.style.colorScheme = saved;
+          root.setAttribute("data-theme", saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
+
+  <div class="editor-shell">
+    <header class="editor-header">
+      <div>
+        <h1 data-editor-title>OSS 存储编辑</h1>
+        <p data-editor-subtitle>编辑存储连接和路径配置</p>
+      </div>
+    </header>
+
+    <main class="editor-main">
+      <form class="editor-form" data-storage-form>
+        <section class="editor-section">
+          <div class="editor-section-title">连接</div>
+          <div class="editor-grid">
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>名称</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <input class="editor-input" name="name" placeholder="七牛主存储" autocomplete="off" />
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>Storage ID</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <input class="editor-input" name="storageId" placeholder="qiniu-main" autocomplete="off" />
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>存储类型</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <select class="editor-select" name="provider">
+                <option value="local">Local</option>
+                <option value="s3">S3 Compatible</option>
+                <option value="aws-s3">AWS S3</option>
+                <option value="aliyun-oss">Aliyun OSS</option>
+                <option value="tencent-cos">Tencent COS</option>
+                <option value="qiniu-kodo">Qiniu Kodo</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>Region</span>
+              </span>
+              <input class="editor-input" name="region" placeholder="us-east-1" autocomplete="off" />
+            </label>
+            <label class="editor-field is-wide">
+              <span class="editor-label-row">
+                <span data-label-endpoint>Endpoint</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <input class="editor-input" name="endpoint" placeholder="https://s3.example.com" autocomplete="off" />
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span data-label-bucket>Bucket</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <input class="editor-input" name="bucket" placeholder="memo-assets" autocomplete="off" />
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>Path Prefix</span>
+              </span>
+              <input class="editor-input" name="pathPrefix" placeholder="uploads/" autocomplete="off" />
+            </label>
+            <label class="editor-field is-wide">
+              <span class="editor-label-row">
+                <span>Public Base URL</span>
+              </span>
+              <input class="editor-input" name="publicBaseUrl" placeholder="https://cdn.example.com" autocomplete="off" />
+            </label>
+          </div>
+        </section>
+
+        <section class="editor-section" data-remote-section>
+          <div class="editor-section-title">凭证</div>
+          <div class="editor-grid">
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>Access Key ID</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <input class="editor-input" name="accessKeyId" autocomplete="off" />
+            </label>
+            <label class="editor-field">
+              <span class="editor-label-row">
+                <span>Secret Access Key</span>
+                <span class="editor-required">必填</span>
+              </span>
+              <span class="editor-secret">
+                <input class="editor-input" name="secretAccessKey" type="password" autocomplete="new-password" />
+                <button class="editor-button is-secondary" type="button" data-action="toggle-secret">显示</button>
+              </span>
+            </label>
+            <label class="editor-field is-wide">
+              <span class="editor-label-row">
+                <span>Session Token</span>
+              </span>
+              <textarea class="editor-textarea" name="sessionToken" autocomplete="off"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="editor-section">
+          <div class="editor-section-title">选项</div>
+          <div class="editor-checks">
+            <label class="editor-check">
+              <input type="checkbox" name="useSSL" />
+              <span>SSL</span>
+            </label>
+            <label class="editor-check">
+              <input type="checkbox" name="forcePathStyle" />
+              <span>Path Style</span>
+            </label>
+          </div>
+        </section>
+
+        <div class="editor-actions">
+          <button class="editor-button is-danger" type="button" data-action="delete-storage">删除</button>
+          <div class="editor-message" data-editor-message></div>
+          <button class="editor-button is-secondary" type="button" data-action="validate-storage">检查</button>
+          <button class="editor-button is-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
+      var STORAGE_API = "/api/settings/cloud-storage";
+      var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
+      var params = new URLSearchParams(window.location.search);
+      var requestedStorageId = sanitizeStorageId(params.get("storageId") || "");
+      var requestedProvider = String(params.get("provider") || "s3").trim() || "s3";
+      var defaults = {
+        localRoot: "",
+        memoBucket: "memos",
+      };
+      var profileDefaults = {
+        accessKeyId: "",
+        bucket: "",
+        enabled: false,
+        endpoint: "",
+        forcePathStyle: true,
+        id: "",
+        name: "",
+        pathPrefix: "",
+        provider: "s3",
+        publicBaseUrl: "",
+        region: "",
+        secretAccessKey: "",
+        sessionToken: "",
+        useSSL: true,
+      };
+
+      var title = document.querySelector("[data-editor-title]");
+      var subtitle = document.querySelector("[data-editor-subtitle]");
+      var form = document.querySelector("[data-storage-form]");
+      var message = document.querySelector("[data-editor-message]");
+      var deleteButton = document.querySelector("[data-action='delete-storage']");
+      var endpointLabel = document.querySelector("[data-label-endpoint]");
+      var bucketLabel = document.querySelector("[data-label-bucket]");
+      var remoteSection = document.querySelector("[data-remote-section]");
+      var state = {
+        originalStorageId: requestedStorageId,
+        settings: normalizeSettings(null),
+        storage: normalizeProfile(null),
+      };
+
+      loadConfig().then(function (settings) {
+        state.settings = normalizeSettings(settings);
+        state.storage = requestedStorageId ? findStorage(requestedStorageId) : createStorageProfile(requestedProvider);
+        if (requestedStorageId && !state.storage) {
+          state.storage = createStorageProfile(requestedProvider);
+          setMessage("未找到原存储，将作为新增保存", "warning");
+        }
+        render();
+      }, function (err) {
+        setMessage("读取配置失败: " + errorMessage(err), "warning");
+        render();
+      });
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        saveCurrentStorage();
+      });
+
+      form.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) return;
+        if (action.dataset.action === "toggle-secret") {
+          toggleSecret(action);
+          return;
+        }
+        if (action.dataset.action === "validate-storage") {
+          validateAndReport(readForm());
+          return;
+        }
+        if (action.dataset.action === "delete-storage") {
+          deleteCurrentStorage();
+        }
+      });
+
+      form.addEventListener("change", function () {
+        renderProviderMode(readForm());
+      });
+
+      function render() {
+        var editing = Boolean(state.originalStorageId);
+        title.textContent = editing ? "编辑 OSS 存储" : "新增 OSS 存储";
+        subtitle.textContent = editing ? state.originalStorageId : providerLabel(state.storage.provider);
+        deleteButton.hidden = !editing;
+        writeForm(state.storage);
+        renderProviderMode(state.storage);
+      }
+
+      function saveCurrentStorage() {
+        var storage = normalizeProfile(readForm());
+        var missing = missingFields(storage);
+        if (missing.length) {
+          setMessage("缺少: " + missing.join(", "), "warning");
+          return;
+        }
+        if (storageIdExists(storage.id, state.originalStorageId)) {
+          setMessage("Storage ID 已存在: " + storage.id, "warning");
+          return;
+        }
+
+        var settings = normalizeSettings(state.settings);
+        var exists = false;
+        settings.storages = settings.storages.map(function (item) {
+          if (item.id !== state.originalStorageId) return item;
+          exists = true;
+          return storage;
+        });
+        if (!exists) {
+          settings.storages.push(storage);
+        }
+        if (settings.activeStorageId === state.originalStorageId) {
+          settings.activeStorageId = storage.id;
+        }
+        settings.storages = settings.storages.map(function (item) {
+          return Object.assign({}, item, {
+            enabled: item.id === settings.activeStorageId,
+          });
+        });
+        if (!settings.activeStorageId && settings.storages.length) {
+          settings.activeStorageId = settings.storages[0].id;
+          settings.storages[0].enabled = true;
+        }
+
+        setControlsDisabled(true);
+        saveConfig(settings).then(function (saved) {
+          state.settings = normalizeSettings(saved || settings);
+          state.originalStorageId = storage.id;
+          state.storage = findStorage(storage.id) || storage;
+          render();
+          setMessage("已保存", "ready");
+        }, function (err) {
+          setMessage("保存失败: " + errorMessage(err), "warning");
+        }).finally(function () {
+          setControlsDisabled(false);
+        });
+      }
+
+      function deleteCurrentStorage() {
+        var id = state.originalStorageId;
+        if (!id) return;
+        if (!window.confirm("删除存储 " + id + "?")) return;
+        var settings = normalizeSettings(state.settings);
+        settings.storages = settings.storages.filter(function (storage) {
+          return storage.id !== id;
+        });
+        if (settings.activeStorageId === id) {
+          settings.activeStorageId = (settings.storages[0] && settings.storages[0].id) || "";
+        }
+        settings.storages = settings.storages.map(function (storage) {
+          return Object.assign({}, storage, {
+            enabled: storage.id === settings.activeStorageId,
+          });
+        });
+        setControlsDisabled(true);
+        saveConfig(settings).then(function (saved) {
+          state.settings = normalizeSettings(saved || settings);
+          state.originalStorageId = "";
+          state.storage = createStorageProfile(requestedProvider);
+          render();
+          setMessage("已删除", "warning");
+        }, function (err) {
+          setMessage("删除失败: " + errorMessage(err), "warning");
+        }).finally(function () {
+          setControlsDisabled(false);
+        });
+      }
+
+      function loadConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_API, "GET").then(function (data) {
+            if (data && data.defaults) {
+              defaults = normalizeStorageDefaults(data.defaults);
+            }
+            if (data && data.found && data.config) {
+              return normalizeSettings(data.config);
+            }
+            return normalizeSettings(loadLocalConfig());
+          }, function () {
+            return loadLocalConfig();
+          });
+        }
+        return Promise.resolve(loadLocalConfig());
+      }
+
+      function loadLocalConfig() {
+        try {
+          return normalizeSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
+        } catch (_) {
+          return normalizeSettings(null);
+        }
+      }
+
+      function saveConfig(settings) {
+        var next = normalizeSettings(settings);
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_SAVE_API, "POST", next).then(function (data) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data && data.config ? data.config : next));
+            return data && data.config ? data.config : next;
+          });
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        return Promise.resolve(next);
+      }
+
+      function callStorage(url, method, args) {
+        return invoke(url, { method: method, args: args }).then(function (resp) {
+          if (!resp || resp.code !== 0) {
+            throw new Error((resp && resp.msg) || "storage request failed");
+          }
+          return resp.data;
+        });
+      }
+
+      function canUseNativeStorage() {
+        return typeof invoke === "function";
+      }
+
+      function readForm() {
+        return {
+          accessKeyId: form.elements.accessKeyId.value.trim(),
+          bucket: form.elements.bucket.value.trim(),
+          enabled: false,
+          endpoint: form.elements.endpoint.value.trim(),
+          forcePathStyle: form.elements.forcePathStyle.checked,
+          id: sanitizeStorageId(form.elements.storageId.value),
+          name: form.elements.name.value.trim(),
+          pathPrefix: form.elements.pathPrefix.value.trim(),
+          provider: form.elements.provider.value,
+          publicBaseUrl: form.elements.publicBaseUrl.value.trim(),
+          region: form.elements.region.value.trim(),
+          secretAccessKey: form.elements.secretAccessKey.value,
+          sessionToken: form.elements.sessionToken.value.trim(),
+          useSSL: form.elements.useSSL.checked,
+        };
+      }
+
+      function writeForm(config) {
+        var next = Object.assign({}, profileDefaults, config || {});
+        form.elements.accessKeyId.value = next.accessKeyId;
+        form.elements.bucket.value = next.bucket;
+        form.elements.endpoint.value = next.endpoint;
+        form.elements.forcePathStyle.checked = Boolean(next.forcePathStyle);
+        form.elements.storageId.value = next.id;
+        form.elements.name.value = next.name;
+        form.elements.pathPrefix.value = next.pathPrefix;
+        form.elements.provider.value = next.provider;
+        form.elements.publicBaseUrl.value = next.publicBaseUrl;
+        form.elements.region.value = next.region;
+        form.elements.secretAccessKey.value = next.secretAccessKey;
+        form.elements.sessionToken.value = next.sessionToken;
+        form.elements.useSSL.checked = Boolean(next.useSSL);
+      }
+
+      function renderProviderMode(config) {
+        var isLocal = isLocalProvider(config && config.provider);
+        endpointLabel.textContent = isLocal ? "本地根目录" : "Endpoint";
+        bucketLabel.textContent = isLocal ? "Bucket / 目录名" : "Bucket";
+        form.elements.endpoint.placeholder = isLocal ? (defaults.localRoot || "workdir/storage") : "https://s3.example.com";
+        form.elements.bucket.placeholder = isLocal ? (defaults.memoBucket || "memos") : "memo-assets";
+        remoteSection.hidden = isLocal;
+        if (isLocal) {
+          form.elements.useSSL.checked = false;
+          form.elements.forcePathStyle.checked = true;
+        }
+      }
+
+      function createStorageProfile(provider) {
+        var normalizedProvider = String(provider || "s3").trim() || "s3";
+        if (isLocalProvider(normalizedProvider)) {
+          var index = state.settings.storages.filter(function (storage) {
+            return isLocalProvider(storage.provider);
+          }).length + 1;
+          var bucket = index === 1 ? (defaults.memoBucket || "memos") : "local-" + index;
+          return Object.assign({}, profileDefaults, {
+            bucket: bucket,
+            endpoint: defaults.localRoot || "",
+            forcePathStyle: true,
+            id: uniqueStorageId(index === 1 ? "memo-local" : "local-" + bucket, ""),
+            name: index === 1 ? "本地 Memo 存储" : "本地存储 " + index,
+            provider: "local",
+            useSSL: false,
+          });
+        }
+        return Object.assign({}, profileDefaults, {
+          forcePathStyle: true,
+          id: uniqueStorageId("storage", ""),
+          name: "新存储",
+          provider: normalizedProvider,
+          useSSL: true,
+        });
+      }
+
+      function findStorage(id) {
+        var target = sanitizeStorageId(id);
+        return state.settings.storages.find(function (storage) {
+          return storage.id === target;
+        }) || null;
+      }
+
+      function storageIdExists(id, originalId) {
+        var target = sanitizeStorageId(id);
+        var original = sanitizeStorageId(originalId);
+        return state.settings.storages.some(function (storage) {
+          return storage.id === target && storage.id !== original;
+        });
+      }
+
+      function uniqueStorageId(base, originalId) {
+        var id = sanitizeStorageId(base || "storage") || "storage";
+        var next = id;
+        var index = 2;
+        var original = sanitizeStorageId(originalId);
+        while (state.settings.storages.some(function (storage) {
+          return storage.id === next && storage.id !== original;
+        })) {
+          next = id + "-" + index;
+          index += 1;
+        }
+        return next;
+      }
+
+      function validateAndReport(config) {
+        var missing = missingFields(config);
+        if (missing.length) {
+          setMessage("缺少: " + missing.join(", "), "warning");
+          return false;
+        }
+        if (storageIdExists(config.id, state.originalStorageId)) {
+          setMessage("Storage ID 已存在: " + config.id, "warning");
+          return false;
+        }
+        setMessage("配置完整", "ready");
+        return true;
+      }
+
+      function missingFields(config) {
+        if (!config) {
+          return ["名称", "Storage ID", "存储类型", "Endpoint", "Bucket", "Access Key ID", "Secret Access Key"];
+        }
+        var labels = [];
+        if (!config.name) labels.push("名称");
+        if (!config.id) labels.push("Storage ID");
+        if (!config.provider) labels.push("存储类型");
+        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
+        if (!config.bucket) labels.push("Bucket");
+        if (!isLocalProvider(config.provider)) {
+          if (!config.accessKeyId) labels.push("Access Key ID");
+          if (!config.secretAccessKey) labels.push("Secret Access Key");
+        }
+        return labels;
+      }
+
+      function normalizeSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var storages;
+        if (Array.isArray(raw.storages)) {
+          storages = raw.storages.map(normalizeProfile).filter(function (storage) {
+            return storage.id;
+          });
+        } else if (hasLegacyConfig(raw)) {
+          storages = [normalizeProfile(Object.assign({ id: "default", name: "默认存储" }, raw), 0)];
+        } else {
+          storages = [];
+        }
+
+        var used = Object.create(null);
+        storages = storages.map(function (storage, index) {
+          var baseId = sanitizeStorageId(storage.id || storage.name || storage.provider || storage.bucket || "storage-" + (index + 1));
+          if (!baseId) baseId = "storage-" + (index + 1);
+          used[baseId] = (used[baseId] || 0) + 1;
+          if (used[baseId] > 1) baseId = baseId + "-" + used[baseId];
+          storage.id = baseId;
+          if (!storage.name) storage.name = storage.bucket || storage.provider || storage.id;
+          return storage;
+        });
+
+        var activeStorageId = sanitizeStorageId(raw.activeStorageId || "");
+        if (!storages.some(function (storage) { return storage.id === activeStorageId; })) {
+          var enabled = storages.find(function (storage) { return storage.enabled; });
+          activeStorageId = enabled ? enabled.id : ((storages[0] && storages[0].id) || "");
+        }
+        return {
+          activeStorageId: activeStorageId,
+          defaultsInitialized: Boolean(raw.defaultsInitialized),
+          storages: storages,
+        };
+      }
+
+      function normalizeProfile(profile) {
+        var raw = profile && typeof profile === "object" ? profile : {};
+        return {
+          accessKeyId: String(raw.accessKeyId || "").trim(),
+          bucket: String(raw.bucket || "").trim(),
+          enabled: Boolean(raw.enabled),
+          endpoint: String(raw.endpoint || "").trim(),
+          forcePathStyle: raw.forcePathStyle !== false,
+          id: sanitizeStorageId(raw.id || ""),
+          name: String(raw.name || "").trim(),
+          pathPrefix: String(raw.pathPrefix || "").trim(),
+          provider: String(raw.provider || "s3").trim() || "s3",
+          publicBaseUrl: String(raw.publicBaseUrl || "").trim(),
+          region: String(raw.region || "").trim(),
+          secretAccessKey: String(raw.secretAccessKey || ""),
+          sessionToken: String(raw.sessionToken || "").trim(),
+          useSSL: raw.useSSL !== false,
+        };
+      }
+
+      function hasLegacyConfig(config) {
+        return Boolean(config && typeof config === "object" && (
+          config.enabled ||
+          config.endpoint ||
+          config.bucket ||
+          config.accessKeyId ||
+          config.secretAccessKey ||
+          config.sessionToken ||
+          config.region ||
+          config.pathPrefix ||
+          config.publicBaseUrl
+        ));
+      }
+
+      function normalizeStorageDefaults(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          localRoot: String(raw.localRoot || "").trim(),
+          memoBucket: String(raw.memoBucket || "memos").trim() || "memos",
+        };
+      }
+
+      function sanitizeStorageId(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      }
+
+      function providerLabel(provider) {
+        var labels = {
+          "aliyun-oss": "Aliyun OSS",
+          "aws-s3": "AWS S3",
+          "custom": "Custom",
+          "local": "Local",
+          "local-oss": "Local",
+          "qiniu-kodo": "Qiniu Kodo",
+          "s3": "S3",
+          "tencent-cos": "Tencent COS",
+        };
+        return labels[provider] || provider;
+      }
+
+      function isLocalProvider(provider) {
+        var value = String(provider || "").trim().toLowerCase();
+        return value === "local" || value === "local-oss";
+      }
+
+      function setMessage(text, tone) {
+        message.textContent = text || "";
+        message.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
+      }
+
+      function setControlsDisabled(disabled) {
+        Array.prototype.forEach.call(form.elements, function (el) {
+          el.disabled = disabled;
+        });
+      }
+
+      function errorMessage(err) {
+        return (err && err.message) || err || "未知错误";
+      }
+
+      function toggleSecret(button) {
+        var input = form.elements.secretAccessKey;
+        var nextType = input.type === "password" ? "text" : "password";
+        input.type = nextType;
+        button.textContent = nextType === "password" ? "显示" : "隐藏";
+      }
+    })();
+  </script>
+</body>
+
+</html>

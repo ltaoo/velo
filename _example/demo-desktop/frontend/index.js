@@ -3,6 +3,8 @@ const DRAFT_STORAGE_KEY = "demo-desktop:memos:draft:v1";
 const CLOUD_STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
 const DEFAULT_VISIBILITY = "PRIVATE";
 
+let cloudStorageSettingsCache = null;
+
 const VISIBILITY = {
   PRIVATE: { label: "仅自己", icon: "lock" },
   PROTECTED: { label: "工作区", icon: "shield" },
@@ -128,6 +130,8 @@ function mountMemosHome(root, options = {}) {
   renderUpdate();
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
+  refreshStorageForRender();
+  window.addEventListener("focus", refreshStorageForRender);
 
   root.addEventListener("click", handleClick);
   root.addEventListener("input", handleInput);
@@ -138,6 +142,7 @@ function mountMemosHome(root, options = {}) {
       root.removeEventListener("click", handleClick);
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
+      window.removeEventListener("focus", refreshStorageForRender);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       if (composerEditor) composerEditor.destroy();
       if (editEditor) editEditor.destroy();
@@ -147,6 +152,12 @@ function mountMemosHome(root, options = {}) {
       updateVersion(els.version, version);
     },
   };
+
+  function refreshStorageForRender() {
+    refreshCloudStorageSettings().then(function () {
+      renderAll();
+    }, function () {});
+  }
 
   function handleClick(event) {
     const command = event.target.closest("[data-command]");
@@ -1921,20 +1932,22 @@ function fileInfoToMarkdownAsync(file) {
     return fileInfoToMarkdown({
       name: uploaded.name || file.name,
       type: uploaded.type || file.type,
-      url: uploaded.url || file.url,
+      url: uploaded.ref || uploaded.url || file.url,
     });
   });
 }
 
 function fileInfoToUploadURL(file) {
-  return loadCloudStorageConfig().then(function (config) {
-    if (!config || !config.enabled) {
+  return loadCloudStorageConfig().then(function (settings) {
+    cloudStorageSettingsCache = normalizeCloudStorageSettings(settings);
+    const storage = activeCloudStorageConfig(settings);
+    if (!storage || !storage.enabled) {
       return file;
     }
     if (typeof invoke !== "function") {
       throw new Error("当前环境不支持云存储上传");
     }
-    const missing = missingCloudStorageFields(config);
+    const missing = missingCloudStorageFields(storage);
     if (missing.length) {
       throw new Error("云存储配置缺少: " + missing.join(", "));
     }
@@ -1944,21 +1957,34 @@ function fileInfoToUploadURL(file) {
     }
     return invoke("/api/oss/upload", {
       args: {
-        config,
         content_base64: contentBase64,
         name: file.name || "file",
+        storageId: storage.id,
         type: file.type || "",
       },
     }).then(function (resp) {
       if (!resp || resp.code !== 0 || !resp.data) {
         throw new Error((resp && resp.msg) || "上传失败");
       }
+      const storageId = resp.data.storageId || storage.id;
+      const ref = markdownUrl(resp.data.ref || assetReference(storageId, resp.data.key || ""));
       return {
+        key: resp.data.key || "",
         name: resp.data.name || file.name,
+        publicUrl: resp.data.url || "",
+        ref,
+        storageId,
         type: resp.data.type || file.type,
-        url: resp.data.url || file.url,
+        url: ref || resp.data.url || file.url,
       };
     });
+  });
+}
+
+function refreshCloudStorageSettings() {
+  return loadCloudStorageConfig().then(function (settings) {
+    cloudStorageSettingsCache = normalizeCloudStorageSettings(settings);
+    return cloudStorageSettingsCache;
   });
 }
 
@@ -1967,21 +1993,21 @@ function loadCloudStorageConfig() {
     return invoke("/api/settings/cloud-storage", { method: "GET" }).then(
       function (resp) {
         if (resp && resp.code === 0 && resp.data && resp.data.found && resp.data.config) {
-          return resp.data.config;
+          return normalizeCloudStorageSettings(resp.data.config);
         }
         if (resp && resp.code === 0) {
-          return loadLocalCloudStorageConfig();
+          return normalizeCloudStorageSettings(loadLocalCloudStorageConfig());
         }
         throw new Error((resp && resp.msg) || "读取云存储配置失败");
       },
       function (err) {
         const localConfig = loadLocalCloudStorageConfig();
-        if (localConfig) return localConfig;
+        if (localConfig) return normalizeCloudStorageSettings(localConfig);
         throw err || new Error("读取云存储配置失败");
       },
     );
   }
-  return Promise.resolve(loadLocalCloudStorageConfig());
+  return Promise.resolve(normalizeCloudStorageSettings(loadLocalCloudStorageConfig()));
 }
 
 function loadLocalCloudStorageConfig() {
@@ -1993,13 +2019,192 @@ function loadLocalCloudStorageConfig() {
   }
 }
 
+function currentCloudStorageSettings() {
+  if (!cloudStorageSettingsCache) {
+    cloudStorageSettingsCache = normalizeCloudStorageSettings(loadLocalCloudStorageConfig());
+  }
+  return cloudStorageSettingsCache;
+}
+
+function normalizeCloudStorageSettings(value) {
+  const settings = value && typeof value === "object" ? value : {};
+  let storages = [];
+  if (Array.isArray(settings.storages)) {
+    storages = settings.storages.map(normalizeCloudStorageProfile).filter(function (storage) {
+      return storage.id;
+    });
+  } else if (hasLegacyCloudStorageProfile(settings)) {
+    storages = [normalizeCloudStorageProfile(Object.assign({ id: "default", name: "默认存储" }, settings))];
+  }
+
+  const seen = Object.create(null);
+  storages = storages.map(function (storage, index) {
+    let id = sanitizeStorageId(storage.id || storage.name || storage.provider || storage.bucket || "storage-" + (index + 1));
+    if (!id) id = "storage-" + (index + 1);
+    seen[id] = (seen[id] || 0) + 1;
+    if (seen[id] > 1) id = id + "-" + seen[id];
+    return Object.assign({}, storage, {
+      id,
+      name: storage.name || storage.bucket || storage.provider || id,
+    });
+  });
+
+  let activeStorageId = sanitizeStorageId(settings.activeStorageId || "");
+  if (!storages.some(function (storage) { return storage.id === activeStorageId; })) {
+    const enabled = storages.find(function (storage) { return storage.enabled; });
+    activeStorageId = enabled ? enabled.id : (storages[0] && storages[0].id) || "";
+  }
+
+  return {
+    activeStorageId,
+    defaultsInitialized: Boolean(settings.defaultsInitialized),
+    storages,
+  };
+}
+
+function normalizeCloudStorageProfile(profile) {
+  const value = profile && typeof profile === "object" ? profile : {};
+  return {
+    accessKeyId: String(value.accessKeyId || "").trim(),
+    bucket: String(value.bucket || "").trim(),
+    enabled: Boolean(value.enabled),
+    endpoint: String(value.endpoint || "").trim(),
+    forcePathStyle: value.forcePathStyle !== false,
+    id: sanitizeStorageId(value.id || ""),
+    name: String(value.name || "").trim(),
+    pathPrefix: String(value.pathPrefix || "").trim(),
+    provider: String(value.provider || "s3").trim() || "s3",
+    publicBaseUrl: String(value.publicBaseUrl || "").trim(),
+    region: String(value.region || "").trim(),
+    secretAccessKey: String(value.secretAccessKey || ""),
+    sessionToken: String(value.sessionToken || "").trim(),
+    useSSL: value.useSSL !== false,
+  };
+}
+
+function hasLegacyCloudStorageProfile(value) {
+  return Boolean(value && typeof value === "object" && (
+    value.enabled ||
+    value.endpoint ||
+    value.bucket ||
+    value.accessKeyId ||
+    value.secretAccessKey ||
+    value.sessionToken ||
+    value.region ||
+    value.pathPrefix ||
+    value.publicBaseUrl
+  ));
+}
+
+function activeCloudStorageConfig(settings) {
+  const normalized = normalizeCloudStorageSettings(settings);
+  if (!normalized.activeStorageId) return null;
+  return normalized.storages.find(function (storage) {
+    return storage.id === normalized.activeStorageId;
+  }) || null;
+}
+
+function cloudStorageById(storageId) {
+  const id = sanitizeStorageId(storageId);
+  if (!id) return null;
+  return currentCloudStorageSettings().storages.find(function (storage) {
+    return storage.id === id;
+  }) || null;
+}
+
+function sanitizeStorageId(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function assetReference(storageId, key) {
+  const id = sanitizeStorageId(storageId);
+  const cleanKey = String(key || "").replace(/^\/+/, "");
+  if (!id || !cleanKey) return "";
+  return "@assets/" + id + "/" + cleanKey;
+}
+
+function parseAssetReference(value) {
+  const match = String(value || "").trim().match(/^@assets\/([a-z0-9_-]+)\/(.+)$/i);
+  if (!match) return null;
+  return {
+    key: decodeAssetReferenceKey(match[2]),
+    storageId: sanitizeStorageId(match[1]),
+  };
+}
+
+function decodeAssetReferenceKey(value) {
+  return String(value || "").replace(/%29/gi, ")").replace(/%28/gi, "(");
+}
+
+function resolveAssetUrl(value) {
+  const asset = parseAssetReference(value);
+  if (!asset) return String(value || "").trim();
+  const storage = cloudStorageById(asset.storageId);
+  if (!storage) return "";
+  return publicCloudStorageObjectUrl(storage, asset.key);
+}
+
+function publicCloudStorageObjectUrl(storage, key) {
+  const encodedKey = encodeObjectKey(key);
+  if (!encodedKey) return "";
+  if (isLocalCloudStorage(storage)) {
+    return "/api/oss/assets?storageId=" + encodeURIComponent(sanitizeStorageId(storage.id)) + "&path=" + encodeURIComponent(String(key || "").replace(/^\/+/, ""));
+  }
+  const publicBaseUrl = String(storage.publicBaseUrl || "").trim().replace(/\/+$/, "");
+  if (publicBaseUrl) return publicBaseUrl + "/" + encodedKey;
+
+  const endpoint = normalizeOSSEndpoint(storage.endpoint, storage.useSSL);
+  if (!endpoint) return "";
+  if (storage.forcePathStyle) {
+    return endpoint.replace(/\/+$/, "") + "/" + encodeURIComponent(String(storage.bucket || "").replace(/^\/+|\/+$/g, "")) + "/" + encodedKey;
+  }
+  try {
+    const url = new URL(endpoint);
+    url.hostname = String(storage.bucket || "").replace(/\.+$/g, "") + "." + url.hostname;
+    url.pathname = "/" + encodedKey;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch (_) {
+    return endpoint.replace(/\/+$/, "") + "/" + encodedKey;
+  }
+}
+
+function normalizeOSSEndpoint(endpoint, useSSL) {
+  const value = String(endpoint || "").trim().replace(/\/+$/, "");
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return (useSSL === false ? "http://" : "https://") + value;
+}
+
+function encodeObjectKey(key) {
+  return String(key || "")
+    .replace(/^\/+/, "")
+    .split("/")
+    .map(function (part) {
+      return encodeURIComponent(part);
+    })
+    .join("/");
+}
+
 function missingCloudStorageFields(config) {
   const missing = [];
-  if (!String(config.endpoint || "").trim()) missing.push("Endpoint");
+  if (!String(config.endpoint || "").trim()) missing.push(isLocalCloudStorage(config) ? "本地根目录" : "Endpoint");
   if (!String(config.bucket || "").trim()) missing.push("Bucket");
-  if (!String(config.accessKeyId || "").trim()) missing.push("Access Key ID");
-  if (!String(config.secretAccessKey || "").trim()) missing.push("Secret Access Key");
+  if (!isLocalCloudStorage(config)) {
+    if (!String(config.accessKeyId || "").trim()) missing.push("Access Key ID");
+    if (!String(config.secretAccessKey || "").trim()) missing.push("Secret Access Key");
+  }
   return missing;
+}
+
+function isLocalCloudStorage(config) {
+  const provider = String((config && config.provider) || "").trim().toLowerCase();
+  return provider === "local" || provider === "local-oss";
 }
 
 function dataURLToBase64(value) {
@@ -2337,11 +2542,12 @@ function renderMemoImageBlock(resource) {
 function renderMemoFileBlock(resource) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
+  const displayUrl = href !== "#" ? href : resource.url;
   const body = `
     <span class="memo-file-block-icon">${SVG.paperclip}</span>
     <span class="memo-file-block-text">
       <span class="memo-file-block-name">${escapeHTML(name)}</span>
-      <span class="memo-file-block-url">${escapeHTML(compactFileURL(resource.url))}</span>
+      <span class="memo-file-block-url">${escapeHTML(compactFileURL(displayUrl))}</span>
     </span>
   `;
 
@@ -2376,12 +2582,14 @@ function renderMemoFileToken(resource) {
 
 function isFileAttachment(label, url) {
   const pattern = /\.(?:7z|aac|apk|avi|csv|dmg|docx?|flac|gz|heic|ics|json|key|log|m4a|mkv|mov|mp3|mp4|numbers|pages|pdf|pptx?|rar|rtf|tar|txt|wav|webm|xlsx?|xml|yaml|yml|zip)(?:[?#].*)?$/i;
+  if (parseAssetReference(url)) return true;
   if (/^(local:\/\/|blob:|data:)/i.test(String(url || ""))) return true;
   return pattern.test(String(label || "")) || pattern.test(String(url || ""));
 }
 
 function fileDisplayName(label, url) {
-  const raw = String(label || "").trim() || String(url || "").trim();
+  const asset = parseAssetReference(url);
+  const raw = String(label || "").trim() || (asset ? asset.key : String(url || "").trim());
   const clean = raw.split(/[?#]/)[0].replace(/\/+$/, "");
   const last = clean.split("/").pop() || raw;
   try {
@@ -2398,14 +2606,14 @@ function compactFileURL(url) {
 }
 
 function safeImageUrl(value) {
-  const url = String(value || "").trim();
+  const url = resolveAssetUrl(value);
   if (/^(https?:|local:\/\/|blob:)/i.test(url)) return url;
   if (/^data:image\//i.test(url)) return url;
   return "";
 }
 
 function safeUrl(value) {
-  const url = String(value || "").trim();
+  const url = resolveAssetUrl(value);
   if (/^(https?:|mailto:|local:\/\/|blob:)/i.test(url)) return url;
   return "#";
 }
