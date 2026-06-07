@@ -242,6 +242,8 @@ func open_window(opts *BoxWebviewOptions) {
 	fmt.Println("Additional webview windows are not supported on Windows yet.")
 }
 
+func focus_window(opts *BoxWebviewOptions) bool { return false }
+
 func Terminate() {
 	C.webviewTerminate()
 }
