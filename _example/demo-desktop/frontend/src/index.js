@@ -4,6 +4,10 @@ import { RouterSubViews } from "./components/sub-views.js";
 
 let snapshotTimer = null;
 
+function windowStateName() {
+  return window.location.pathname === "/vault-picker" ? "vault-picker" : "desktop";
+}
+
 const render = ($root) => {
   const { innerWidth, innerHeight, location } = window;
   history.$router.prepare(location);
@@ -45,13 +49,13 @@ window.addEventListener("beforeunload", function () {
 
 function restoreWindowState() {
   if (typeof invoke !== "function") return;
-  invoke("/api/window/state/restore?name=desktop", { method: "GET" }).catch(function () {});
+  invoke("/api/window/state/restore?name=" + encodeURIComponent(windowStateName()), { method: "GET" }).catch(function () {});
 }
 
 function startWindowStateSnapshots() {
   if (typeof invoke !== "function" || snapshotTimer) return;
   snapshotTimer = window.setInterval(function () {
-    invoke("/api/window/state/snapshot?name=desktop", { method: "GET" }).catch(function () {});
+    invoke("/api/window/state/snapshot?name=" + encodeURIComponent(windowStateName()), { method: "GET" }).catch(function () {});
   }, 3000);
 }
 
@@ -64,7 +68,7 @@ function stopWindowStateSnapshots() {
 function snapshotWindowStateSync() {
   try {
     const xhr = new XMLHttpRequest();
-    xhr.open("GET", "/api/window/state/snapshot?name=desktop", false);
+    xhr.open("GET", "/api/window/state/snapshot?name=" + encodeURIComponent(windowStateName()), false);
     xhr.send();
   } catch (_) {}
 }

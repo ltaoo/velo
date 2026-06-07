@@ -1413,6 +1413,15 @@ body.is-fixed-window .memo-window-shell {
   width: 30px;
 }
 
+.memo-tool-button svg,
+.memo-action-button svg,
+.memo-icon-text-button svg,
+.memo-secondary-button svg,
+.memo-primary-button svg,
+.memo-delete-dialog svg {
+  pointer-events: none;
+}
+
 .memo-tool-button:hover,
 .memo-action-button:hover {
   background: var(--BG-3);
@@ -1435,6 +1444,16 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-primary-button:hover {
   background: var(--memo-accent-strong);
+}
+
+.memo-primary-button.is-danger {
+  background: var(--RED, #dc2626);
+  border-color: var(--RED, #dc2626);
+}
+
+.memo-primary-button.is-danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 
 .memo-primary-button:disabled {
@@ -2511,6 +2530,114 @@ body.is-fixed-window .memo-window-shell {
   width: 44px;
 }
 
+.memo-delete-dialog {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 1200;
+}
+
+.memo-delete-panel {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: var(--memo-radius);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+  color: var(--FG-0);
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+  padding: 16px;
+  width: min(420px, 100%);
+}
+
+.memo-delete-head {
+  align-items: flex-start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.memo-delete-icon {
+  align-items: center;
+  background: var(--memo-warn-soft);
+  border: 1px solid var(--memo-warn-border);
+  border-radius: 8px;
+  color: var(--RED, #dc2626);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+.memo-delete-icon svg {
+  height: 18px;
+  width: 18px;
+}
+
+.memo-delete-head h2 {
+  font-size: 17px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.memo-delete-head p {
+  color: var(--FG-1);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.memo-delete-options {
+  display: grid;
+  gap: 8px;
+}
+
+.memo-delete-option {
+  align-items: flex-start;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--FG-0);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.memo-delete-option input {
+  accent-color: var(--memo-accent);
+  margin-top: 3px;
+}
+
+.memo-delete-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.memo-delete-option strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.memo-delete-option small {
+  color: var(--FG-1);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.memo-delete-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .memo-toast {
   background: var(--FG-0);
   border-radius: 999px;
@@ -2531,6 +2658,243 @@ body.is-fixed-window .memo-window-shell {
 .memo-toast.is-visible {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+.vault-picker-page {
+  background: var(--BG-1);
+  color: var(--FG-0);
+}
+
+.vault-picker-shell {
+  align-items: center;
+  display: flex;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.vault-picker-panel {
+  background: var(--BG-0);
+  border: 1px solid var(--FG-5);
+  border-radius: 8px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.08);
+  margin: 0 auto;
+  max-width: 680px;
+  padding: 24px;
+  width: min(100%, 680px);
+}
+
+.vault-picker-header {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.vault-picker-header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.vault-picker-header p {
+  color: var(--FG-1);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.vault-picker-mark,
+.vault-picker-item-icon {
+  align-items: center;
+  background: rgba(7, 193, 96, 0.11);
+  border: 1px solid rgba(7, 193, 96, 0.2);
+  border-radius: 8px;
+  color: var(--GREEN);
+  display: flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.vault-picker-mark svg,
+.vault-picker-item-icon svg,
+.vault-picker-button svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 18px;
+}
+
+.vault-picker-meta {
+  background: var(--BG-1);
+  border: 1px solid var(--FG-5);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.vault-picker-meta span,
+.vault-picker-section-title {
+  color: var(--FG-1);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vault-picker-meta strong {
+  color: var(--FG-0);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.vault-picker-form {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 10px;
+}
+
+.vault-picker-form input {
+  background: var(--BG-0);
+  border: 1px solid var(--FG-4);
+  border-radius: 8px;
+  color: var(--FG-0);
+  font-size: 14px;
+  height: 42px;
+  min-width: 0;
+  outline: none;
+  padding: 0 12px;
+}
+
+.vault-picker-form input:focus {
+  border-color: var(--GREEN);
+  box-shadow: 0 0 0 3px rgba(7, 193, 96, 0.12);
+}
+
+.vault-picker-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.vault-picker-button {
+  align-items: center;
+  background: var(--BG-0);
+  border: 1px solid var(--FG-4);
+  border-radius: 8px;
+  color: var(--FG-0);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 650;
+  gap: 8px;
+  height: 42px;
+  justify-content: center;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.vault-picker-button:hover {
+  background: var(--BG-1);
+}
+
+.vault-picker-button.is-primary {
+  background: var(--GREEN);
+  border-color: var(--GREEN);
+  color: #fff;
+}
+
+.vault-picker-button:disabled,
+.vault-picker-form input:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.vault-picker-section {
+  border-top: 1px solid var(--FG-5);
+  padding-top: 18px;
+}
+
+.vault-picker-section-title {
+  margin-bottom: 10px;
+}
+
+.vault-picker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.vault-picker-item {
+  align-items: center;
+  background: var(--BG-0);
+  border: 1px solid var(--FG-5);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 12px;
+  text-align: left;
+}
+
+.vault-picker-item:hover {
+  background: var(--BG-1);
+  border-color: rgba(7, 193, 96, 0.35);
+}
+
+.vault-picker-item-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vault-picker-item-copy strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-picker-item-copy small {
+  color: var(--FG-1);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.vault-picker-empty {
+  border: 1px dashed var(--FG-4);
+  border-radius: 8px;
+  color: var(--FG-1);
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+
+.vault-picker-message {
+  color: var(--FG-1);
+  font-size: 13px;
+  min-height: 20px;
+  padding-top: 14px;
+}
+
+.vault-picker-message.is-success {
+  color: var(--GREEN);
+}
+
+.vault-picker-message.is-warning {
+  color: #a56a00;
+}
+
+.vault-picker-message.is-error {
+  color: var(--RED);
 }
 
 @keyframes memo-highlight {
@@ -2559,6 +2923,25 @@ body.is-fixed-window .memo-window-shell {
 }
 
 @media (max-width: 760px) {
+  .vault-picker-shell {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .vault-picker-panel {
+    box-shadow: none;
+    padding: 18px;
+  }
+
+  .vault-picker-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vault-picker-actions,
+  .vault-picker-button {
+    width: 100%;
+  }
+
   .memo-shell {
     background: var(--BG-0);
     grid-template-columns: minmax(0, 1fr);
@@ -2611,5 +2994,15 @@ body.is-fixed-window .memo-window-shell {
     right: auto;
     top: auto;
     transform: none;
+  }
+
+  .memo-delete-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .memo-delete-actions .memo-primary-button,
+  .memo-delete-actions .memo-secondary-button {
+    width: 100%;
   }
 }

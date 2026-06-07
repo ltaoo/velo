@@ -90,6 +90,7 @@ export function mountMemosHome(root) {
     query: "",
     selectedCalendarDate: "",
     sortDesc: true,
+    saving: false,
     toastTimer: null,
     visibility: DEFAULT_VISIBILITY,
   };
@@ -141,6 +142,7 @@ export function mountMemosHome(root) {
   renderAll();
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
+  refreshMemosFromVault();
   refreshStorageForRender();
   window.addEventListener("focus", refreshStorageForRender);
 
@@ -184,13 +186,13 @@ export function mountMemosHome(root) {
   }
 
   function handleClick(event) {
-    const command = event.target.closest("[data-command]");
+    const command = closestElement(event.target, "[data-command]");
     if (command && root.contains(command)) {
       runComposerCommand(command.dataset.command);
       return;
     }
 
-    const filter = event.target.closest("[data-filter]");
+    const filter = closestElement(event.target, "[data-filter]");
     if (filter && root.contains(filter)) {
       state.activeView = "memos";
       state.activeFilter = filter.dataset.filter;
@@ -200,7 +202,7 @@ export function mountMemosHome(root) {
       return;
     }
 
-    const view = event.target.closest("[data-view]");
+    const view = closestElement(event.target, "[data-view]");
     if (view && root.contains(view)) {
       state.activeView = view.dataset.view;
       state.activeFilter = "all";
@@ -213,7 +215,7 @@ export function mountMemosHome(root) {
       return;
     }
 
-    const tag = event.target.closest("[data-tag]");
+    const tag = closestElement(event.target, "[data-tag]");
     if (tag && root.contains(tag)) {
       state.activeTag = state.activeTag === tag.dataset.tag ? "" : tag.dataset.tag;
       state.activeFilter = "all";
@@ -222,19 +224,19 @@ export function mountMemosHome(root) {
       return;
     }
 
-    const calendarAction = event.target.closest("[data-calendar-action]");
+    const calendarAction = closestElement(event.target, "[data-calendar-action]");
     if (calendarAction && root.contains(calendarAction)) {
       runCalendarAction(calendarAction.dataset.calendarAction);
       return;
     }
 
-    const calendarDate = event.target.closest("[data-calendar-date]");
+    const calendarDate = closestElement(event.target, "[data-calendar-date]");
     if (calendarDate && root.contains(calendarDate)) {
       selectCalendarDate(calendarDate.dataset.calendarDate);
       return;
     }
 
-    const editorOpen = event.target.closest("[data-editor-open]");
+    const editorOpen = closestElement(event.target, "[data-editor-open]");
     if (editorOpen && root.contains(editorOpen)) {
       event.preventDefault();
       event.stopPropagation();
@@ -242,17 +244,17 @@ export function mountMemosHome(root) {
       return;
     }
 
-    const memoRefTarget = event.target.closest("[data-memo-ref-target]");
+    const memoRefTarget = closestElement(event.target, "[data-memo-ref-target]");
     if (memoRefTarget && root.contains(memoRefTarget)) {
       event.preventDefault();
       focusMemo(memoRefTarget.dataset.memoRefTarget);
       return;
     }
 
-    const action = event.target.closest("[data-action]");
+    const action = closestElement(event.target, "[data-action]");
     if (!action || !root.contains(action)) return;
 
-    const memoNode = action.closest("[data-memo-id]");
+    const memoNode = closestElement(action, "[data-memo-id]");
     const memoId = memoNode ? memoNode.dataset.memoId : "";
 
     switch (action.dataset.action) {
@@ -481,7 +483,7 @@ export function mountMemosHome(root) {
     }
 
     if (event.target.matches("[data-task-line]")) {
-      const memoNode = event.target.closest("[data-memo-id]");
+      const memoNode = closestElement(event.target, "[data-memo-id]");
       if (!memoNode) return;
       toggleTask(memoNode.dataset.memoId, Number(event.target.dataset.taskLine), event.target.checked);
       return;
@@ -534,6 +536,7 @@ export function mountMemosHome(root) {
   }
 
   function createMemo() {
+    if (state.saving) return;
     const content = composerEditor.getText().trim();
     if (!content) {
       showToast("先写点内容");
@@ -541,27 +544,31 @@ export function mountMemosHome(root) {
       return;
     }
 
-    const now = new Date().toISOString();
-    state.memos.unshift({
-      archived: false,
-      content,
-      createdAt: now,
-      id: createId(),
-      pinned: false,
-      updatedAt: "",
-      visibility: state.visibility,
-    });
-    saveMemos(state.memos);
-    composerEditor.setText("");
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
-    state.activeView = "memos";
-    state.activeFilter = "all";
-    state.activeTag = "";
-    state.selectedCalendarDate = "";
-    renderAll();
-    renderComposerStatus("");
-    window.requestAnimationFrame(() => {
-      if (composerEditor && els.composerHost.isConnected) composerEditor.focus();
+    state.saving = true;
+    renderComposerStatus(content);
+    createMemoInVault(content, state.visibility).then(
+      function (memo) {
+        state.memos = [normalizeMemoPayload(memo)].filter(Boolean).concat(state.memos);
+        saveMemos(state.memos);
+        composerEditor.setText("");
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        state.activeView = "memos";
+        state.activeFilter = "all";
+        state.activeTag = "";
+        state.selectedCalendarDate = "";
+        renderAll();
+        renderComposerStatus("");
+        showToast("已发布");
+        window.requestAnimationFrame(() => {
+          if (composerEditor && els.composerHost.isConnected) composerEditor.focus();
+        });
+      },
+      function (err) {
+        showToast("发布失败: " + errorMessage(err));
+      },
+    ).finally(function () {
+      state.saving = false;
+      renderComposerStatus(composerEditor.getText());
     });
   }
 
@@ -598,16 +605,33 @@ export function mountMemosHome(root) {
   }
 
   function updateMemo(memoId, patch) {
+    let nextMemo = null;
     state.memos = state.memos.map((memo) => {
       if (memo.id !== memoId) return memo;
-      return {
+      nextMemo = {
         ...memo,
         ...patch,
         updatedAt: patch.updatedAt || memo.updatedAt,
       };
+      return nextMemo;
     });
     saveMemos(state.memos);
     renderAll();
+    if (nextMemo) {
+      updateMemoInVault(memoId, patch).then(
+        function (memo) {
+          const normalized = normalizeMemoPayload(memo);
+          if (!normalized) return;
+          state.memos = state.memos.map((item) => item.id === memoId ? normalized : item);
+          saveMemos(state.memos);
+          renderAll();
+        },
+        function (err) {
+          showToast("保存失败: " + errorMessage(err));
+          refreshMemosFromVault();
+        },
+      );
+    }
   }
 
   function togglePin(memoId) {
@@ -636,18 +660,173 @@ export function mountMemosHome(root) {
   function deleteMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
-    if (!window.confirm("删除这条 memo？")) return;
-    state.memos = state.memos.filter((item) => item.id !== memoId);
-    saveMemos(state.memos);
-    renderAll();
+    confirmDeleteMemo(memo).then(function (options) {
+      if (!options) return;
+      deleteMemoWithOptions(memo, options);
+    });
+  }
+
+  function deleteMemoWithOptions(memo, options) {
+    const memoId = memo.id;
+    const preserveTodos = options.todoCount > 0 && !options.deleteTodos;
+    const preservePromise = preserveTodos ? createMemoFromTodoItems(memo) : Promise.resolve(null);
+
+    preservePromise.then(function (preservedMemo) {
+      deleteMemoInVault(memoId, { cleanupAssets: options.deleteFiles }).then(
+        function (result) {
+          state.memos = state.memos.filter((item) => item.id !== memoId);
+          if (preservedMemo) {
+            state.memos = [preservedMemo].concat(state.memos);
+          }
+          saveMemos(state.memos);
+          renderAll();
+          if (result && Array.isArray(result.assetErrors) && result.assetErrors.length) {
+            showToast("已删除 memo，部分文件删除失败");
+          } else if (preservedMemo) {
+            showToast("已删除 memo，todo 已保留");
+          } else {
+            showToast("已删除 memo");
+          }
+        },
+        function (err) {
+          showToast("删除失败: " + errorMessage(err));
+          if (preservedMemo) refreshMemosFromVault();
+        },
+      );
+    }, function (err) {
+      showToast("保留 todo 失败: " + errorMessage(err));
+    });
+  }
+
+  function createMemoFromTodoItems(memo) {
+    const lines = String(memo.content || "").replace(/\r\n/g, "\n").split("\n");
+    const todoLines = lines.filter((line) => parseTaskLine(line));
+    const content = todoLines.join("\n").trim();
+    if (!content) return Promise.resolve(null);
+    return createMemoInVault(content, memo.visibility || DEFAULT_VISIBILITY).then(function (created) {
+      const normalized = normalizeMemoPayload(created);
+      if (!normalized) throw new Error("无法创建 todo memo");
+      return normalized;
+    });
+  }
+
+  function confirmDeleteMemo(memo) {
+    const fileCount = collectManagedResources([memo]).length;
+    const todoCount = collectTodos([memo]).length;
+
+    return new Promise(function (resolve) {
+      const dialog = document.createElement("div");
+      dialog.className = "memo-delete-dialog";
+      dialog.innerHTML = deleteMemoDialogTemplate(memo, fileCount, todoCount);
+      root.appendChild(dialog);
+
+      function close(value) {
+        document.removeEventListener("keydown", handleKeydown);
+        dialog.remove();
+        resolve(value);
+      }
+
+      function handleKeydown(event) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close(null);
+        }
+      }
+
+      dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) {
+          close(null);
+          return;
+        }
+        const action = closestElement(event.target, "[data-delete-dialog-action]");
+        if (!action || !dialog.contains(action)) return;
+        if (action.dataset.deleteDialogAction === "cancel") {
+          close(null);
+          return;
+        }
+        const filesInput = dialog.querySelector("[data-delete-files]");
+        const todosInput = dialog.querySelector("[data-delete-todos]");
+        close({
+          deleteFiles: filesInput ? filesInput.checked : true,
+          deleteTodos: todosInput ? todosInput.checked : true,
+          fileCount,
+          todoCount,
+        });
+      });
+
+      document.addEventListener("keydown", handleKeydown);
+      window.requestAnimationFrame(function () {
+        const cancel = dialog.querySelector('[data-delete-dialog-action="cancel"]');
+        if (cancel) cancel.focus();
+      });
+    });
+  }
+
+  function collectManagedResources(memos) {
+    const seen = new Set();
+    return collectResources(memos).filter(function (resource) {
+      const asset = parseAssetReference(resource.url);
+      if (!asset) return false;
+      const key = asset.storageId + "/" + asset.key;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function deleteMemoDialogTemplate(memo, fileCount, todoCount) {
+    const title = memoTitle(memo);
+    const fileOption = fileCount
+      ? `
+        <label class="memo-delete-option">
+          <input type="checkbox" data-delete-files checked />
+          <span>
+            <strong>同时删除文件和图片</strong>
+            <small>${fileCount} 个已上传资源</small>
+          </span>
+        </label>
+      `
+      : "";
+    const todoOption = todoCount
+      ? `
+        <label class="memo-delete-option">
+          <input type="checkbox" data-delete-todos checked />
+          <span>
+            <strong>同时删除 todo 项</strong>
+            <small>${todoCount} 个 todo</small>
+          </span>
+        </label>
+      `
+      : "";
+
+    return `
+      <section class="memo-delete-panel" role="dialog" aria-modal="true" aria-labelledby="memo-delete-title">
+        <header class="memo-delete-head">
+          <span class="memo-delete-icon">${SVG.trash}</span>
+          <div>
+            <h2 id="memo-delete-title">删除 memo？</h2>
+            <p>${escapeHTML(compactText(title, 72))}</p>
+          </div>
+        </header>
+        ${fileOption || todoOption ? `<div class="memo-delete-options">${fileOption}${todoOption}</div>` : ""}
+        <footer class="memo-delete-actions">
+          <button class="memo-secondary-button" type="button" data-delete-dialog-action="cancel">取消</button>
+          <button class="memo-primary-button is-danger" type="button" data-delete-dialog-action="confirm">删除</button>
+        </footer>
+      </section>
+    `;
   }
 
   function copyMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
     copyText(memo.content).then(
-      () => showToast("已复制"),
-      () => showToast("复制失败"),
+      function () {
+        showToast("已复制");
+      },
+      function () {
+        showToast("复制失败");
+      },
     );
   }
 
@@ -905,7 +1084,20 @@ export function mountMemosHome(root) {
     const tagCount = extractTags(text).length;
     const chars = text.trim().length;
     els.composerStatus.textContent = `${chars} 字符 / ${tagCount} 标签`;
-    els.createButton.disabled = chars === 0;
+    els.createButton.disabled = chars === 0 || state.saving;
+  }
+
+  function refreshMemosFromVault() {
+    loadMemosFromVault().then(
+      function (memos) {
+        state.memos = memos.map(normalizeMemoPayload).filter(Boolean);
+        saveMemos(state.memos);
+        renderAll();
+      },
+      function (err) {
+        showToast("读取 vault memo 失败: " + errorMessage(err));
+      },
+    );
   }
 
   function visibleMemos() {
@@ -1136,13 +1328,13 @@ export function mountDetachedMemoWindow(root, options = {}) {
   }
 
   function handleClick(event) {
-    const control = event.target.closest("[data-window-control]");
+    const control = closestElement(event.target, "[data-window-control]");
     if (control && root.contains(control)) {
       runWindowControl(control.dataset.windowControl);
       return;
     }
 
-    const editorOpen = event.target.closest("[data-editor-open]");
+    const editorOpen = closestElement(event.target, "[data-editor-open]");
     if (editorOpen && root.contains(editorOpen)) {
       event.preventDefault();
       event.stopPropagation();
@@ -1150,14 +1342,14 @@ export function mountDetachedMemoWindow(root, options = {}) {
       return;
     }
 
-    const memoRefTarget = event.target.closest("[data-memo-ref-target]");
+    const memoRefTarget = closestElement(event.target, "[data-memo-ref-target]");
     if (memoRefTarget && root.contains(memoRefTarget)) {
       event.preventDefault();
       focusDetachedMemo(memoRefTarget.dataset.memoRefTarget);
       return;
     }
 
-    const action = event.target.closest("[data-action]");
+    const action = closestElement(event.target, "[data-action]");
     if (!action || !root.contains(action)) return;
 
     switch (action.dataset.action) {
@@ -2361,7 +2553,7 @@ function createMemoReferencePlugin(editor, options) {
           renderMemoReferenceMenu(menu, pluginState);
         },
         onMouseDown(event, pluginState) {
-          const option = event.target.closest("[data-memo-ref-index]");
+          const option = closestElement(event.target, "[data-memo-ref-index]");
           if (!option) return false;
           event.preventDefault();
           const item = pluginState.items[Number(option.dataset.memoRefIndex)];
@@ -2529,7 +2721,7 @@ function createMemoSlashCommandPlugin(editor, options) {
           renderSlashCommandMenu(menu, pluginState);
         },
         onMouseDown(event, pluginState) {
-          const option = event.target.closest("[data-slash-command-index]");
+          const option = closestElement(event.target, "[data-slash-command-index]");
           if (!option) return false;
           event.preventDefault();
           const item = pluginState.items[Number(option.dataset.slashCommandIndex)];
@@ -2699,7 +2891,7 @@ function createMemoTimePickerPlugin(editor) {
           renderTimePickerMenu(menu, pluginState);
         },
         onMouseDown(event, pluginState) {
-          const option = event.target.closest("[data-time-picker-index]");
+          const option = closestElement(event.target, "[data-time-picker-index]");
           if (!option) return false;
           event.preventDefault();
           const item = pluginState.items[Number(option.dataset.timePickerIndex)];
@@ -3527,6 +3719,7 @@ function insertMarkdownLinkIntoTextarea(textarea, url, onChange) {
 }
 
 function loadMemos() {
+  if (typeof invoke === "function") return [];
   const saved = loadJSON(MEMOS_STORAGE_KEY, null);
   if (Array.isArray(saved)) return saved;
   const memos = seedMemos();
@@ -3535,7 +3728,91 @@ function loadMemos() {
 }
 
 function saveMemos(memos) {
+  if (typeof invoke === "function") return;
   localStorage.setItem(MEMOS_STORAGE_KEY, JSON.stringify(memos));
+}
+
+function loadMemosFromVault() {
+  if (typeof invoke !== "function") {
+    return Promise.resolve(loadMemos());
+  }
+  return invoke("/api/memos", { method: "GET" }).then(function (resp) {
+    if (!resp || resp.code !== 0) {
+      throw new Error((resp && resp.msg) || "读取 memo 失败");
+    }
+    const data = resp.data || {};
+    return Array.isArray(data.memos) ? data.memos : [];
+  });
+}
+
+function createMemoInVault(content, visibility) {
+  if (typeof invoke !== "function") {
+    const now = new Date().toISOString();
+    return Promise.resolve({
+      archived: false,
+      content,
+      createdAt: now,
+      id: createId(),
+      pinned: false,
+      updatedAt: "",
+      visibility,
+    });
+  }
+  return invoke("/api/memos/create", {
+    method: "POST",
+    args: {
+      content,
+      visibility,
+    },
+  }).then(function (resp) {
+    if (!resp || resp.code !== 0 || !resp.data || !resp.data.memo) {
+      throw new Error((resp && resp.msg) || "发布失败");
+    }
+    return resp.data.memo;
+  });
+}
+
+function updateMemoInVault(id, patch) {
+  if (typeof invoke !== "function") {
+    return Promise.resolve(Object.assign({ id }, patch));
+  }
+  const args = { id };
+  if (Object.prototype.hasOwnProperty.call(patch, "content")) args.content = patch.content;
+  if (Object.prototype.hasOwnProperty.call(patch, "visibility")) args.visibility = patch.visibility;
+  if (Object.prototype.hasOwnProperty.call(patch, "pinned")) args.pinned = patch.pinned;
+  if (Object.prototype.hasOwnProperty.call(patch, "archived")) args.archived = patch.archived;
+  return invoke("/api/memos/update", {
+    method: "POST",
+    args,
+  }).then(function (resp) {
+    if (!resp || resp.code !== 0 || !resp.data || !resp.data.memo) {
+      throw new Error((resp && resp.msg) || "保存失败");
+    }
+    return resp.data.memo;
+  });
+}
+
+function deleteMemoInVault(id, options) {
+  if (typeof invoke !== "function") {
+    return Promise.resolve({ success: true });
+  }
+  const args = { id };
+  if (options && Object.prototype.hasOwnProperty.call(options, "cleanupAssets")) {
+    args.cleanupAssets = Boolean(options.cleanupAssets);
+  }
+  return invoke("/api/memos/delete", {
+    method: "POST",
+    args,
+  }).then(function (resp) {
+    if (!resp || resp.code !== 0) {
+      throw new Error((resp && resp.msg) || "删除失败");
+    }
+    return resp.data || { success: true };
+  });
+}
+
+function errorMessage(err) {
+  return err && err.message ? err.message : String(err || "unknown error");
 }
 
 function loadJSON(key, fallback) {
@@ -4599,10 +4876,20 @@ function copyText(text) {
 }
 
 function closestAnchor(target) {
+  return closestElement(target, "a[href]");
+}
+
+function closestElement(target, selector) {
   let node = target;
-  if (node && node.nodeType === 3) node = node.parentElement;
-  if (!node || typeof node.closest !== "function") return null;
-  return node.closest("a[href]");
+  if (node && node.nodeType === 3) node = node.parentElement || node.parentNode;
+  while (node && node !== document) {
+    if (node.nodeType === 1) {
+      if (typeof node.matches === "function" && node.matches(selector)) return node;
+      if (typeof node.webkitMatchesSelector === "function" && node.webkitMatchesSelector(selector)) return node;
+    }
+    node = node.parentElement || node.parentNode;
+  }
+  return null;
 }
 
 function externalBrowserURLFromAnchor(anchor) {
