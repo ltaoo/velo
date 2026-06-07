@@ -75,6 +75,7 @@ func init() {
 
 	// Register VeloWebView class (subclass of WKWebView with drag-drop support)
 	webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
+	cocoa.AddMethod(webViewClass, cocoa.RegisterName("acceptsFirstMouse:"), veloWebViewAcceptsFirstMouse, "B@:@")
 	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingEntered:"), veloWebViewDraggingEntered, "Q@:@")
 	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingUpdated:"), veloWebViewDraggingUpdated, "Q@:@")
 	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingExited:"), veloWebViewDraggingExited, "v@:@")
@@ -94,6 +95,10 @@ func applicationShouldTerminateAfterLastWindowClosed(self, _cmd, app uintptr) ui
 func windowWillClose(self, _cmd, notification uintptr) {
 	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
 	cleanupWindow(nsWindow)
+}
+
+func veloWebViewAcceptsFirstMouse(self, _cmd, event uintptr) uintptr {
+	return 1
 }
 
 // Callback for webView:startURLSchemeTask:

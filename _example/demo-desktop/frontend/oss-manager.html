@@ -1140,8 +1140,37 @@
       }
 
       function openURL(url) {
-        if (!url) return;
-        window.open(url, "_blank", "noopener");
+        var target = externalBrowserURL(url);
+        if (!target) {
+          setMessage("仅支持使用默认浏览器打开 http/https 链接", "warning");
+          return;
+        }
+        if (typeof invoke !== "function") {
+          window.open(target, "_blank", "noopener");
+          return;
+        }
+        invoke("/api/external/open?url=" + encodeURIComponent(target), { method: "GET" }).then(
+          function (resp) {
+            if (!resp || resp.code !== 0) {
+              setMessage((resp && resp.msg) || "打开链接失败", "warning");
+            }
+          },
+          function (err) {
+            setMessage("打开链接失败: " + errorMessage(err), "warning");
+          },
+        );
+      }
+
+      function externalBrowserURL(value) {
+        var href = String(value || "").trim();
+        if (!/^https?:\/\//i.test(href)) return "";
+        try {
+          var parsed = new URL(href);
+          if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.host) {
+            return parsed.href;
+          }
+        } catch (_) {}
+        return "";
       }
 
       function copyText(value, label) {

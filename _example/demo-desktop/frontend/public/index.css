@@ -448,6 +448,7 @@ ol {
 }
 
 .file-picker-menu,
+.memo-ref-menu,
 .time-picker-menu,
 .slash-command-menu {
   background: var(--BG-0);
@@ -468,6 +469,7 @@ ol {
 }
 
 .file-picker-option,
+.memo-ref-option,
 .time-picker-option,
 .slash-command-option {
   border-radius: 6px;
@@ -479,8 +481,17 @@ ol {
 }
 
 .file-picker-option,
+.memo-ref-option,
 .time-picker-option {
   flex-direction: column;
+}
+
+.memo-ref-option {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 52px minmax(0, 1fr);
+  min-height: 48px;
 }
 
 .slash-command-option {
@@ -493,6 +504,8 @@ ol {
 
 .file-picker-option:hover,
 .file-picker-option.active,
+.memo-ref-option:hover,
+.memo-ref-option.active,
 .time-picker-option:hover,
 .time-picker-option.active,
 .slash-command-option:hover,
@@ -500,6 +513,7 @@ ol {
   background: var(--memo-accent-soft);
 }
 
+.memo-ref-option-kind,
 .slash-command-icon {
   align-items: center;
   background: var(--BG-1);
@@ -514,6 +528,12 @@ ol {
   min-width: 34px;
 }
 
+.memo-ref-option-kind {
+  color: var(--memo-accent-strong);
+  min-width: 46px;
+}
+
+.memo-ref-option-copy,
 .slash-command-copy {
   display: flex;
   flex-direction: column;
@@ -523,6 +543,8 @@ ol {
 
 .file-picker-label,
 .file-picker-detail,
+.memo-ref-option-label,
+.memo-ref-option-detail,
 .time-picker-label,
 .time-picker-detail,
 .slash-command-label,
@@ -533,6 +555,7 @@ ol {
 }
 
 .file-picker-label,
+.memo-ref-option-label,
 .time-picker-label,
 .slash-command-label {
   color: var(--FG-0);
@@ -541,9 +564,11 @@ ol {
 }
 
 .file-picker-detail,
+.memo-ref-option-detail,
 .time-picker-detail,
 .slash-command-detail,
 .file-picker-empty,
+.memo-ref-empty,
 .time-picker-empty,
 .slash-command-empty {
   color: var(--FG-1);
@@ -551,14 +576,20 @@ ol {
 }
 
 .file-picker-empty,
+.memo-ref-empty,
 .time-picker-empty,
 .slash-command-empty {
   padding: 9px 10px;
 }
 
+.ProseMirror .memo-ref-query-range,
 .ProseMirror .time-query-range,
 .ProseMirror .slash-command-range {
   border-radius: 4px;
+}
+
+.ProseMirror .memo-ref-query-range {
+  background: var(--memo-accent-soft);
 }
 
 .ProseMirror .time-query-range {
@@ -1212,7 +1243,8 @@ ol {
 }
 
 .memo-visibility,
-.memo-pin-label {
+.memo-pin-label,
+.memo-backlink-label {
   align-items: center;
   background: var(--BG-1);
   border: 1px solid var(--border);
@@ -1231,6 +1263,12 @@ ol {
   color: var(--memo-warn);
 }
 
+.memo-backlink-label {
+  background: var(--memo-blue-soft);
+  border-color: rgba(37, 99, 235, 0.24);
+  color: var(--memo-blue);
+}
+
 .memo-content {
   color: var(--FG-0);
   font-size: 14px;
@@ -1244,6 +1282,7 @@ ol {
 .memo-content ul,
 .memo-content ol,
 .memo-content figure,
+.memo-content .memo-ref-card,
 .memo-content h3,
 .memo-content h4,
 .memo-content h5 {
@@ -1290,6 +1329,147 @@ ol {
 
 .memo-content a {
   color: var(--memo-blue);
+}
+
+.memo-ref-chip {
+  align-items: center;
+  background: var(--memo-blue-soft);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 6px;
+  color: var(--memo-blue);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 5px;
+  line-height: 1.3;
+  margin: 0 1px;
+  max-width: min(320px, 100%);
+  padding: 2px 7px;
+  vertical-align: baseline;
+}
+
+.memo-ref-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-ref-chip small {
+  color: var(--FG-1);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.memo-ref-chip:hover {
+  border-color: var(--memo-blue);
+}
+
+.memo-ref-chip.is-embed {
+  background: var(--memo-accent-soft);
+  border-color: var(--memo-accent-border);
+  color: var(--memo-accent-strong);
+}
+
+.memo-ref-chip.is-missing {
+  background: var(--memo-warn-soft);
+  border-color: var(--memo-warn-border);
+  color: var(--memo-warn);
+  cursor: default;
+}
+
+.memo-ref-card {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--memo-accent);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.memo-ref-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.memo-ref-title {
+  background: transparent;
+  border: 0;
+  color: var(--FG-0);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-ref-title:hover {
+  color: var(--memo-accent-strong);
+}
+
+.memo-ref-title.is-static {
+  cursor: default;
+}
+
+.memo-ref-title.is-static:hover {
+  color: var(--FG-0);
+}
+
+.memo-ref-meta {
+  align-items: center;
+  color: var(--FG-1);
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.memo-ref-meta-line {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--FG-1);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.memo-ref-body {
+  max-height: 360px;
+  overflow: auto;
+  padding: 10px 12px 4px;
+}
+
+.memo-ref-body .memo-task-line input:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.memo-ref-state {
+  color: var(--FG-1);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.memo-ref-card.is-missing,
+.memo-ref-card.is-cycle,
+.memo-ref-card.is-collapsed {
+  border-left-color: var(--memo-warn);
 }
 
 .memo-hashtag {
@@ -1343,13 +1523,68 @@ ol {
   max-width: 100%;
   min-height: 58px;
   padding: 10px 12px;
+  position: relative;
   text-decoration: none;
   width: fit-content;
+}
+
+.memo-file-block.has-editor-open {
+  padding-right: 152px;
 }
 
 .memo-file-block:hover {
   border-color: var(--memo-accent-border);
   text-decoration: none;
+}
+
+.memo-file-open-vscode {
+  align-items: center;
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--memo-accent-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 4px;
+  height: 28px;
+  opacity: 0;
+  padding: 0 8px;
+  pointer-events: none;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.memo-file-open-vscode svg {
+  height: 14px;
+  width: 14px;
+}
+
+.memo-file-open-vscode span {
+  overflow: visible;
+}
+
+.has-editor-open:hover .memo-file-open-vscode,
+.has-editor-open:focus-within .memo-file-open-vscode {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.memo-file-open-vscode:hover {
+  background: var(--memo-accent-soft);
+  border-color: var(--memo-accent-border);
+}
+
+.memo-file-open-vscode:disabled {
+  cursor: progress;
+  opacity: 0.72;
 }
 
 .memo-file-block-icon {
@@ -1600,6 +1835,11 @@ ol {
   white-space: nowrap;
 }
 
+.memo-file-token.has-editor-open {
+  overflow: visible;
+  position: relative;
+}
+
 .memo-file-token span {
   min-width: 0;
   overflow: hidden;
@@ -1609,6 +1849,19 @@ ol {
 .memo-file-token:hover {
   border-color: var(--memo-accent-border);
   text-decoration: none;
+}
+
+.memo-file-token .memo-file-open-vscode {
+  bottom: calc(100% + 6px);
+  right: 0;
+  top: auto;
+  transform: none;
+}
+
+.memo-file-token .memo-file-open-vscode span {
+  min-width: auto;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .memo-card-tags {

@@ -73,6 +73,7 @@ function mountMemosHome(root, options = {}) {
     editingId: "",
     editDraft: "",
     editVisibility: DEFAULT_VISIBILITY,
+    memoRefIndex: null,
     memos: loadMemos(),
     query: "",
     sortDesc: true,
@@ -114,6 +115,9 @@ function mountMemosHome(root, options = {}) {
   updateVersion(els.version, options.version);
 
   composerEditor = createMiniEditor(els.composerHost, {
+    memoItems() {
+      return state.memos;
+    },
     onChange(value) {
       localStorage.setItem(DRAFT_STORAGE_KEY, value);
       renderComposerStatus(value);
@@ -133,12 +137,14 @@ function mountMemosHome(root, options = {}) {
   refreshStorageForRender();
   window.addEventListener("focus", refreshStorageForRender);
 
+  window.addEventListener("click", handleExternalLinkClick, true);
   root.addEventListener("click", handleClick);
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
 
   return {
     destroy() {
+      window.removeEventListener("click", handleExternalLinkClick, true);
       root.removeEventListener("click", handleClick);
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
@@ -152,6 +158,19 @@ function mountMemosHome(root, options = {}) {
       updateVersion(els.version, version);
     },
   };
+
+  function handleExternalLinkClick(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const link = closestAnchor(event.target);
+    if (!link || !root.contains(link)) return;
+
+    const url = externalBrowserURLFromAnchor(link);
+    if (!url) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    confirmOpenExternalLink(url);
+  }
 
   function refreshStorageForRender() {
     refreshCloudStorageSettings().then(function () {
@@ -182,6 +201,21 @@ function mountMemosHome(root, options = {}) {
       return;
     }
 
+    const editorOpen = event.target.closest("[data-editor-open]");
+    if (editorOpen && root.contains(editorOpen)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openFileInVSCode(editorOpen);
+      return;
+    }
+
+    const memoRefTarget = event.target.closest("[data-memo-ref-target]");
+    if (memoRefTarget && root.contains(memoRefTarget)) {
+      event.preventDefault();
+      focusMemo(memoRefTarget.dataset.memoRefTarget);
+      return;
+    }
+
     const action = event.target.closest("[data-action]");
     if (!action || !root.contains(action)) return;
 
@@ -204,6 +238,9 @@ function mountMemosHome(root, options = {}) {
         break;
       case "copyMemo":
         copyMemo(memoId);
+        break;
+      case "copyMemoRef":
+        copyMemoRef(memoId);
         break;
       case "createMemo":
         createMemo();
@@ -269,6 +306,67 @@ function mountMemosHome(root, options = {}) {
     return invoke(path, { method: "GET" });
   }
 
+  function openFileInVSCode(button) {
+    const file = button.dataset.editorFile || "";
+    if (!file) {
+      showToast("没有可打开的本地文件");
+      return;
+    }
+    if (typeof invoke !== "function") {
+      showToast("当前环境不支持打开 VS Code");
+      return;
+    }
+
+    const line = button.dataset.editorLine || "1";
+    const col = button.dataset.editorCol || "1";
+    button.disabled = true;
+    invoke(
+      "/api/editor/open?file=" +
+        encodeURIComponent(file) +
+        "&line=" +
+        encodeURIComponent(line) +
+        "&col=" +
+        encodeURIComponent(col) +
+        "&app=code",
+      { method: "GET" },
+    ).then(
+      function (resp) {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开 VS Code 失败");
+          return;
+        }
+        showToast("已在 VS Code 中打开");
+      },
+      function (err) {
+        showToast("打开 VS Code 失败: " + err);
+      },
+    ).finally(function () {
+      button.disabled = false;
+    });
+  }
+
+  function confirmOpenExternalLink(url) {
+    openExternalLinkInDefaultBrowser(url);
+  }
+
+  function openExternalLinkInDefaultBrowser(url) {
+    if (typeof invoke !== "function") {
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+
+    invoke("/api/external/open?url=" + encodeURIComponent(url), { method: "GET" }).then(
+      function (resp) {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开链接失败");
+        }
+      },
+      function (err) {
+        showToast("打开链接失败: " + err);
+      },
+    );
+  }
+
   function openSettings() {
     if (typeof invoke !== "function") {
       window.open("settings.html");
@@ -284,6 +382,30 @@ function mountMemosHome(root, options = {}) {
         showToast("打开设置失败: " + err);
       },
     );
+  }
+
+  function focusMemo(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) {
+      showToast("找不到引用的 memo");
+      return;
+    }
+
+    state.activeFilter = memo.archived ? "archive" : "all";
+    state.activeTag = "";
+    state.query = "";
+    els.searchInput.value = "";
+    renderAll();
+
+    window.requestAnimationFrame(function () {
+      const target = els.memoList.querySelector(`[data-memo-id="${escapeCSSIdent(memoId)}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.add("is-highlighted");
+      window.setTimeout(function () {
+        target.classList.remove("is-highlighted");
+      }, 1500);
+    });
   }
 
   async function checkUpdate() {
@@ -558,6 +680,15 @@ function mountMemosHome(root, options = {}) {
     );
   }
 
+  function copyMemoRef(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return;
+    copyText(`[[memo:${memo.id}|${memoReferenceAlias(memoTitle(memo))}]]`).then(
+      () => showToast("已复制 memo 引用"),
+      () => showToast("复制失败"),
+    );
+  }
+
   function insertFiles(files) {
     if (!files || files.length === 0) return;
     if (composerEditor.insertFiles) {
@@ -595,6 +726,7 @@ function mountMemosHome(root, options = {}) {
   }
 
   function renderAll() {
+    state.memoRefIndex = buildMemoReferenceIndex(state.memos);
     renderFilterButtons();
     renderStats();
     renderTags();
@@ -646,7 +778,7 @@ function mountMemosHome(root, options = {}) {
           .map(
             (memo) => `
               <article class="memo-pinned-item">
-                <div class="memo-pinned-content memo-content">${renderMemoMarkdown(memo.content)}</div>
+                <div class="memo-pinned-content memo-content">${renderMemoMarkdown(memo.content, memoRenderContext(memo.id, { readonly: true }))}</div>
                 <small>${formatShortDate(memo.createdAt)}</small>
               </article>
             `,
@@ -675,7 +807,7 @@ function mountMemosHome(root, options = {}) {
     const memos = visibleMemos();
     els.feedCount.textContent = `${memos.length} 条`;
     els.memoList.innerHTML = memos.length
-      ? memos.map((memo) => memoTemplate(memo, state.editingId)).join("")
+      ? memos.map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id))).join("")
       : emptyFeedTemplate();
 
     if (state.editingId) {
@@ -684,6 +816,9 @@ function mountMemosHome(root, options = {}) {
       const statusHost = els.memoList.querySelector("[data-edit-vim-status]");
       if (memo && host) {
         editEditor = createMiniEditor(host, {
+          memoItems() {
+            return state.memos;
+          },
           onChange(value) {
             state.editDraft = value;
           },
@@ -691,6 +826,7 @@ function mountMemosHome(root, options = {}) {
             saveEdit(memo.id);
           },
           placeholder: "编辑 memo...",
+          sourceMemoId: memo.id,
           value: memo.content,
           vimStatusHost: statusHost,
         });
@@ -729,6 +865,19 @@ function mountMemosHome(root, options = {}) {
 
   function findMemo(memoId) {
     return state.memos.find((memo) => memo.id === memoId);
+  }
+
+  function memoRenderContext(sourceId, options = {}) {
+    const index = state.memoRefIndex || buildMemoReferenceIndex(state.memos);
+    state.memoRefIndex = index;
+    return {
+      depth: options.depth || 0,
+      index,
+      maxDepth: options.maxDepth || 2,
+      readonly: Boolean(options.readonly),
+      sourceId: sourceId || "",
+      stack: options.stack || (sourceId ? [sourceId] : []),
+    };
   }
 
   function showToast(message) {
@@ -922,11 +1071,12 @@ function updateReleaseTemplate(info) {
   `;
 }
 
-function memoTemplate(memo, editingId) {
+function memoTemplate(memo, editingId, renderContext) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
   const archived = memo.archived;
   const editing = memo.id === editingId;
+  const backlinks = memoBacklinkCount(renderContext, memo.id);
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -941,19 +1091,21 @@ function memoTemplate(memo, editingId) {
         <div class="memo-card-meta">
           <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
+          ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
       </header>
       ${
         editing
           ? editTemplate(memo)
           : `
-            <div class="memo-content">${renderMemoMarkdown(memo.content)}</div>
+            <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
             ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`).join("")}</div>` : ""}
           `
       }
       <footer class="memo-card-actions">
         <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
         <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
+        <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
         <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
         ${
           archived
@@ -1198,10 +1350,21 @@ function installFileDropHandler(host, editor) {
 
   function onPaste(event) {
     const files = filesFromClipboard(event.clipboardData);
-    if (!files.length) return;
+    if (files.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      insertFilesIntoEditor(editor, files);
+      editor.focus();
+      return;
+    }
+
+    const url = clipboardPlainURL(event.clipboardData);
+    if (!url) return;
     event.preventDefault();
     event.stopPropagation();
-    insertFilesIntoEditor(editor, files);
+    if (!insertMarkdownLinkIntoEditor(editor, url)) {
+      insertPlainTextIntoEditor(editor, markdownLinkText(markdownLinkLabel(url), url));
+    }
     editor.focus();
   }
 
@@ -1264,6 +1427,7 @@ function installMemoEditorPlugins(editor, options) {
   }
 
   const plugins = [
+    createMemoReferencePlugin(editor, options || {}),
     createMemoSlashCommandPlugin(editor, options || {}),
     createMemoTimePickerPlugin(editor),
   ];
@@ -1303,6 +1467,171 @@ function filterEditorFileItems(items, query) {
         .includes(keyword);
     })
     .slice(0, 8);
+}
+
+function createMemoReferencePlugin(editor, options) {
+  const PM = window.ProsemirrorMod;
+  const key = new PM.PluginKey(editor.id + "-memoReference");
+
+  function empty(dismissedKey) {
+    return {
+      active: false,
+      dismissedKey: dismissedKey || null,
+      embed: false,
+      from: null,
+      items: [],
+      query: "",
+      selectedIndex: 0,
+      to: null,
+    };
+  }
+
+  function findTrigger(state) {
+    const selection = state.selection;
+    if (!selection.empty) return null;
+
+    const $from = selection.$from;
+    if (!$from.parent.isTextblock) return null;
+
+    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const openIndex = before.lastIndexOf("[[");
+    if (openIndex < 0) return null;
+
+    const query = before.slice(openIndex + 2);
+    if (/[\[\]\n]/.test(query)) return null;
+
+    const embed = openIndex > 0 && before.charAt(openIndex - 1) === "!";
+    const markerStart = embed ? openIndex - 1 : openIndex;
+    const prev = markerStart > 0 ? before.charAt(markerStart - 1) : "";
+    if (prev && !/[\s([{>]/.test(prev)) return null;
+
+    const from = selection.from - query.length - 2 - (embed ? 1 : 0);
+    return {
+      embed,
+      from,
+      key: from + ":" + selection.from + ":" + (embed ? "embed" : "link") + ":" + query,
+      query,
+      to: selection.from,
+    };
+  }
+
+  function selectItem(view, item) {
+    const state = key.getState(view.state);
+    if (!state || !state.active || !item) return false;
+
+    const text = memoReferenceInsertText(item, state.embed);
+    view.dispatch(
+      view.state.tr
+        .insertText(text, state.from, state.to)
+        .setMeta(key, { type: "close" })
+        .scrollIntoView(),
+    );
+    view.focus();
+    return true;
+  }
+
+  return new PM.Plugin({
+    key,
+    state: {
+      init: empty,
+      apply(transaction, value, oldState, newState) {
+        const meta = transaction.getMeta(key);
+        if (meta && meta.type === "close") {
+          const trigger = findTrigger(newState);
+          return empty(trigger ? trigger.key : null);
+        }
+
+        const trigger = findTrigger(newState);
+        if (!trigger) return empty();
+        if (trigger.key === value.dismissedKey && !transaction.docChanged) {
+          return {
+            ...empty(value.dismissedKey),
+            embed: trigger.embed,
+            from: trigger.from,
+            query: trigger.query,
+            to: trigger.to,
+          };
+        }
+
+        const items = memoReferenceItems(options, trigger.query);
+        let selectedIndex = value.selectedIndex || 0;
+        if (meta && meta.type === "setSelectedIndex") selectedIndex = meta.selectedIndex || 0;
+        selectedIndex = items.length ? Math.max(0, Math.min(selectedIndex, items.length - 1)) : 0;
+
+        return {
+          active: true,
+          dismissedKey: null,
+          embed: trigger.embed,
+          from: trigger.from,
+          items,
+          query: trigger.query,
+          selectedIndex,
+          to: trigger.to,
+        };
+      },
+    },
+    props: {
+      decorations(state) {
+        const pluginState = key.getState(state);
+        if (!pluginState || !pluginState.active || pluginState.from >= pluginState.to) {
+          return PM.DecorationSet.empty;
+        }
+        return PM.DecorationSet.create(state.doc, [
+          PM.Decoration.inline(pluginState.from, pluginState.to, {
+            class: "memo-ref-query-range",
+          }),
+        ]);
+      },
+      handleKeyDown(view, event) {
+        const pluginState = key.getState(view.state);
+        if (!pluginState || !pluginState.active) return false;
+
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          const length = pluginState.items.length;
+          const selectedIndex = length
+            ? (pluginState.selectedIndex + direction + length) % length
+            : 0;
+          event.preventDefault();
+          view.dispatch(
+            view.state.tr.setMeta(key, { type: "setSelectedIndex", selectedIndex }),
+          );
+          return true;
+        }
+
+        if (event.key === "Enter" || event.key === "Tab") {
+          if (!pluginState.items.length) return false;
+          event.preventDefault();
+          return selectItem(view, pluginState.items[pluginState.selectedIndex]);
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          view.dispatch(view.state.tr.setMeta(key, { type: "close" }));
+          return true;
+        }
+
+        return false;
+      },
+    },
+    view(view) {
+      return createFloatingMenuView({
+        className: "memo-ref-menu hidden",
+        key,
+        render(menu, pluginState) {
+          renderMemoReferenceMenu(menu, pluginState);
+        },
+        onMouseDown(event, pluginState) {
+          const option = event.target.closest("[data-memo-ref-index]");
+          if (!option) return false;
+          event.preventDefault();
+          const item = pluginState.items[Number(option.dataset.memoRefIndex)];
+          return selectItem(view, item);
+        },
+        view,
+      });
+    },
+  });
 }
 
 function createMemoSlashCommandPlugin(editor, options) {
@@ -1776,6 +2105,85 @@ function renderSlashCommandMenu(menu, pluginState) {
     .join("");
 }
 
+function memoReferenceItems(options, query) {
+  const source = typeof options.memoItems === "function"
+    ? options.memoItems()
+    : options.memoItems;
+  const sourceMemoId = String(options.sourceMemoId || "");
+  const keyword = String(query || "")
+    .trim()
+    .replace(/^memo:/i, "")
+    .toLowerCase();
+
+  return (Array.isArray(source) ? source : [])
+    .filter(function (memo) {
+      return memo && memo.id && memo.id !== sourceMemoId;
+    })
+    .map(function (memo) {
+      const title = memoTitle(memo);
+      const detail = memoReferenceDetail(memo);
+      return {
+        alias: memoReferenceAlias(title),
+        content: memo.content || "",
+        detail,
+        id: memo.id,
+        label: title,
+        pinned: Boolean(memo.pinned),
+        time: new Date(memo.updatedAt || memo.createdAt || 0).getTime() || 0,
+      };
+    })
+    .filter(function (item) {
+      if (!keyword) return true;
+      return [item.label, item.detail, item.id, item.content]
+        .join("\n")
+        .toLowerCase()
+        .includes(keyword);
+    })
+    .sort(function (a, b) {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.time - a.time;
+    })
+    .slice(0, 8);
+}
+
+function memoReferenceDetail(memo) {
+  const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const date = memo.updatedAt || memo.createdAt;
+  const parts = [
+    visibility.label,
+    date ? formatShortDate(date) : "",
+    "memo:" + memo.id,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function memoReferenceInsertText(item, embed) {
+  const alias = memoReferenceAlias(item.alias || item.label || "");
+  const target = "memo:" + item.id + (alias ? "|" + alias : "");
+  return (embed ? "![[" : "[[") + target + "]]";
+}
+
+function renderMemoReferenceMenu(menu, pluginState) {
+  if (!pluginState.items.length) {
+    menu.innerHTML = '<div class="memo-ref-empty">没有匹配的 memo</div>';
+    return;
+  }
+
+  menu.innerHTML = pluginState.items
+    .map(function (item, index) {
+      return `
+        <div class="memo-ref-option ${index === pluginState.selectedIndex ? "active" : ""}" data-memo-ref-index="${index}">
+          <span class="memo-ref-option-kind">${pluginState.embed ? "EMBED" : "LINK"}</span>
+          <span class="memo-ref-option-copy">
+            <span class="memo-ref-option-label">${escapeHTML(item.label)}</span>
+            <span class="memo-ref-option-detail">${escapeHTML(item.detail)}</span>
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 function memoTimeItems(query) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1890,6 +2298,46 @@ function requestNativeFileForEditor(editor, accept) {
 function insertPlainTextIntoEditor(editor, text) {
   const view = editor.view;
   view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+}
+
+function insertMarkdownLinkIntoEditor(editor, url) {
+  const view = editor && editor.view;
+  const PM = window.ProsemirrorMod;
+  if (!view || !view.state || !PM || !PM.TextSelection) return false;
+
+  const { from, to, empty } = view.state.selection;
+  const selected = empty ? "" : view.state.doc.textBetween(from, to, "\n");
+  const label = markdownLinkLabel(selected || url);
+  const text = markdownLinkText(label, url);
+  const transaction = view.state.tr.insertText(text, from, to);
+  transaction.setSelection(PM.TextSelection.create(transaction.doc, from + 1, from + 1 + label.length));
+  view.dispatch(transaction.scrollIntoView());
+  return true;
+}
+
+function clipboardPlainURL(clipboardData) {
+  if (!clipboardData || typeof clipboardData.getData !== "function") return "";
+  return singlePlainURL(clipboardData.getData("text/plain"));
+}
+
+function singlePlainURL(value) {
+  const text = String(value || "").trim();
+  if (!text || /\s/.test(text) || !/^https?:\/\//i.test(text)) return "";
+
+  try {
+    const url = new window.URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? text : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function markdownLinkText(label, url) {
+  return "[" + label + "](" + markdownUrl(url) + ")";
+}
+
+function markdownLinkLabel(value) {
+  return markdownLabel(String(value || "").replace(/\s+/g, " ").trim());
 }
 
 function filesToMarkdown(files) {
@@ -2272,8 +2720,17 @@ function createFallbackEditor(host, options) {
       options.onSubmit();
     }
   });
+  function onPaste(event) {
+    const url = clipboardPlainURL(event.clipboardData);
+    if (!url) return;
+    event.preventDefault();
+    event.stopPropagation();
+    insertMarkdownLinkIntoTextarea(textarea, url, options.onChange);
+  }
+  textarea.addEventListener("paste", onPaste);
   return {
     destroy() {
+      textarea.removeEventListener("paste", onPaste);
       textarea.remove();
     },
     focus() {
@@ -2316,6 +2773,18 @@ function createFallbackEditor(host, options) {
       if (options.onChange) options.onChange(textarea.value);
     },
   };
+}
+
+function insertMarkdownLinkIntoTextarea(textarea, url, onChange) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.slice(start, end);
+  const label = markdownLinkLabel(selected || url);
+  const text = markdownLinkText(label, url);
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+  textarea.selectionStart = start + 1;
+  textarea.selectionEnd = start + 1 + label.length;
+  if (onChange) onChange(textarea.value);
 }
 
 function loadMemos() {
@@ -2389,8 +2858,134 @@ function extractTags(text) {
   return Array.from(tags);
 }
 
-function renderMemoMarkdown(content) {
-  const lines = String(content || "").replace(/\r\n/g, "\n").split("\n");
+function buildMemoReferenceIndex(memos) {
+  const list = Array.isArray(memos) ? memos : [];
+  const incoming = new Map();
+  const memoById = new Map();
+  const memoByTitleKey = new Map();
+  const outgoing = new Map();
+  const unresolved = [];
+
+  list.forEach(function (memo) {
+    if (!memo || !memo.id) return;
+    memoById.set(memo.id, memo);
+  });
+
+  list.forEach(function (memo) {
+    if (!memo || !memo.id) return;
+    const key = memoTitleKey(memoTitle(memo));
+    if (key && !memoByTitleKey.has(key)) memoByTitleKey.set(key, memo.id);
+  });
+
+  list.forEach(function (memo) {
+    if (!memo || !memo.id) return;
+    const refs = parseMemoReferences(memo.content).map(function (ref) {
+      const target = resolveMemoReferenceTarget(ref, { index: { memoById, memoByTitleKey } });
+      const edge = {
+        ...ref,
+        sourceId: memo.id,
+        targetId: target ? target.id : "",
+      };
+      if (edge.targetId) {
+        if (!incoming.has(edge.targetId)) incoming.set(edge.targetId, []);
+        incoming.get(edge.targetId).push(edge);
+      } else {
+        unresolved.push(edge);
+      }
+      return edge;
+    });
+    outgoing.set(memo.id, refs);
+  });
+
+  return {
+    incoming,
+    memoById,
+    memoByTitleKey,
+    outgoing,
+    unresolved,
+  };
+}
+
+function parseMemoReferences(content) {
+  const refs = [];
+  const lines = memoLines(content);
+  let inCode = false;
+
+  lines.forEach(function (line, index) {
+    if (isMemoFenceLine(line)) {
+      inCode = !inCode;
+      return;
+    }
+    if (inCode) return;
+
+    const pattern = /(!?)\[\[([^\]\n]+)\]\]/g;
+    let match = pattern.exec(line);
+    while (match) {
+      const ref = parseMemoReferenceInner(match[2], match[1] === "!");
+      if (ref) {
+        refs.push({
+          ...ref,
+          line: index + 1,
+          raw: match[0],
+        });
+      }
+      match = pattern.exec(line);
+    }
+  });
+
+  return refs;
+}
+
+function parseStandaloneMemoEmbed(line) {
+  const match = String(line || "").match(/^\s*!\[\[([^\]\n]+)\]\]\s*$/);
+  return match ? parseMemoReferenceInner(match[1], true) : null;
+}
+
+function parseMemoReferenceInner(value, embed) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const aliasIndex = raw.indexOf("|");
+  const targetExpr = (aliasIndex >= 0 ? raw.slice(0, aliasIndex) : raw).trim();
+  const alias = aliasIndex >= 0 ? raw.slice(aliasIndex + 1).trim() : "";
+  const selectorIndex = targetExpr.indexOf("#");
+  const target = (selectorIndex >= 0 ? targetExpr.slice(0, selectorIndex) : targetExpr).trim();
+  const selectorRaw = selectorIndex >= 0 ? targetExpr.slice(selectorIndex + 1).trim() : "";
+
+  if (!target) return null;
+
+  return {
+    alias,
+    embed: Boolean(embed),
+    selector: parseMemoSelector(selectorRaw),
+    target,
+  };
+}
+
+function parseMemoSelector(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const line = raw.match(/^L([1-9]\d*)(?:-(?:L)?([1-9]\d*))?$/i);
+  if (line) {
+    const start = Number(line[1]);
+    const end = Number(line[2] || line[1]);
+    return {
+      end,
+      raw,
+      start,
+      type: end >= start ? "line" : "invalid",
+    };
+  }
+
+  return {
+    raw,
+    type: "unsupported",
+  };
+}
+
+function renderMemoMarkdown(content, context = {}) {
+  const lines = memoLines(content);
   let html = "";
   let code = [];
   let inCode = false;
@@ -2426,6 +3021,13 @@ function renderMemoMarkdown(content) {
       return;
     }
 
+    const memoEmbed = parseStandaloneMemoEmbed(line);
+    if (memoEmbed) {
+      closeList();
+      html += renderMemoEmbedCard(memoEmbed, context);
+      return;
+    }
+
     const standaloneResource = parseStandaloneMarkdownResource(line);
     if (standaloneResource) {
       closeList();
@@ -2441,8 +3043,8 @@ function renderMemoMarkdown(content) {
       const checked = taskMatch[1].toLowerCase() === "x";
       html += `
         <label class="memo-task-line">
-          <input type="checkbox" data-task-line="${index}" ${checked ? "checked" : ""} />
-          <span>${inlineMarkdown(taskMatch[2])}</span>
+          <input type="checkbox" ${context.readonly ? "disabled" : `data-task-line="${index}"`} ${checked ? "checked" : ""} />
+          <span>${inlineMarkdown(taskMatch[2], context)}</span>
         </label>
       `;
       return;
@@ -2455,7 +3057,7 @@ function renderMemoMarkdown(content) {
         listType = "ul";
         html += "<ul>";
       }
-      html += `<li>${inlineMarkdown(unorderedMatch[1])}</li>`;
+      html += `<li>${inlineMarkdown(unorderedMatch[1], context)}</li>`;
       return;
     }
 
@@ -2466,7 +3068,7 @@ function renderMemoMarkdown(content) {
         listType = "ol";
         html += "<ol>";
       }
-      html += `<li>${inlineMarkdown(orderedMatch[1])}</li>`;
+      html += `<li>${inlineMarkdown(orderedMatch[1], context)}</li>`;
       return;
     }
 
@@ -2475,17 +3077,17 @@ function renderMemoMarkdown(content) {
     const heading = line.match(/^(#{1,3})\s+(.*)$/);
     if (heading) {
       const level = heading[1].length;
-      html += `<h${level + 2}>${inlineMarkdown(heading[2])}</h${level + 2}>`;
+      html += `<h${level + 2}>${inlineMarkdown(heading[2], context)}</h${level + 2}>`;
       return;
     }
 
     const quote = line.match(/^>\s?(.*)$/);
     if (quote) {
-      html += `<blockquote>${inlineMarkdown(quote[1])}</blockquote>`;
+      html += `<blockquote>${inlineMarkdown(quote[1], context)}</blockquote>`;
       return;
     }
 
-    html += `<p>${inlineMarkdown(line)}</p>`;
+    html += `<p>${inlineMarkdown(line, context)}</p>`;
   });
 
   closeList();
@@ -2493,7 +3095,26 @@ function renderMemoMarkdown(content) {
   return html;
 }
 
-function inlineMarkdown(value) {
+function inlineMarkdown(value, context = {}) {
+  const text = String(value || "");
+  const pattern = /(!?)\[\[([^\]\n]+)\]\]/g;
+  let html = "";
+  let lastIndex = 0;
+  let match = pattern.exec(text);
+
+  while (match) {
+    html += inlineMarkdownBase(text.slice(lastIndex, match.index));
+    const ref = parseMemoReferenceInner(match[2], match[1] === "!");
+    html += ref ? renderMemoRefChip(ref, context) : inlineMarkdownBase(match[0]);
+    lastIndex = match.index + match[0].length;
+    match = pattern.exec(text);
+  }
+
+  html += inlineMarkdownBase(text.slice(lastIndex));
+  return html;
+}
+
+function inlineMarkdownBase(value) {
   let html = escapeHTML(value);
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
     return renderMemoImageToken({ label: alt, url: src });
@@ -2510,6 +3131,204 @@ function inlineMarkdown(value) {
   html = html.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   html = html.replace(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g, '$1<span class="memo-hashtag">#$2</span>');
   return html;
+}
+
+function renderMemoRefChip(ref, context) {
+  const target = resolveMemoReferenceTarget(ref, context);
+  const label = target ? memoRefTitle(ref, target) : ref.alias || ref.target;
+  const range = target && ref.selector ? memoSelectorLabel(ref.selector) : "";
+
+  if (!target) {
+    return `<span class="memo-ref-chip is-missing" title="找不到 ${escapeAttr(ref.target)}">[[${escapeHTML(label)}]]</span>`;
+  }
+
+  return `
+    <button class="memo-ref-chip ${ref.embed ? "is-embed" : ""}" type="button" data-memo-ref-target="${escapeAttr(target.id)}" title="打开 memo">
+      <span>${escapeHTML(label)}</span>
+      ${range ? `<small>${escapeHTML(range)}</small>` : ""}
+    </button>
+  `;
+}
+
+function renderMemoEmbedCard(ref, context) {
+  const target = resolveMemoReferenceTarget(ref, context);
+  if (!target) {
+    return renderMemoRefStateCard("is-missing", "引用不可用", "找不到 " + ref.target);
+  }
+
+  const stack = Array.isArray(context.stack) ? context.stack : [];
+  if (stack.includes(target.id)) {
+    return renderMemoRefStateCard("is-cycle", memoRefTitle(ref, target), "循环引用已停止");
+  }
+
+  const depth = Number(context.depth || 0);
+  const maxDepth = Number(context.maxDepth || 2);
+  if (depth >= maxDepth) {
+    return renderMemoRefStateCard("is-collapsed", memoRefTitle(ref, target), "嵌套引用已折叠");
+  }
+
+  const excerpt = memoReferenceExcerpt(target.content, ref.selector);
+  if (excerpt.error) {
+    return renderMemoRefStateCard("is-missing", memoRefTitle(ref, target), excerpt.error);
+  }
+
+  const childContext = {
+    ...context,
+    depth: depth + 1,
+    readonly: true,
+    sourceId: target.id,
+    stack: stack.concat(target.id),
+  };
+  const updatedAt = target.updatedAt || target.createdAt;
+  const meta = [
+    excerpt.label ? `<span>${escapeHTML(excerpt.label)}</span>` : "",
+    updatedAt ? `<time datetime="${escapeAttr(updatedAt)}">${formatRelativeDate(updatedAt)}</time>` : "",
+  ].filter(Boolean).join("");
+
+  return `
+    <aside class="memo-ref-card" data-memo-ref-card="${escapeAttr(target.id)}">
+      ${meta ? `<div class="memo-ref-meta-line">${meta}</div>` : ""}
+      <div class="memo-ref-body memo-content">${renderMemoMarkdown(excerpt.content, childContext)}</div>
+    </aside>
+  `;
+}
+
+function renderMemoRefStateCard(className, title, message) {
+  return `
+    <aside class="memo-ref-card ${className}">
+      <header class="memo-ref-head">
+        <span class="memo-ref-title is-static">${escapeHTML(title || "引用")}</span>
+      </header>
+      <div class="memo-ref-state">${escapeHTML(message || "")}</div>
+    </aside>
+  `;
+}
+
+function resolveMemoReferenceTarget(ref, context = {}) {
+  const index = context.index || {};
+  const memoById = index.memoById || new Map();
+  const memoByTitleKey = index.memoByTitleKey || new Map();
+  const raw = String((ref && ref.target) || "").trim();
+  if (!raw) return null;
+
+  const id = raw.toLowerCase().startsWith("memo:") ? raw.slice(5).trim() : raw;
+  if (memoById.has(id)) return memoById.get(id);
+
+  const titleId = memoByTitleKey.get(memoTitleKey(raw));
+  return titleId ? memoById.get(titleId) || null : null;
+}
+
+function memoReferenceExcerpt(content, selector) {
+  const text = String(content || "").replace(/\r\n/g, "\n");
+  if (!selector) {
+    return {
+      content: text,
+      label: "",
+    };
+  }
+
+  if (selector.type === "invalid") {
+    return { error: "行范围无效" };
+  }
+  if (selector.type !== "line") {
+    return { error: "暂不支持选择器 #" + selector.raw };
+  }
+
+  const lines = memoLines(text);
+  if (selector.start > lines.length) {
+    return { error: "目标 memo 没有第 " + selector.start + " 行" };
+  }
+
+  const actualEnd = Math.min(selector.end, lines.length);
+  const selected = lines.slice(selector.start - 1, actualEnd);
+  const wrapped = wrapPartialCodeFence(lines, selector.start - 1, actualEnd, selected);
+  return {
+    content: wrapped.join("\n"),
+    label: selector.start === actualEnd ? "L" + selector.start : "L" + selector.start + "-L" + actualEnd,
+  };
+}
+
+function wrapPartialCodeFence(lines, startIndex, endIndex, selected) {
+  const output = selected.slice();
+  let inCode = false;
+
+  for (let i = 0; i < startIndex; i += 1) {
+    if (isMemoFenceLine(lines[i])) inCode = !inCode;
+  }
+
+  const startedInsideCode = inCode;
+  for (let i = startIndex; i < endIndex; i += 1) {
+    if (isMemoFenceLine(lines[i])) inCode = !inCode;
+  }
+
+  if (startedInsideCode) output.unshift("```");
+  if (inCode) output.push("```");
+  return output;
+}
+
+function memoLines(content) {
+  return String(content || "").replace(/\r\n/g, "\n").split("\n");
+}
+
+function isMemoFenceLine(line) {
+  return String(line || "").trim().startsWith("```");
+}
+
+function memoRefTitle(ref, memo) {
+  return String((ref && ref.alias) || "").trim() || memoTitle(memo);
+}
+
+function memoReferenceAlias(value) {
+  return String(value || "")
+    .replace(/\|+/g, " ")
+    .replace(/\]\]+/g, "]")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function memoTitle(memo) {
+  const lines = memoLines((memo && memo.content) || "");
+  const first = lines.find(function (line) {
+    return line.trim();
+  });
+  if (!first) return memo && memo.id ? memo.id : "Untitled memo";
+
+  const heading = first.match(/^#{1,6}\s+(.*)$/);
+  return compactMemoTitle(stripMemoTitleMarkdown(heading ? heading[1] : first));
+}
+
+function stripMemoTitleMarkdown(value) {
+  return String(value || "")
+    .replace(/!\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_>#-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactMemoTitle(value) {
+  const title = String(value || "").trim();
+  if (!title) return "Untitled memo";
+  return title.length > 48 ? title.slice(0, 47) + "..." : title;
+}
+
+function memoTitleKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function memoSelectorLabel(selector) {
+  if (!selector) return "";
+  if (selector.type === "line") {
+    return selector.start === selector.end ? "L" + selector.start : "L" + selector.start + "-L" + selector.end;
+  }
+  return "#" + selector.raw;
+}
+
+function memoBacklinkCount(context, memoId) {
+  const incoming = context && context.index && context.index.incoming;
+  return incoming && incoming.has(memoId) ? incoming.get(memoId).length : 0;
 }
 
 function parseStandaloneMarkdownResource(line) {
@@ -2542,6 +3361,8 @@ function renderMemoFileBlock(resource) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
   const displayUrl = href !== "#" ? href : resource.url;
+  const openButton = renderVSCodeOpenButton(resource.url);
+  const localClass = openButton ? " has-editor-open" : "";
   const body = `
     <span class="memo-file-block-icon">${SVG.paperclip}</span>
     <span class="memo-file-block-text">
@@ -2550,8 +3371,8 @@ function renderMemoFileBlock(resource) {
     </span>
   `;
 
-  if (href === "#") {
-    return `<div class="memo-file-block">${body}</div>`;
+  if (href === "#" || openButton) {
+    return `<div class="memo-file-block${localClass}">${body}${openButton}</div>`;
   }
   return `<a class="memo-file-block" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
 }
@@ -2571,12 +3392,104 @@ function renderMemoImageToken(resource) {
 function renderMemoFileToken(resource) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
+  const openButton = renderVSCodeOpenButton(resource.url);
+  const localClass = openButton ? " has-editor-open" : "";
   const body = `${SVG.paperclip}<span>${escapeHTML(name)}</span>`;
 
-  if (href === "#") {
-    return `<span class="memo-file-token">${body}</span>`;
+  if (href === "#" || openButton) {
+    return `<span class="memo-file-token${localClass}">${body}${openButton}</span>`;
   }
   return `<a class="memo-file-token" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
+}
+
+function renderVSCodeOpenButton(url) {
+  const target = localEditorTarget(url);
+  if (!target) return "";
+  return `
+    <button
+      class="memo-file-open-vscode"
+      type="button"
+      data-editor-open="vscode"
+      data-editor-file="${escapeAttr(target.file)}"
+      data-editor-line="${escapeAttr(target.line)}"
+      data-editor-col="${escapeAttr(target.col)}"
+      title="在 VS Code 中打开"
+      aria-label="在 VS Code 中打开"
+    >
+      ${SVG.code}
+      <span>在 VS Code 中打开</span>
+    </button>
+  `;
+}
+
+function localEditorTarget(value) {
+  const target = parseEditorTarget(value);
+  if (!target || !target.file) return null;
+  if (!isLocalEditorResource(target.file)) return null;
+  return target;
+}
+
+function parseEditorTarget(value) {
+  let file = String(value || "").trim();
+  if (!file) return null;
+
+  let line = "1";
+  let col = "1";
+  try {
+    const parsed = new URL(file, window.location.origin);
+    line = editorPositionValue(parsed.searchParams.get("line"), line);
+    col = editorPositionValue(parsed.searchParams.get("col") || parsed.searchParams.get("column"), col);
+  } catch (_) {}
+
+  if (!isLocalOSSAssetURL(file)) {
+    const suffix = file.match(/^(.*):(\d+)(?::(\d+))?$/);
+    if (suffix && !/^[a-zA-Z]:[\\/]/.test(file)) {
+      file = suffix[1];
+      line = editorPositionValue(suffix[2], line);
+      col = editorPositionValue(suffix[3], col);
+    }
+  }
+
+  return { file, line, col };
+}
+
+function editorPositionValue(value, fallback) {
+  const text = String(value || "").trim();
+  return /^[1-9]\d*$/.test(text) ? text : fallback || "1";
+}
+
+function isLocalEditorResource(value) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+  if (isLocalAssetReference(url)) return true;
+  if (/^@assets\//i.test(url)) return false;
+  if (isLocalOSSAssetURL(url)) return true;
+  if (/^(local:\/\/|file:\/\/)/i.test(url)) return true;
+  if (/^(https?:|mailto:|blob:|data:)/i.test(url)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^[a-zA-Z]:[\\/]/.test(url)) return false;
+  return true;
+}
+
+function isLocalAssetReference(value) {
+  const asset = typeof parseAssetReference === "function" ? parseAssetReference(value) : null;
+  if (!asset) return false;
+  const storage = typeof cloudStorageById === "function" ? cloudStorageById(asset.storageId) : null;
+  return editorStorageIsLocal(storage);
+}
+
+function isLocalOSSAssetURL(value) {
+  const raw = String(value || "").trim();
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    return parsed.pathname === "/api/oss/assets" && (parsed.origin === window.location.origin || raw.startsWith("/"));
+  } catch (_) {
+    return /^\/api\/oss\/assets(?:\?|$)/i.test(raw);
+  }
+}
+
+function editorStorageIsLocal(storage) {
+  const provider = String((storage && storage.provider) || "").trim().toLowerCase();
+  return provider === "local" || provider === "local-oss";
 }
 
 function isFileAttachment(label, url) {
@@ -2682,6 +3595,26 @@ function copyText(text) {
   return ok ? Promise.resolve() : Promise.reject(new Error("copy failed"));
 }
 
+function closestAnchor(target) {
+  let node = target;
+  if (node && node.nodeType === 3) node = node.parentElement;
+  if (!node || typeof node.closest !== "function") return null;
+  return node.closest("a[href]");
+}
+
+function externalBrowserURLFromAnchor(anchor) {
+  const href = String(anchor.getAttribute("href") || anchor.href || "").trim();
+  if (!/^https?:\/\//i.test(href)) return "";
+
+  try {
+    const url = new URL(href);
+    if ((url.protocol === "http:" || url.protocol === "https:") && url.host) {
+      return url.href;
+    }
+  } catch (_) {}
+  return "";
+}
+
 function escapeHTML(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -2693,6 +3626,11 @@ function escapeHTML(value) {
 
 function escapeAttr(value) {
   return escapeHTML(value).replace(/`/g, "&#96;");
+}
+
+function escapeCSSIdent(value) {
+  if (window.CSS && window.CSS.escape) return window.CSS.escape(String(value || ""));
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 document.addEventListener("DOMContentLoaded", function () {
