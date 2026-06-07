@@ -50,6 +50,9 @@
             }
             ensure_go_msg_handlers();
             window.__goMessageHandlers.push(handler);
+            if (!has_native_bridge()) {
+              ensure_velo_ws().catch(function (_e) {});
+            }
           },
           writable: true,
           configurable: true,
@@ -59,6 +62,18 @@
           console.log(payload);
         });
       }
+    }
+    var velo_ws = null;
+    var velo_ws_connecting = null;
+    function has_native_bridge() {
+      return !!(
+        (window.webkit &&
+          window.webkit.messageHandlers &&
+          window.webkit.messageHandlers.go) ||
+        (window.chrome &&
+          window.chrome.webview &&
+          typeof window.chrome.webview.postMessage === "function")
+      );
     }
     function notify_go_ready() {
       try {
@@ -95,8 +110,112 @@
       }
       return false;
     }
+    function velo_ws_endpoint() {
+      var host = "127.0.0.1:8080";
+      var protocol = "ws:";
+      try {
+        if (window.location && window.location.host) {
+          host = window.location.host;
+        }
+        if (window.location && window.location.protocol === "https:") {
+          protocol = "wss:";
+        }
+      } catch (_e) {}
+      return protocol + "//" + host + "/__velo/ws";
+    }
+    function handle_velo_ws_message(event) {
+      var packet = null;
+      try {
+        packet =
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      } catch (_e) {
+        return;
+      }
+      if (!packet) {
+        return;
+      }
+      if (packet.type === "__velo_callback") {
+        ensure_cbs();
+        var cb = window.invoke_cbs && window.invoke_cbs[packet.id];
+        if (cb) {
+          cb(packet.result);
+        }
+        return;
+      }
+      if (packet.type === "__velo_message") {
+        ensure_go_msg_handlers();
+        window.__receiveGoMessage(packet.payload);
+        return;
+      }
+      ensure_go_msg_handlers();
+      window.__receiveGoMessage(packet);
+    }
+    function ensure_velo_ws() {
+      if (typeof WebSocket !== "function") {
+        return Promise.reject(new Error("WebSocket is not available"));
+      }
+      if (velo_ws && velo_ws.readyState === WebSocket.OPEN) {
+        return Promise.resolve(velo_ws);
+      }
+      if (velo_ws_connecting) {
+        return velo_ws_connecting;
+      }
+      velo_ws_connecting = new Promise(function (resolve, reject) {
+        var settled = false;
+        var socket = null;
+        var timer = null;
+        function finish(fn, value) {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          if (timer) {
+            clearTimeout(timer);
+          }
+          velo_ws_connecting = null;
+          fn(value);
+        }
+        try {
+          socket = new WebSocket(velo_ws_endpoint());
+        } catch (e) {
+          finish(reject, e);
+          return;
+        }
+        timer = setTimeout(function () {
+          try {
+            socket.close();
+          } catch (_e) {}
+          finish(reject, new Error("Go WebSocket connection timed out"));
+        }, 10000);
+        socket.onopen = function () {
+          velo_ws = socket;
+          finish(resolve, socket);
+        };
+        socket.onmessage = handle_velo_ws_message;
+        socket.onerror = function () {
+          finish(reject, new Error("Go WebSocket is not available"));
+        };
+        socket.onclose = function () {
+          if (velo_ws === socket) {
+            velo_ws = null;
+          }
+          finish(reject, new Error("Go WebSocket closed"));
+        };
+      });
+      return velo_ws_connecting;
+    }
+    function send_message_to_go(payload) {
+      if (post_message_to_go(payload)) {
+        return Promise.resolve(true);
+      }
+      return ensure_velo_ws().then(function (socket) {
+        socket.send(JSON.stringify(payload));
+        return true;
+      });
+    }
     function invoke(url, args) {
       return new Promise(function (resolve, reject) {
+        args = args || {};
         const id = String(Date.now()) + Math.random().toString(16).slice(2);
         const payload = {
           id: id,
@@ -115,10 +234,10 @@
           }
           resolve(result);
         };
-        if (!post_message_to_go(payload)) {
+        send_message_to_go(payload).catch(function (err) {
           delete window.invoke_cbs[id];
-          reject(new Error("go bridge not available"));
-        }
+          reject(err || new Error("go bridge not available"));
+        });
       });
     }
     Object.defineProperty(window, "invoke", {
