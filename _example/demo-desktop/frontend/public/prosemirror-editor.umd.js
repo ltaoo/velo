@@ -468,6 +468,30 @@
       return blocks;
     }
 
+    function trailingHardBreakRanges(doc) {
+      const hardBreak = schema.nodes.hard_break;
+      const ranges = [];
+      if (!hardBreak) return ranges;
+
+      doc.descendants((node, pos) => {
+        if (!node.isTextblock || !node.childCount) return true;
+
+        let end = node.content.size;
+        for (let index = node.childCount - 1; index >= 0; index -= 1) {
+          const child = node.child(index);
+          if (child.type !== hardBreak) break;
+
+          const from = pos + 1 + end - child.nodeSize;
+          ranges.push({ from, to: from + child.nodeSize });
+          end -= child.nodeSize;
+        }
+
+        return false;
+      });
+
+      return ranges;
+    }
+
     function htmlFromDoc(doc) {
       const fragment = PM.DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
       const wrap = document.createElement("div");
@@ -1768,6 +1792,25 @@
         });
       }
 
+      miniHardBreakCleanupPlugin() {
+        return new PM.Plugin({
+          appendTransaction(transactions, oldState, newState) {
+            if (!transactions.some((transaction) => transaction.docChanged)) return null;
+
+            const ranges = trailingHardBreakRanges(newState.doc);
+            if (!ranges.length) return null;
+
+            let transaction = newState.tr;
+            ranges
+              .sort((left, right) => right.from - left.from)
+              .forEach((range) => {
+                transaction = transaction.delete(range.from, range.to);
+              });
+            return transaction.setMeta("addToHistory", false);
+          },
+        });
+      }
+
       normalizeMiniFileToken(token, doc) {
         if (!token || token.from == null || token.to == null) return null;
         const from = Math.max(0, Math.min(token.from, doc.content.size));
@@ -2377,6 +2420,7 @@
           this.filePickerPlugin(),
           this.imageUploadPastePlugin(),
           this.miniPlainTextPlugin(),
+          this.miniHardBreakCleanupPlugin(),
           this.miniFileTokenPlugin(),
           this.miniLinkTokenPlugin(),
           this.miniMarkdownDecorationPlugin(),
