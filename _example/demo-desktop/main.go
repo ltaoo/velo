@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -49,6 +50,19 @@ var Version = "1.0.0"
 var Mode = "dev"
 
 const cloudStorageSettingsKey = "demo-desktop:settings:cloud-storage:v1"
+
+var memoWindowCache = struct {
+	sync.RWMutex
+	items map[string]MemoWindowPayload
+}{
+	items: make(map[string]MemoWindowPayload),
+}
+
+type MemoWindowPayload struct {
+	Fixed bool            `json:"fixed"`
+	Memo  json.RawMessage `json:"memo"`
+	Memos json.RawMessage `json:"memos"`
+}
 
 type OSSConfig struct {
 	AccessKeyID     string `json:"accessKeyId"`
@@ -190,7 +204,7 @@ func main() {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	quitOnLastWindowClosed := false
+	quitOnLastWindowClosed := true
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 	if Mode == "dev" {
@@ -314,6 +328,65 @@ func main() {
 		}
 
 		return c.Ok(velo.H{"success": true, "url": target})
+	})
+
+	b.Post("/api/memo-window/open", func(c *velo.BoxContext) interface{} {
+		var req MemoWindowPayload
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+
+		memoID, err := memoWindowMemoID(req.Memo)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		req.Memos = memoWindowMemosPayload(req.Memo, req.Memos)
+
+		memoWindowCache.Lock()
+		memoWindowCache.items[memoID] = req
+		memoWindowCache.Unlock()
+
+		params := url.Values{}
+		params.Set("id", memoID)
+		if req.Fixed {
+			params.Set("fixed", "1")
+		}
+
+		nameSuffix := sanitizeStorageID(memoID)
+		if nameSuffix == "" {
+			nameSuffix = "memo"
+		}
+		b.OpenWindow(&velo.VeloWebviewOpt{
+			Name:       "memo-window-" + nameSuffix,
+			Title:      "Memo",
+			Pathname:   "/memo-window?" + params.Encode(),
+			Width:      460,
+			Height:     560,
+			Frameless:  true,
+			EntryPage:  "memo-window.html",
+			FrontendFS: frontend_folder,
+		})
+		return c.Ok(velo.H{"success": true, "id": memoID})
+	})
+
+	b.Get("/api/memo-window/get", func(c *velo.BoxContext) interface{} {
+		memoID := strings.TrimSpace(c.Query("id"))
+		if memoID == "" {
+			return c.Error("id is required")
+		}
+
+		memoWindowCache.RLock()
+		payload, ok := memoWindowCache.items[memoID]
+		memoWindowCache.RUnlock()
+		if !ok {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{
+			"found": true,
+			"fixed": payload.Fixed,
+			"memo":  payload.Memo,
+			"memos": payload.Memos,
+		})
 	})
 
 	b.Get("/api/settings/cloud-storage", func(c *velo.BoxContext) interface{} {
@@ -779,6 +852,30 @@ func droppedFileForPath(path string) (velo.H, error) {
 		"type":    contentType,
 		"dataURL": "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data),
 	}, nil
+}
+
+func memoWindowMemoID(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return "", fmt.Errorf("memo is required")
+	}
+	var memo struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &memo); err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(memo.ID)
+	if id == "" {
+		return "", fmt.Errorf("memo id is required")
+	}
+	return id, nil
+}
+
+func memoWindowMemosPayload(memo json.RawMessage, memos json.RawMessage) json.RawMessage {
+	if len(memos) > 0 && json.Valid(memos) && strings.TrimSpace(string(memos)) != "null" {
+		return memos
+	}
+	return json.RawMessage("[" + string(memo) + "]")
 }
 
 func normalizeExternalBrowserURL(value string) (string, error) {

@@ -136,14 +136,11 @@ func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 	// (mirrors the Darwin implementation). JS from runtime.js posts this when
 	// the user mousedowns on a .velo-drag / [data-velo-drag] element.
 	var parsed struct {
-		ID     string `json:"id"`
-		Method string `json:"method"`
+		ID     string      `json:"id"`
+		Method string      `json:"method"`
+		Args   interface{} `json:"args"`
 	}
-	if json.Unmarshal([]byte(goMsg), &parsed) == nil && parsed.Method == "__velo/window/start_drag" {
-		C.webviewStartWindowDrag()
-		if parsed.ID != "" {
-			sendCallback(parsed.ID, `"ok"`)
-		}
+	if json.Unmarshal([]byte(goMsg), &parsed) == nil && handleWindowControlMessage(parsed.ID, parsed.Method, parsed.Args) {
 		return
 	}
 
@@ -174,6 +171,61 @@ func sendCallback(id, result string) {
 	cjs := C.CString(js)
 	defer C.free(unsafe.Pointer(cjs))
 	C.webviewEval(globalWebview, cjs)
+}
+
+func handleWindowControlMessage(id string, method string, args interface{}) bool {
+	if !strings.HasPrefix(method, "__velo/window/") {
+		return false
+	}
+
+	switch method {
+	case "__velo/window/start_drag":
+		C.webviewStartWindowDrag()
+	case "__velo/window/close":
+		if id != "" {
+			sendCallback(id, `{"success":true}`)
+		}
+		C.webviewClose()
+		return true
+	case "__velo/window/minimize":
+		C.webviewMinimize()
+	case "__velo/window/toggle_maximize":
+		C.webviewMaximize()
+	case "__velo/window/maximize":
+		C.webviewMaximize()
+	case "__velo/window/restore":
+		C.webviewRestore()
+	case "__velo/window/set_always_on_top":
+		setAlwaysOnTop(boolArg(args, "onTop"))
+	default:
+		return false
+	}
+
+	if id != "" {
+		sendCallback(id, `{"success":true}`)
+	}
+	return true
+}
+
+func boolArg(args interface{}, key string) bool {
+	values, ok := args.(map[string]interface{})
+	if !ok || values == nil {
+		return false
+	}
+	v, ok := values[key]
+	if !ok {
+		return false
+	}
+	switch value := v.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(value, "true") || value == "1"
+	case float64:
+		return value != 0
+	default:
+		return false
+	}
 }
 
 func sendMessage(payload string) bool {

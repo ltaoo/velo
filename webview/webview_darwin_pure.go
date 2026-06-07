@@ -174,23 +174,11 @@ func didReceiveScriptMessage(self, _cmd, userContentController, message uintptr)
 	// Check for built-in window drag message before routing to Go handler
 	// This is done early to minimize latency for drag operations
 	var parsed struct {
-		ID     string `json:"id"`
-		Method string `json:"method"`
+		ID     string      `json:"id"`
+		Method string      `json:"method"`
+		Args   interface{} `json:"args"`
 	}
-	if json.Unmarshal([]byte(str), &parsed) == nil && parsed.Method == "__velo/window/start_drag" {
-		mapLock.RLock()
-		nsWindow := nsWindowMap[uintptr(webView)]
-		mapLock.RUnlock()
-		if nsWindow != 0 {
-			nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
-			currentEvent := nsApp.Send(cocoa.RegisterName("currentEvent"))
-			if currentEvent != 0 {
-				nsWindow.Send(cocoa.RegisterName("performWindowDragWithEvent:"), currentEvent)
-			}
-		}
-		if parsed.ID != "" {
-			sendCallbackTo(webView, parsed.ID, `"ok"`)
-		}
+	if json.Unmarshal([]byte(str), &parsed) == nil && handleWindowControlMessage(webView, parsed.ID, parsed.Method, parsed.Args) {
 		return
 	}
 
@@ -218,6 +206,87 @@ func didReceiveScriptMessage(self, _cmd, userContentController, message uintptr)
 			})
 		}
 	}()
+}
+
+func handleWindowControlMessage(webView cocoa.ID, id string, method string, args interface{}) bool {
+	if !strings.HasPrefix(method, "__velo/window/") {
+		return false
+	}
+
+	mapLock.RLock()
+	nsWindow := nsWindowMap[uintptr(webView)]
+	mapLock.RUnlock()
+
+	if nsWindow == 0 {
+		if id != "" {
+			sendCallbackTo(webView, id, `{"success":false}`)
+		}
+		return true
+	}
+
+	switch method {
+	case "__velo/window/start_drag":
+		nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+		currentEvent := nsApp.Send(cocoa.RegisterName("currentEvent"))
+		if currentEvent != 0 {
+			nsWindow.Send(cocoa.RegisterName("performWindowDragWithEvent:"), currentEvent)
+		}
+	case "__velo/window/close":
+		if id != "" {
+			sendCallbackTo(webView, id, `{"success":true}`)
+		}
+		nsWindow.Send(cocoa.RegisterName("performClose:"), 0)
+		return true
+	case "__velo/window/minimize":
+		nsWindow.Send(cocoa.RegisterName("miniaturize:"), 0)
+	case "__velo/window/toggle_maximize":
+		nsWindow.Send(cocoa.RegisterName("zoom:"), 0)
+	case "__velo/window/maximize":
+		if nsWindow.Send(cocoa.RegisterName("isZoomed")) == 0 {
+			nsWindow.Send(cocoa.RegisterName("zoom:"), 0)
+		}
+	case "__velo/window/restore":
+		if nsWindow.Send(cocoa.RegisterName("isMiniaturized")) != 0 {
+			nsWindow.Send(cocoa.RegisterName("deminiaturize:"), 0)
+		}
+		if nsWindow.Send(cocoa.RegisterName("isZoomed")) != 0 {
+			nsWindow.Send(cocoa.RegisterName("zoom:"), 0)
+		}
+	case "__velo/window/set_always_on_top":
+		level := cocoa.NSNormalWindowLevel
+		if boolArg(args, "onTop") {
+			level = cocoa.NSFloatingWindowLevel
+		}
+		nsWindow.Send(cocoa.RegisterName("setLevel:"), level)
+	default:
+		return false
+	}
+
+	if id != "" {
+		sendCallbackTo(webView, id, `{"success":true}`)
+	}
+	return true
+}
+
+func boolArg(args interface{}, key string) bool {
+	values, ok := args.(map[string]interface{})
+	if !ok || values == nil {
+		return false
+	}
+	v, ok := values[key]
+	if !ok {
+		return false
+	}
+	switch value := v.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(value, "true") || value == "1"
+	case float64:
+		return value != 0
+	default:
+		return false
+	}
 }
 
 type schemeResponseWriter struct {
@@ -626,11 +695,6 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	if opts.Frameless {
 		nsWindow.Send(cocoa.RegisterName("setTitlebarAppearsTransparent:"), true)
 		nsWindow.Send(cocoa.RegisterName("setTitleVisibility:"), 1) // NSWindowTitleHidden
-
-		// Hide traffic light buttons (close, miniaturize, zoom)
-		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 0).Send(cocoa.RegisterName("setHidden:"), true) // close
-		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 1).Send(cocoa.RegisterName("setHidden:"), true) // miniaturize
-		nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 2).Send(cocoa.RegisterName("setHidden:"), true) // zoom
 
 		// Transparent window background
 		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"),

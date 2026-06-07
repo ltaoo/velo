@@ -506,6 +506,8 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		Frameless:              opt.Frameless,
+		Hidden:                 opt.Hidden,
 		URL:                    windowURL,
 	}
 	return webview.OpenWindow(opts)

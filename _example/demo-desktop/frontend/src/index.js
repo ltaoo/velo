@@ -2,6 +2,8 @@ import { app, history, client, views } from "./store/index.js";
 import { storage } from "./store/storage.js";
 import { RouterSubViews } from "./components/sub-views.js";
 
+let snapshotTimer = null;
+
 const render = ($root) => {
   const { innerWidth, innerHeight, location } = window;
   history.$router.prepare(location);
@@ -22,6 +24,8 @@ const render = ($root) => {
       });
       $root.appendChild(v$.render());
       v$.onMounted();
+      restoreWindowState();
+      startWindowStateSnapshots();
     });
 };
 
@@ -33,3 +37,34 @@ document.addEventListener("DOMContentLoaded", function () {
   }
   render($root);
 });
+
+window.addEventListener("beforeunload", function () {
+  stopWindowStateSnapshots();
+  snapshotWindowStateSync();
+});
+
+function restoreWindowState() {
+  if (typeof invoke !== "function") return;
+  invoke("/api/window/state/restore?name=desktop", { method: "GET" }).catch(function () {});
+}
+
+function startWindowStateSnapshots() {
+  if (typeof invoke !== "function" || snapshotTimer) return;
+  snapshotTimer = window.setInterval(function () {
+    invoke("/api/window/state/snapshot?name=desktop", { method: "GET" }).catch(function () {});
+  }, 3000);
+}
+
+function stopWindowStateSnapshots() {
+  if (!snapshotTimer) return;
+  window.clearInterval(snapshotTimer);
+  snapshotTimer = null;
+}
+
+function snapshotWindowStateSync() {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", "/api/window/state/snapshot?name=desktop", false);
+    xhr.send();
+  } catch (_) {}
+}
