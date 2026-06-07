@@ -2519,9 +2519,8 @@ function parseStandaloneMarkdownResource(line) {
   const url = match[3].trim();
   if (!url) return null;
 
-  const type = match[1] === "!" ? "image" : "file";
   const label = (match[2] || "").trim() || fileDisplayName("", url);
-  if (type === "file" && !isFileAttachment(label, url)) return null;
+  const type = match[1] === "!" || isImageAttachment(label, url) ? "image" : "file";
 
   return { type, label, url };
 }
@@ -2587,6 +2586,13 @@ function isFileAttachment(label, url) {
   return pattern.test(String(label || "")) || pattern.test(String(url || ""));
 }
 
+function isImageAttachment(label, url) {
+  const pattern = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i;
+  const asset = parseAssetReference(url);
+  if (/^data:image\//i.test(String(url || ""))) return true;
+  return pattern.test(String(label || "")) || pattern.test(String(url || "")) || pattern.test(asset ? asset.key : "");
+}
+
 function fileDisplayName(label, url) {
   const asset = parseAssetReference(url);
   const raw = String(label || "").trim() || (asset ? asset.key : String(url || "").trim());
@@ -2607,6 +2613,7 @@ function compactFileURL(url) {
 
 function safeImageUrl(value) {
   const url = resolveAssetUrl(value);
+  if (/^\/(?!\/)/.test(url)) return url;
   if (/^(https?:|local:\/\/|blob:)/i.test(url)) return url;
   if (/^data:image\//i.test(url)) return url;
   return "";
@@ -2614,6 +2621,7 @@ function safeImageUrl(value) {
 
 function safeUrl(value) {
   const url = resolveAssetUrl(value);
+  if (/^\/(?!\/)/.test(url)) return url;
   if (/^(https?:|mailto:|local:\/\/|blob:)/i.test(url)) return url;
   return "#";
 }

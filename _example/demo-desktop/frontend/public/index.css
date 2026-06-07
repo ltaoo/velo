@@ -585,15 +585,22 @@ ol {
   --memo-warn-soft: rgba(180, 83, 9, 0.13);
   --memo-warn-border: rgba(180, 83, 9, 0.28);
   --memo-radius: 8px;
+  --memo-sidebar-width: clamp(172px, 18vw, 220px);
+  --memo-inspector-width: clamp(220px, 22vw, 300px);
   background:
-    linear-gradient(90deg, var(--BG-1) 0 220px, transparent 220px),
+    linear-gradient(
+      90deg,
+      var(--BG-1) 0 var(--memo-sidebar-width),
+      transparent var(--memo-sidebar-width)
+    ),
     var(--BG-0);
   color: var(--FG-0);
   display: grid;
-  grid-template-columns: minmax(172px, 220px) minmax(0, 680px) minmax(220px, 280px);
+  grid-template-columns: var(--memo-sidebar-width) minmax(0, 1fr) var(--memo-inspector-width);
   height: 100%;
-  justify-content: center;
+  min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .memo-shell svg {
@@ -846,6 +853,7 @@ ol {
   min-width: 0;
   overflow-y: auto;
   padding: 22px 20px 44px;
+  width: 100%;
 }
 
 .memo-topbar {
@@ -893,6 +901,7 @@ ol {
 .memo-composer {
   min-width: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .memo-composer-head {
@@ -1140,6 +1149,7 @@ ol {
 .memo-list {
   display: grid;
   gap: 12px;
+  width: 100%;
 }
 
 .memo-list.is-todo-list {
@@ -1294,9 +1304,13 @@ ol {
 }
 
 .memo-image-block {
+  align-items: center;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 100%;
 }
 
 .memo-image-block img {
@@ -1304,9 +1318,11 @@ ol {
   border: 1px solid var(--border);
   border-radius: 8px;
   display: block;
-  max-height: 420px;
+  height: auto;
+  max-height: 240px;
   max-width: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  width: auto;
 }
 
 .memo-image-block figcaption {
@@ -1323,10 +1339,12 @@ ol {
   color: var(--FG-0);
   display: flex;
   gap: 10px;
-  margin: 0 0 8px;
+  margin: 0 auto 8px;
+  max-width: 100%;
   min-height: 58px;
   padding: 10px 12px;
   text-decoration: none;
+  width: fit-content;
 }
 
 .memo-file-block:hover {
@@ -1781,7 +1799,8 @@ ol {
 
 @media (max-width: 900px) {
   .memo-shell {
-    grid-template-columns: minmax(164px, 200px) minmax(0, 1fr);
+    --memo-sidebar-width: clamp(164px, 24vw, 200px);
+    grid-template-columns: var(--memo-sidebar-width) minmax(0, 1fr);
   }
 
   .memo-inspector {
