@@ -125,12 +125,14 @@ export function mountMemosHome(root, options = {}) {
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
 
+  window.addEventListener("click", handleExternalLinkClick, true);
   root.addEventListener("click", handleClick);
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
 
   return {
     destroy() {
+      window.removeEventListener("click", handleExternalLinkClick, true);
       root.removeEventListener("click", handleClick);
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
@@ -141,6 +143,19 @@ export function mountMemosHome(root, options = {}) {
       root.innerHTML = "";
     },
   };
+
+  function handleExternalLinkClick(event) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const link = closestAnchor(event.target);
+    if (!link || !root.contains(link)) return;
+
+    const url = externalBrowserURLFromAnchor(link);
+    if (!url) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    confirmOpenExternalLink(url);
+  }
 
   function bindGoMessages() {
     if (!window.onGoMessage) return;
@@ -183,6 +198,14 @@ export function mountMemosHome(root, options = {}) {
       state.activeTag = state.activeTag === tag.dataset.tag ? "" : tag.dataset.tag;
       state.activeFilter = "all";
       renderAll();
+      return;
+    }
+
+    const editorOpen = event.target.closest("[data-editor-open]");
+    if (editorOpen && root.contains(editorOpen)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openFileInVSCode(editorOpen);
       return;
     }
 
@@ -262,6 +285,67 @@ export function mountMemosHome(root, options = {}) {
       },
       (err) => {
         showToast("打开设置失败: " + err);
+      },
+    );
+  }
+
+  function openFileInVSCode(button) {
+    const file = button.dataset.editorFile || "";
+    if (!file) {
+      showToast("没有可打开的本地文件");
+      return;
+    }
+    if (typeof invoke !== "function") {
+      showToast("当前环境不支持打开 VS Code");
+      return;
+    }
+
+    const line = button.dataset.editorLine || "1";
+    const col = button.dataset.editorCol || "1";
+    button.disabled = true;
+    invoke(
+      "/api/editor/open?file=" +
+        encodeURIComponent(file) +
+        "&line=" +
+        encodeURIComponent(line) +
+        "&col=" +
+        encodeURIComponent(col) +
+        "&app=code",
+      { method: "GET" },
+    ).then(
+      (resp) => {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开 VS Code 失败");
+          return;
+        }
+        showToast("已在 VS Code 中打开");
+      },
+      (err) => {
+        showToast("打开 VS Code 失败: " + err);
+      },
+    ).finally(() => {
+      button.disabled = false;
+    });
+  }
+
+  function confirmOpenExternalLink(url) {
+    openExternalLinkInDefaultBrowser(url);
+  }
+
+  function openExternalLinkInDefaultBrowser(url) {
+    if (typeof invoke !== "function") {
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+
+    invoke("/api/external/open?url=" + encodeURIComponent(url), { method: "GET" }).then(
+      (resp) => {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开链接失败");
+        }
+      },
+      (err) => {
+        showToast("打开链接失败: " + err);
       },
     );
   }
@@ -1018,6 +1102,7 @@ function createMiniEditor(host, options) {
       view.focus();
     },
     insertFiles,
+    insertMarkdownLink,
   });
 
   syncEmptyState();
@@ -1086,6 +1171,16 @@ function createMiniEditor(host, options) {
     });
   }
 
+  function insertMarkdownLink(url) {
+    const { from, to, empty } = view.state.selection;
+    const selected = empty ? "" : view.state.doc.textBetween(from, to, "\n");
+    const label = markdownLinkLabel(selected || url);
+    const text = markdownLinkText(label, url);
+    const transaction = view.state.tr.insertText(text, from, to);
+    transaction.setSelection(PM.TextSelection.create(transaction.doc, from + 1, from + 1 + label.length));
+    view.dispatch(transaction.scrollIntoView());
+  }
+
   function syncEmptyState() {
     host.classList.toggle("is-empty", getText().trim().length === 0);
   }
@@ -1111,6 +1206,7 @@ function createFallbackEditor(host, options) {
       textarea.focus();
     },
     insertFiles,
+    insertMarkdownLink,
   });
   return {
     destroy() {
@@ -1182,6 +1278,10 @@ function createFallbackEditor(host, options) {
       console.error(uploadErrorMessage(err));
     });
   }
+
+  function insertMarkdownLink(url) {
+    insertMarkdownLinkIntoTextarea(textarea, url, options.onChange);
+  }
 }
 
 function installFileDropHandler(host, editor) {
@@ -1215,10 +1315,19 @@ function installFileDropHandler(host, editor) {
 
   function onPaste(event) {
     const files = filesFromClipboard(event.clipboardData);
-    if (!files.length) return;
+    if (files.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      editor.insertFiles(files);
+      editor.focus();
+      return;
+    }
+
+    const url = clipboardPlainURL(event.clipboardData);
+    if (!url || typeof editor.insertMarkdownLink !== "function") return;
     event.preventDefault();
     event.stopPropagation();
-    editor.insertFiles(files);
+    editor.insertMarkdownLink(url);
     editor.focus();
   }
 
@@ -1273,6 +1382,43 @@ function requestNativeFileForEditor(editor, accept) {
     },
     () => {},
   );
+}
+
+function insertMarkdownLinkIntoTextarea(textarea, url, onChange) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.slice(start, end);
+  const label = markdownLinkLabel(selected || url);
+  const text = markdownLinkText(label, url);
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+  textarea.selectionStart = start + 1;
+  textarea.selectionEnd = start + 1 + label.length;
+  if (onChange) onChange(textarea.value);
+}
+
+function clipboardPlainURL(clipboardData) {
+  if (!clipboardData || typeof clipboardData.getData !== "function") return "";
+  return singlePlainURL(clipboardData.getData("text/plain"));
+}
+
+function singlePlainURL(value) {
+  const text = String(value || "").trim();
+  if (!text || /\s/.test(text) || !/^https?:\/\//i.test(text)) return "";
+
+  try {
+    const url = new window.URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? text : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function markdownLinkText(label, url) {
+  return `[${label}](${markdownUrl(url)})`;
+}
+
+function markdownLinkLabel(value) {
+  return markdownLabel(String(value || "").replace(/\s+/g, " ").trim());
 }
 
 function filesToMarkdown(files) {
@@ -1727,6 +1873,8 @@ function renderMemoImageBlock(resource) {
 function renderMemoFileBlock(resource) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
+  const openButton = renderVSCodeOpenButton(resource.url);
+  const localClass = openButton ? " has-editor-open" : "";
   const body = `
     <span class="memo-file-block-icon">${SVG.paperclip}</span>
     <span class="memo-file-block-text">
@@ -1735,8 +1883,8 @@ function renderMemoFileBlock(resource) {
     </span>
   `;
 
-  if (href === "#") {
-    return `<div class="memo-file-block">${body}</div>`;
+  if (href === "#" || openButton) {
+    return `<div class="memo-file-block${localClass}">${body}${openButton}</div>`;
   }
   return `<a class="memo-file-block" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
 }
@@ -1756,12 +1904,104 @@ function renderMemoImageToken(resource) {
 function renderMemoFileToken(resource) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
+  const openButton = renderVSCodeOpenButton(resource.url);
+  const localClass = openButton ? " has-editor-open" : "";
   const body = `${SVG.paperclip}<span>${escapeHTML(name)}</span>`;
 
-  if (href === "#") {
-    return `<span class="memo-file-token">${body}</span>`;
+  if (href === "#" || openButton) {
+    return `<span class="memo-file-token${localClass}">${body}${openButton}</span>`;
   }
   return `<a class="memo-file-token" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
+}
+
+function renderVSCodeOpenButton(url) {
+  const target = localEditorTarget(url);
+  if (!target) return "";
+  return `
+    <button
+      class="memo-file-open-vscode"
+      type="button"
+      data-editor-open="vscode"
+      data-editor-file="${escapeAttr(target.file)}"
+      data-editor-line="${escapeAttr(target.line)}"
+      data-editor-col="${escapeAttr(target.col)}"
+      title="在 VS Code 中打开"
+      aria-label="在 VS Code 中打开"
+    >
+      ${SVG.code}
+      <span>在 VS Code 中打开</span>
+    </button>
+  `;
+}
+
+function localEditorTarget(value) {
+  const target = parseEditorTarget(value);
+  if (!target || !target.file) return null;
+  if (!isLocalEditorResource(target.file)) return null;
+  return target;
+}
+
+function parseEditorTarget(value) {
+  let file = String(value || "").trim();
+  if (!file) return null;
+
+  let line = "1";
+  let col = "1";
+  try {
+    const parsed = new URL(file, window.location.origin);
+    line = editorPositionValue(parsed.searchParams.get("line"), line);
+    col = editorPositionValue(parsed.searchParams.get("col") || parsed.searchParams.get("column"), col);
+  } catch (_) {}
+
+  if (!isLocalOSSAssetURL(file)) {
+    const suffix = file.match(/^(.*):(\d+)(?::(\d+))?$/);
+    if (suffix && !/^[a-zA-Z]:[\\/]/.test(file)) {
+      file = suffix[1];
+      line = editorPositionValue(suffix[2], line);
+      col = editorPositionValue(suffix[3], col);
+    }
+  }
+
+  return { file, line, col };
+}
+
+function editorPositionValue(value, fallback) {
+  const text = String(value || "").trim();
+  return /^[1-9]\d*$/.test(text) ? text : fallback || "1";
+}
+
+function isLocalEditorResource(value) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+  if (isLocalAssetReference(url)) return true;
+  if (/^@assets\//i.test(url)) return false;
+  if (isLocalOSSAssetURL(url)) return true;
+  if (/^(local:\/\/|file:\/\/)/i.test(url)) return true;
+  if (/^(https?:|mailto:|blob:|data:)/i.test(url)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^[a-zA-Z]:[\\/]/.test(url)) return false;
+  return true;
+}
+
+function isLocalAssetReference(value) {
+  const asset = typeof parseAssetReference === "function" ? parseAssetReference(value) : null;
+  if (!asset) return false;
+  const storage = typeof cloudStorageById === "function" ? cloudStorageById(asset.storageId) : null;
+  return editorStorageIsLocal(storage);
+}
+
+function isLocalOSSAssetURL(value) {
+  const raw = String(value || "").trim();
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    return parsed.pathname === "/api/oss/assets" && (parsed.origin === window.location.origin || raw.startsWith("/"));
+  } catch (_) {
+    return /^\/api\/oss\/assets(?:\?|$)/i.test(raw);
+  }
+}
+
+function editorStorageIsLocal(storage) {
+  const provider = String((storage && storage.provider) || "").trim().toLowerCase();
+  return provider === "local" || provider === "local-oss";
 }
 
 function isFileAttachment(label, url) {
@@ -1867,6 +2107,26 @@ function copyText(text) {
   const ok = document.execCommand("copy");
   textarea.remove();
   return ok ? Promise.resolve() : Promise.reject(new Error("copy failed"));
+}
+
+function closestAnchor(target) {
+  let node = target;
+  if (node && node.nodeType === 3) node = node.parentElement;
+  if (!node || typeof node.closest !== "function") return null;
+  return node.closest("a[href]");
+}
+
+function externalBrowserURLFromAnchor(anchor) {
+  const href = String(anchor.getAttribute("href") || anchor.href || "").trim();
+  if (!/^https?:\/\//i.test(href)) return "";
+
+  try {
+    const url = new URL(href);
+    if ((url.protocol === "http:" || url.protocol === "https:") && url.host) {
+      return url.href;
+    }
+  } catch (_) {}
+  return "";
 }
 
 function escapeHTML(value) {

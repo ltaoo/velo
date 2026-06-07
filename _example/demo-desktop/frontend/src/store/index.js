@@ -89,7 +89,26 @@ history.onRouteChange(({ reason, view, href, ignore }) => {
   }
 });
 
+window.addEventListener("click", (event) => {
+  if (event.defaultPrevented || event.button !== 0) return;
+  const link = closestAnchor(event.target);
+  if (!link) return;
+
+  const externalURL = externalBrowserURL(link.getAttribute("href") || link.href || "");
+  if (!externalURL) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  confirmOpenExternalLink(externalURL);
+}, true);
+
 history.onClickLink(({ href, target }) => {
+  const externalURL = externalBrowserURL(href);
+  if (externalURL) {
+    confirmOpenExternalLink(externalURL);
+    return;
+  }
+
   // @ts-ignore
   const { pathname, query } = Timeless.NavigatorCore.parse(href);
   const route = routesWithPathname[pathname];
@@ -103,6 +122,48 @@ history.onClickLink(({ href, target }) => {
   }
   history.push(route.name, query);
 });
+
+function closestAnchor(target) {
+  let node = target;
+  if (node && node.nodeType === 3) node = node.parentElement;
+  if (!node || typeof node.closest !== "function") return null;
+  return node.closest("a[href]");
+}
+
+function externalBrowserURL(href) {
+  const value = String(href || "").trim();
+  if (!/^https?:\/\//i.test(value)) return "";
+
+  try {
+    const url = new URL(value);
+    if ((url.protocol === "http:" || url.protocol === "https:") && url.host) {
+      return url.href;
+    }
+  } catch (_) {}
+  return "";
+}
+
+function confirmOpenExternalLink(url) {
+  openExternalLinkInDefaultBrowser(url);
+}
+
+function openExternalLinkInDefaultBrowser(url) {
+  if (typeof invoke !== "function") {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+
+  invoke("/api/external/open?url=" + encodeURIComponent(url), { method: "GET" }).then(
+    (resp) => {
+      if (!resp || resp.code !== 0) {
+        app.tip?.({ text: [(resp && resp.msg) || "打开链接失败"] });
+      }
+    },
+    (err) => {
+      app.tip?.({ text: ["打开链接失败: " + err] });
+    },
+  );
+}
 
 // @ts-ignore
 TimelessWeb.provide_app(app);
