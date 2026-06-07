@@ -99,6 +99,49 @@ func TestCreateVaultMemoWritesMarkdownFile(t *testing.T) {
 	}
 }
 
+func TestCreateVaultMemoPreservesBlankLines(t *testing.T) {
+	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if existing {
+		t.Fatalf("new temp vault should not be existing")
+	}
+
+	content := "first\n\nsecond\n\n"
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    content,
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	if memo.Content != content {
+		t.Fatalf("created content = %q, want %q", memo.Content, content)
+	}
+
+	path := filepath.Join(ctx.RootDir, filepath.FromSlash(memo.Path))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read memo file: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "contentWhitespace: \"preserve\"") {
+		t.Fatalf("memo file missing whitespace marker:\n%s", text)
+	}
+	if !strings.HasSuffix(text, "---\n"+content) {
+		t.Fatalf("memo file content suffix = %q, want %q", text, "---\n"+content)
+	}
+
+	listed, err := listVaultMemos(ctx)
+	if err != nil {
+		t.Fatalf("list memos: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Content != content {
+		t.Fatalf("listed memos = %#v, want content %q", listed, content)
+	}
+}
+
 func TestExtractMemoAssetReferences(t *testing.T) {
 	content := strings.Join([]string{
 		"![image](@assets/memo-local/images/a%29.png)",

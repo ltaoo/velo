@@ -1037,6 +1037,16 @@
             doc: this.initialDoc(editorOptions),
             plugins: this.buildMiniPlugins(),
           }),
+          attributes: {
+            autocapitalize: "off",
+            autocomplete: "off",
+            autocorrect: "off",
+            "data-enable-grammarly": "false",
+            "data-gramm": "false",
+            "data-gramm_editor": "false",
+            spellcheck: "false",
+            writingsuggestions: "false",
+          },
           dispatchTransaction: (transaction) => {
             this.dispatchTransaction(transaction);
           },

@@ -85,6 +85,7 @@ export function mountMemosHome(root) {
     editVisibility: DEFAULT_VISIBILITY,
     highlightMemoId: "",
     highlightTimer: null,
+    expandedMemoIds: new Set(),
     memoRefIndex: null,
     memos: loadMemos(),
     query: "",
@@ -289,6 +290,9 @@ export function mountMemosHome(root) {
         break;
       case "editMemo":
         startEdit(memoId);
+        break;
+      case "toggleMemoExpand":
+        toggleMemoExpand(memoId);
         break;
       case "openSettings":
         openSettings();
@@ -537,8 +541,8 @@ export function mountMemosHome(root) {
 
   function createMemo() {
     if (state.saving) return;
-    const content = composerEditor.getText().trim();
-    if (!content) {
+    const content = composerEditor.getText();
+    if (!content.trim()) {
       showToast("先写点内容");
       composerEditor.focus();
       return;
@@ -581,6 +585,16 @@ export function mountMemosHome(root) {
     renderFeed();
   }
 
+  function toggleMemoExpand(memoId) {
+    if (!memoId) return;
+    if (state.expandedMemoIds.has(memoId)) {
+      state.expandedMemoIds.delete(memoId);
+    } else {
+      state.expandedMemoIds.add(memoId);
+    }
+    renderFeed();
+  }
+
   function cancelEdit() {
     state.editingId = "";
     state.editDraft = "";
@@ -590,8 +604,8 @@ export function mountMemosHome(root) {
   function saveEdit(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
-    const content = (editEditor ? editEditor.getText() : state.editDraft).trim();
-    if (!content) {
+    const content = editEditor ? editEditor.getText() : state.editDraft;
+    if (!content.trim()) {
       showToast("内容不能为空");
       return;
     }
@@ -1002,7 +1016,9 @@ export function mountMemosHome(root) {
     const memos = visibleMemos();
     els.feedCount.textContent = `${memos.length} 条`;
     els.memoList.innerHTML = memos.length
-      ? memos.map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id))).join("")
+      ? memos
+          .map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id), state.expandedMemoIds.has(memo.id)))
+          .join("")
       : emptyFeedTemplate();
 
     if (state.editingId) {
@@ -1028,6 +1044,28 @@ export function mountMemosHome(root) {
         editEditor.focus();
       }
     }
+
+    syncMemoExpandControls();
+  }
+
+  function syncMemoExpandControls() {
+    const collapsibleItems = els.memoList.querySelectorAll("[data-memo-collapse]");
+    collapsibleItems.forEach(function (item) {
+      const content = item.querySelector(".memo-content");
+      if (!content) return;
+
+      item.classList.remove("is-short");
+      if (item.classList.contains("is-collapsed") && content.scrollHeight <= content.clientHeight + 1) {
+        item.classList.add("is-short");
+      }
+
+      content.querySelectorAll("img").forEach(function (image) {
+        if (image.complete) return;
+        if (image.dataset.memoExpandWatch) return;
+        image.dataset.memoExpandWatch = "true";
+        image.addEventListener("load", syncMemoExpandControls, { once: true });
+      });
+    });
   }
 
   function renderTodos() {
@@ -1242,6 +1280,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     content: root.querySelector("[data-window-content]"),
     fixedButton: root.querySelector('[data-window-control="toggleFixed"]'),
     toast: root.querySelector("[data-toast]"),
+    visibility: root.querySelector("[data-window-visibility]"),
   };
 
   renderFixedButton();
@@ -1408,12 +1447,27 @@ export function mountDetachedMemoWindow(root, options = {}) {
 
     const context = detachedMemoRenderContext(state, memo.id, { readonly: true });
     document.title = memoTitle(memo);
+    renderDetachedVisibility(memo);
     els.content.innerHTML = detachedMemoCardTemplate(memo, context);
   }
 
   function renderDetachedState(message) {
     document.title = "Memo";
+    renderDetachedVisibility(null);
     els.content.innerHTML = `<div class="memo-window-empty">${escapeHTML(message || "")}</div>`;
+  }
+
+  function renderDetachedVisibility(memo) {
+    if (!els.visibility) return;
+    if (!memo) {
+      els.visibility.hidden = true;
+      els.visibility.innerHTML = "";
+      return;
+    }
+
+    const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+    els.visibility.innerHTML = `${SVG[visibility.icon]} ${escapeHTML(visibility.label)}`;
+    els.visibility.hidden = false;
   }
 
   function focusDetachedMemo(memoId) {
@@ -1534,6 +1588,7 @@ function detachedMemoWindowTemplate() {
           <button class="memo-window-icon-button velo-no-drag" type="button" data-window-control="toggleFixed" title="悬浮在所有窗口上方" aria-label="悬浮在所有窗口上方">
             ${SVG.pin}
           </button>
+          <span class="memo-window-visibility memo-visibility" data-window-visibility hidden></span>
         </div>
       </header>
       <main class="memo-window-body velo-no-drag" data-window-content></main>
@@ -1543,7 +1598,6 @@ function detachedMemoWindowTemplate() {
 }
 
 function detachedMemoCardTemplate(memo, renderContext) {
-  const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
   const backlinks = memoBacklinkCount(renderContext, memo.id);
 
@@ -1558,7 +1612,6 @@ function detachedMemoCardTemplate(memo, renderContext) {
           </div>
         </div>
         <div class="memo-card-meta">
-          <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
@@ -1847,12 +1900,13 @@ function calendarTemplate(monthDate, memos, selectedDate) {
   `;
 }
 
-function memoTemplate(memo, editingId, renderContext) {
+function memoTemplate(memo, editingId, renderContext, expanded = false) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
   const archived = memo.archived;
   const editing = memo.id === editingId;
   const backlinks = memoBacklinkCount(renderContext, memo.id);
+  const expandLabel = expanded ? "收起" : "展开";
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -1865,6 +1919,11 @@ function memoTemplate(memo, editingId, renderContext) {
           </div>
         </div>
         <div class="memo-card-meta">
+          <div class="memo-card-head-actions">
+            <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
+            <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口">${SVG.external}</button>
+            <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
+          </div>
           <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
@@ -1874,14 +1933,17 @@ function memoTemplate(memo, editingId, renderContext) {
         editing
           ? editTemplate(memo)
           : `
-            <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+            <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
+              <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+              <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
+                <span>${expandLabel}</span>
+                ${SVG.chevronDown}
+              </button>
+            </div>
             ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`).join("")}</div>` : ""}
           `
       }
       <footer class="memo-card-actions">
-        <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
-        <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口">${SVG.external}</button>
-        <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
         <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
         <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
         ${
@@ -4216,10 +4278,11 @@ function renderMemoMarkdown(content, context = {}) {
   lines.forEach((line, index) => {
     const lineNumber = index + 1;
     if (line.trim().startsWith("```")) {
+      const fenceClass = inCode ? "is-code-end" : "is-code-start";
       html += memoLineTemplate(
         lineNumber,
         `<pre class="memo-code-line is-fence"><code>${escapeHTML(line)}</code></pre>`,
-        "is-code is-code-fence",
+        `is-code is-code-fence ${fenceClass}`,
       );
       inCode = !inCode;
       return;
@@ -4229,7 +4292,7 @@ function renderMemoMarkdown(content, context = {}) {
       html += memoLineTemplate(
         lineNumber,
         `<pre class="memo-code-line"><code>${escapeHTML(line)}</code></pre>`,
-        "is-code",
+        "is-code is-code-body",
       );
       return;
     }
@@ -4293,13 +4356,12 @@ function renderMemoMarkdown(content, context = {}) {
       return;
     }
 
-    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    const heading = parseMemoHeadingLine(line);
     if (heading) {
-      const level = heading[1].length;
       html += memoLineTemplate(
         lineNumber,
-        `<h${level + 2}>${inlineMarkdown(heading[2], context)}</h${level + 2}>`,
-        "is-heading",
+        `<h${heading.level} class="memo-heading memo-heading-${heading.level}">${inlineMarkdown(heading.text, context)}</h${heading.level}>`,
+        `is-heading is-heading-${heading.level}`,
       );
       return;
     }
@@ -4509,6 +4571,16 @@ function isMemoFenceLine(line) {
   return String(line || "").trim().startsWith("```");
 }
 
+function parseMemoHeadingLine(line) {
+  const match = String(line || "").match(/^\s{0,3}(#{1,6})(?:[ \t]+|$)(.*)$/);
+  if (!match) return null;
+
+  return {
+    level: match[1].length,
+    text: match[2].replace(/[ \t]+#{1,}\s*$/, "").trim(),
+  };
+}
+
 function memoRefTitle(ref, memo) {
   return String((ref && ref.alias) || "").trim() || memoTitle(memo);
 }
@@ -4528,8 +4600,8 @@ function memoTitle(memo) {
   });
   if (!first) return memo && memo.id ? memo.id : "Untitled memo";
 
-  const heading = first.match(/^#{1,6}\s+(.*)$/);
-  return compactMemoTitle(stripMemoTitleMarkdown(heading ? heading[1] : first));
+  const heading = parseMemoHeadingLine(first);
+  return compactMemoTitle(stripMemoTitleMarkdown(heading ? heading.text : first));
 }
 
 function stripMemoTitleMarkdown(value) {

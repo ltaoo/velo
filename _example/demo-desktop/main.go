@@ -669,8 +669,8 @@ func listVaultMemos(ctx *VaultContext) ([]MemoRecord, error) {
 }
 
 func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, error) {
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
+	content := normalizeMemoContent(req.Content)
+	if strings.TrimSpace(content) == "" {
 		return MemoRecord{}, fmt.Errorf("memo content is required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -706,8 +706,8 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 		return MemoRecord{}, err
 	}
 	if req.Content != nil {
-		content := strings.TrimSpace(*req.Content)
-		if content == "" {
+		content := normalizeMemoContent(*req.Content)
+		if strings.TrimSpace(content) == "" {
 			return MemoRecord{}, fmt.Errorf("memo content is required")
 		}
 		memo.Content = content
@@ -808,7 +808,7 @@ func readMemoFile(ctx *VaultContext, path string) (MemoRecord, error) {
 	}
 	memo := MemoRecord{
 		Archived:   parseMemoBool(meta["archived"]),
-		Content:    strings.TrimSpace(content),
+		Content:    normalizeStoredMemoContent(content, meta),
 		CreatedAt:  createdAt,
 		ID:         id,
 		Path:       relativeVaultPath(ctx, path),
@@ -867,6 +867,7 @@ func renderMemoMarkdownFile(memo MemoRecord) string {
 		"visibility: " + yamlQuote(normalizeMemoVisibility(memo.Visibility)),
 		"pinned: " + fmt.Sprintf("%t", memo.Pinned),
 		"archived: " + fmt.Sprintf("%t", memo.Archived),
+		"contentWhitespace: \"preserve\"",
 	}
 	if len(tags) == 0 {
 		lines = append(lines, "tags: []")
@@ -884,8 +885,21 @@ func renderMemoMarkdownFile(memo MemoRecord) string {
 			lines = append(lines, "  - "+yamlQuote(ref))
 		}
 	}
-	lines = append(lines, "---", "", strings.TrimSpace(memo.Content), "")
-	return strings.Join(lines, "\n")
+	lines = append(lines, "---")
+	return strings.Join(lines, "\n") + "\n" + normalizeMemoContent(memo.Content)
+}
+
+func normalizeMemoContent(content string) string {
+	text := strings.ReplaceAll(content, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
+}
+
+func normalizeStoredMemoContent(content string, meta map[string]string) string {
+	content = normalizeMemoContent(content)
+	if meta["contentWhitespace"] == "preserve" {
+		return content
+	}
+	return strings.TrimSpace(content)
 }
 
 func parseMemoMarkdown(raw string) (map[string]string, string) {

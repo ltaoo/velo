@@ -288,6 +288,12 @@
     return { from, to: from + 1, empty: false };
   }
 
+  function normalCursorPos(state) {
+    if (!state.selection.empty) return state.selection.from;
+    const cursor = normalCursorRange(state);
+    return cursor ? cursor.from : state.selection.from;
+  }
+
   function indexAtOrAfter(chars, pos) {
     for (let i = 0; i < chars.length; i += 1) {
       if (chars[i].pos >= pos) return i;
@@ -401,6 +407,46 @@
     return currentPos;
   }
 
+  function changeWordEndPos(state, pos, count) {
+    const chars = wordMotionPositions(state);
+    if (!chars.length) return pos;
+
+    let index = indexAtOrAfter(chars, pos);
+    if (index >= chars.length || charKind(chars[index].ch) === "blank") return null;
+
+    const steps = Math.max(1, count || 1);
+    for (let step = 0; step < steps; step += 1) {
+      while (index < chars.length && charKind(chars[index].ch) === "blank") index += 1;
+      if (index >= chars.length) return docEnd(state);
+
+      const endIndex = runEndIndex(chars, index);
+      if (step === steps - 1) return chars[endIndex].pos;
+      index = endIndex + 1;
+    }
+
+    return pos;
+  }
+
+  function findCharForwardPos(state, pos, query, count) {
+    if (!query || query.length !== 1) return null;
+
+    const block = textblockInfo(state, pos);
+    if (!block.node.isTextblock) return null;
+
+    const chars = textblockTextPositions(block, 0);
+    let remaining = Math.max(1, count || 1);
+
+    for (let i = 0; i < chars.length; i += 1) {
+      if (chars[i].pos <= pos) continue;
+      if (chars[i].ch !== query) continue;
+
+      remaining -= 1;
+      if (remaining === 0) return chars[i].pos;
+    }
+
+    return null;
+  }
+
   function moveHorizontalPos(state, pos, delta) {
     return clamp(pos + delta, 0, state.doc.content.size);
   }
@@ -480,7 +526,7 @@
 
   function rangeForMotion(view, key, count, operator) {
     const { state } = view;
-    const from = state.selection.from;
+    const from = normalCursorPos(state);
 
     if (key === operator) {
       if (operator === "d" || operator === "y") {
@@ -492,12 +538,41 @@
       }
     }
 
+    if (operator === "c" && key === "w") {
+      const chars = wordMotionPositions(state);
+      const current = chars[indexAtOrAfter(chars, from)];
+      if (current && charKind(current.ch) !== "blank") {
+        const target = changeWordEndPos(state, from, count);
+        if (target == null) return null;
+        const rangeTarget = positionAfterCursorTarget(state, target);
+        return {
+          from: Math.min(from, rangeTarget),
+          to: Math.max(from, rangeTarget),
+          linewise: false,
+        };
+      }
+    }
+
     const target = motionTarget(view, key, count);
     if (target == null) return null;
     const nextLineStart = key === "e" ? nextLineStartAtLineEnd(state, from) : null;
     const rangeTarget = operator && key === "e" && target !== nextLineStart
       ? positionAfterCursorTarget(state, target)
       : target;
+    return {
+      from: Math.min(from, rangeTarget),
+      to: Math.max(from, rangeTarget),
+      linewise: false,
+    };
+  }
+
+  function rangeForFindChar(view, query, count) {
+    const { state } = view;
+    const from = normalCursorPos(state);
+    const target = findCharForwardPos(state, from, query, count);
+    if (target == null) return null;
+
+    const rangeTarget = positionAfterCursorTarget(state, target);
     return {
       from: Math.min(from, rangeTarget),
       to: Math.max(from, rangeTarget),
@@ -849,7 +924,9 @@
 
   function applyRepeatedChange(view, action, count) {
     const { state } = view;
-    const range = rangeForMotion(view, action.motion, count, action.operator);
+    const range = action.motion === "f"
+      ? rangeForFindChar(view, action.query, count)
+      : rangeForMotion(view, action.motion, count, action.operator);
     if (!range || range.from === range.to || !view.dispatch) return true;
 
     const deletedText = state.doc.textBetween(range.from, range.to, "\n");
@@ -939,7 +1016,9 @@
 
     const count = repeatCount(action, countOverride);
     if (action.type === "operator") {
-      const range = rangeForMotion(view, action.motion, count, action.operator);
+      const range = action.motion === "f"
+        ? rangeForFindChar(view, action.query, count)
+        : rangeForMotion(view, action.motion, count, action.operator);
       return applyOperator(view, action.operator, range, { ...action, count });
     }
     if (action.type === "change") {
@@ -1077,17 +1156,135 @@
     return true;
   }
 
+  function findPendingValue(mode, operator) {
+    return "find:" + mode + ":" + (operator || "");
+  }
+
+  function parseFindPending(value) {
+    const match = String(value || "").match(/^find:(normal|visual|operator):([dyc]?)$/);
+    if (!match) return null;
+    return {
+      mode: match[1],
+      operator: match[2] || null,
+    };
+  }
+
+  function isFindQueryKey(key) {
+    return key && key.length === 1;
+  }
+
+  function dispatchFindPending(state, dispatch, mode, operator) {
+    return dispatchPending(state, dispatch, findPendingValue(mode, operator), "f", true);
+  }
+
+  function runFindChar(view, query, count) {
+    const { state } = view;
+    const target = findCharForwardPos(state, state.selection.head, query, count);
+    if (target == null) {
+      view.dispatch(
+        setVimMeta(state.tr, {
+          pending: null,
+          count: "",
+          message: "not found: " + query,
+        }),
+      );
+      return true;
+    }
+
+    return setCursor(state, view.dispatch, target, clearTransient({
+      lastFind: { query },
+      message: "f" + query,
+    }));
+  }
+
+  function visualFindChar(view, query, count) {
+    const { state } = view;
+    const pluginState = getPluginState(state);
+    const target = findCharForwardPos(state, state.selection.head, query, count);
+    if (target == null) {
+      view.dispatch(
+        setVimMeta(state.tr, {
+          pending: null,
+          count: "",
+          message: "not found: " + query,
+        }),
+      );
+      return true;
+    }
+
+    const head = target >= pluginState.visualAnchor
+      ? positionAfterCursorTarget(state, target)
+      : target;
+    return setRange(state, view.dispatch, pluginState.visualAnchor, head, {
+      mode: MODES.VISUAL,
+      visualAnchor: pluginState.visualAnchor,
+      pending: null,
+      count: "",
+      lastFind: { query },
+      message: "f" + query,
+    });
+  }
+
+  function repeatFindChar(view, count, visual) {
+    const pluginState = getPluginState(view.state);
+    if (!pluginState.lastFind || !pluginState.lastFind.query) {
+      view.dispatch(setVimMeta(view.state.tr, { message: "no find" }));
+      return true;
+    }
+
+    return visual
+      ? visualFindChar(view, pluginState.lastFind.query, count)
+      : runFindChar(view, pluginState.lastFind.query, count);
+  }
+
   function normalCommand(view, key, options) {
     const { state } = view;
     const pluginState = getPluginState(state);
     const count = countFrom(pluginState);
     const countOverride = pluginState.count ? count : null;
+    const findPending = parseFindPending(pluginState.pending);
+
+    if (findPending) {
+      if (key === "Esc" || key === "Ctrl-[") {
+        return setMode(state, view.dispatch, MODES.NORMAL);
+      }
+      if (!isFindQueryKey(key)) {
+        return dispatchPending(state, view.dispatch, null, "not mapped: f" + key);
+      }
+      if (findPending.mode === "operator" && findPending.operator) {
+        const range = rangeForFindChar(view, key, count);
+        if (!range) {
+          view.dispatch(
+            setVimMeta(state.tr, {
+              pending: null,
+              count: "",
+              message: "not found: " + key,
+            }),
+          );
+          return true;
+        }
+        const repeatAction =
+          findPending.operator === "y"
+            ? null
+            : {
+                type: findPending.operator === "c" ? "change" : "operator",
+                operator: findPending.operator,
+                motion: "f",
+                query: key,
+                count,
+                text: "",
+              };
+        return applyOperator(view, findPending.operator, range, repeatAction);
+      }
+      return runFindChar(view, key, count);
+    }
 
     if (/^[1-9]$/.test(key) || (key === "0" && pluginState.count)) {
       return dispatchCount(state, view.dispatch, key);
     }
 
     if (key === "." && !pluginState.pending) return repeatLastChange(view, countOverride);
+    if (key === ";" && !pluginState.pending) return repeatFindChar(view, count, false);
 
     if (pluginState.pending === "g") {
       if (key === "g") {
@@ -1097,6 +1294,9 @@
     }
 
     if (pluginState.pending === "d" || pluginState.pending === "y" || pluginState.pending === "c") {
+      if (key === "f") {
+        return dispatchFindPending(state, view.dispatch, "operator", pluginState.pending);
+      }
       const range = rangeForMotion(view, key, count, pluginState.pending);
       const repeatAction =
         pluginState.pending === "y"
@@ -1123,8 +1323,12 @@
 
     if ("hjklJKweb0^$".includes(key) || key.startsWith("Arrow")) {
       const target = motionTarget(view, key, count);
-      if (target != null) return setCursor(state, view.dispatch, target, clearTransient());
+      if (target != null) {
+        const cursorTarget = key === "$" ? charBeforePositionInBlock(state, target) : target;
+        return setCursor(state, view.dispatch, cursorTarget, clearTransient());
+      }
     }
+    if (key === "f") return dispatchFindPending(state, view.dispatch, "normal", null);
 
     if (key === "i") return enterInsertAt(view, state.selection.from);
     if (key === "a") return enterInsertAt(view, moveHorizontalPos(state, state.selection.from, 1));
@@ -1175,8 +1379,16 @@
     const { state } = view;
     const pluginState = getPluginState(state);
     const count = countFrom(pluginState);
+    const findPending = parseFindPending(pluginState.pending);
 
     if (key === "Esc" || key === "Ctrl-[") return leaveVisual(view);
+
+    if (findPending) {
+      if (!isFindQueryKey(key)) {
+        return dispatchPending(state, view.dispatch, null, "not mapped: f" + key);
+      }
+      return visualFindChar(view, key, count);
+    }
 
     if (key === "o") {
       const anchor = state.selection.head;
@@ -1200,6 +1412,9 @@
         message: "",
       });
     }
+
+    if (key === "f") return dispatchFindPending(state, view.dispatch, "visual", null);
+    if (key === ";") return repeatFindChar(view, count, true);
 
     if (key === "d" || key === "x") {
       const selectedSize = state.selection.to - state.selection.from;
@@ -1299,6 +1514,15 @@
     );
   }
 
+  function visualCursorDisplayPos(state, pluginState) {
+    const anchor = pluginState.visualAnchor;
+    const head = state.selection.head;
+    if (anchor != null && head > anchor) {
+      return charBeforePositionInBlock(state, head);
+    }
+    return head;
+  }
+
   function decorationsFor(state) {
     const pluginState = getPluginState(state);
     if (!pluginState) return PM.DecorationSet.empty;
@@ -1317,7 +1541,7 @@
     }
 
     if (pluginState.mode === MODES.VISUAL) {
-      pushCursorDecoration(decorations, state, state.selection.head);
+      pushCursorDecoration(decorations, state, visualCursorDisplayPos(state, pluginState));
     }
 
     if (pluginState.searchRange) {
@@ -1352,6 +1576,7 @@
               searchDirection: 1,
               searchRange: null,
               lastRepeat: null,
+              lastFind: null,
               insertSession: null,
               message: "",
             };
@@ -1402,6 +1627,9 @@
             }
             if (Object.prototype.hasOwnProperty.call(meta, "lastRepeat")) {
               next.lastRepeat = meta.lastRepeat;
+            }
+            if (Object.prototype.hasOwnProperty.call(meta, "lastFind")) {
+              next.lastFind = meta.lastFind;
             }
             if (Object.prototype.hasOwnProperty.call(meta, "insertSession")) {
               next.insertSession = meta.insertSession;
