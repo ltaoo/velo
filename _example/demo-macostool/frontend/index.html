@@ -100,15 +100,33 @@
       </section>
     </section>
 
+    <section class="panel keyboard-panel" aria-labelledby="keyboard-title">
+      <div class="section-head">
+        <div>
+          <h2 id="keyboard-title">键盘清洁模式</h2>
+          <p id="keyboard-status">正在读取键盘状态...</p>
+        </div>
+        <div class="toolbar-actions">
+          <button class="danger" id="keyboard-disable" type="button" disabled>禁用键盘</button>
+          <button class="ghost" id="keyboard-enable" type="button" disabled>启用键盘</button>
+        </div>
+      </div>
+      <div class="keyboard-meta">
+        <span id="keyboard-permission">辅助功能权限未知</span>
+        <span id="keyboard-eventtap">事件拦截未初始化</span>
+      </div>
+      <p class="keyboard-message" id="keyboard-message"></p>
+    </section>
+
     <section class="result" id="result" aria-live="polite"></section>
 
     <section class="status-grid">
       <section class="status">
-        <h2>当前接电源配置</h2>
+        <h2>当前接电源策略</h2>
         <pre id="ac-status">-</pre>
       </section>
       <section class="status">
-        <h2>当前电池配置</h2>
+        <h2>当前电池策略</h2>
         <pre id="battery-status">-</pre>
       </section>
     </section>

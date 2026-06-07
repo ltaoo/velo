@@ -513,6 +513,11 @@
             </main>
         </div>
     </div>
+    <script>
+        if (typeof window.invoke !== "function") {
+            document.write('<script src="/__velo/runtime.js"><\/script>');
+        }
+    </script>
     <script src="index.js"></script>
 </body>
 

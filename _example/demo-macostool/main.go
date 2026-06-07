@@ -61,6 +61,26 @@ func main() {
 		return c.Ok(status)
 	})
 
+	app.Get("/api/keyboard/status", func(c *velo.BoxContext) interface{} {
+		return c.Ok(readKeyboardState())
+	})
+
+	app.Post("/api/keyboard/disable", func(c *velo.BoxContext) interface{} {
+		status, err := disableKeyboard()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(status)
+	})
+
+	app.Post("/api/keyboard/enable", func(c *velo.BoxContext) interface{} {
+		status, err := enableKeyboard()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(status)
+	})
+
 	app.Post("/api/power/apply", func(c *velo.BoxContext) interface{} {
 		var req applyRequest
 		if err := c.BindJSON(&req); err != nil {

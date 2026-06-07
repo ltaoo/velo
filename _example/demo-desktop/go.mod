@@ -3,12 +3,23 @@ module example/simple
 go 1.20
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.16.16
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.27.11
 	github.com/ltaoo/velo v0.0.0
 	github.com/rs/zerolog v1.34.0
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.23 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.14 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.9 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.1.18 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.13.17 // indirect
+	github.com/aws/smithy-go v1.13.3 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect

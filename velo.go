@@ -301,6 +301,7 @@ type Box struct {
 	Store                  *store.Store
 	DB                     *gorm.DB
 	mux                    *http.ServeMux
+	wsHub                  *veloWSHub
 	mode                   Mode
 	frontendDir            string
 	appName                string
@@ -327,6 +328,7 @@ func NewApp(o *VeloAppOpt) *Box {
 	b := &Box{
 		get_handlers:           make(map[string]Handler),
 		post_handlers:          make(map[string]Handler),
+		wsHub:                  newVeloWSHub(),
 		frontendDir:            "frontend",
 		appName:                appConfig.displayName(),
 		appConfig:              appConfig,
@@ -450,7 +452,14 @@ func (b *Box) Post(name string, handler Handler) {
 }
 
 func (b *Box) SendMessage(message interface{}) bool {
-	return webview.SendMessage(message)
+	delivered := false
+	if b.mode != ModeHttp {
+		delivered = webview.SendMessage(message)
+	}
+	if b.wsHub != nil && b.wsHub.BroadcastMessage(message) {
+		delivered = true
+	}
+	return delivered
 }
 
 func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
@@ -641,6 +650,20 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 		}))
 	}
 
+	if box.wsHub != nil {
+		mux.HandleFunc(VeloWebSocketPath, func(w http.ResponseWriter, r *http.Request) {
+			box.wsHub.ServeHTTP(w, r, box.handleMessage)
+		})
+	}
+	mux.HandleFunc(VeloRuntimePath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Write([]byte(box.injectedRuntimeJS(nil)))
+	})
+
 	for path, handler := range box.get_handlers {
 		path, handler := path, handler
 		fmt.Printf("[velo] registering GET %s\n", path)
@@ -706,6 +729,22 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 
 func (box *Box) Run() {
 	fmt.Printf("[velo] version: %s\n", Version)
+	if box.mode == ModeHttp {
+		if len(box.webviews) > 0 {
+			first := box.webviews[0]
+			if mux, ok := first.Mux.(*http.ServeMux); ok {
+				box.mux = mux
+			} else {
+				box.mux = box.setupMux(first.FrontendFS, "")
+			}
+		} else {
+			box.mux = box.setupMux(nil, "")
+		}
+		server := &http.Server{Addr: "127.0.0.1:8080", Handler: box.mux}
+		server.ListenAndServe()
+		return
+	}
+
 	if len(box.webviews) > 0 && box.mode != ModeHttp {
 		first := box.webviews[0]
 		pathname := first.Pathname

@@ -1,11 +1,833 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
+
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Settings</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>设置</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #ededed;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #ffffff;
+      --BG-3: #f0f2f1;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.58);
+      --FG-2: rgba(0, 0, 0, 0.34);
+      --border: #dedede;
+      --accent: #0f9f6e;
+      --accent-strong: #08784f;
+      --accent-soft: rgba(15, 159, 110, 0.12);
+      --danger: #c93a32;
+      --danger-soft: rgba(201, 58, 50, 0.1);
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --background: #111111;
+      --BG-0: #151515;
+      --BG-1: #1d1d1d;
+      --BG-2: #191919;
+      --BG-3: #242424;
+      --FG-0: rgba(255, 255, 255, 0.86);
+      --FG-1: rgba(255, 255, 255, 0.56);
+      --FG-2: rgba(255, 255, 255, 0.34);
+      --border: rgba(255, 255, 255, 0.11);
+      --accent: #20b883;
+      --accent-strong: #7ee0bd;
+      --accent-soft: rgba(32, 184, 131, 0.15);
+      --danger: #ff746c;
+      --danger-soft: rgba(255, 116, 108, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overscroll-behavior: none;
+    }
+
+    body {
+      background: var(--background);
+      color: var(--FG-0);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .settings-shell {
+      background: var(--BG-0);
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .settings-sidebar {
+      background: var(--BG-1);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding: 18px 14px;
+    }
+
+    .settings-brand {
+      margin-bottom: 18px;
+    }
+
+    .settings-title {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .settings-subtitle {
+      color: var(--FG-1);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .settings-nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .settings-nav-button {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      color: var(--FG-1);
+      display: inline-flex;
+      gap: 8px;
+      height: 36px;
+      justify-content: flex-start;
+      padding: 0 10px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .settings-nav-button.is-active,
+    .settings-nav-button:hover {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .settings-nav-button svg,
+    .settings-section-icon svg,
+    .setting-status svg {
+      display: inline-block;
+      fill: none;
+      height: 16px;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 2;
+      width: 16px;
+    }
+
+    .settings-main {
+      min-height: 0;
+      min-width: 0;
+      overflow: auto;
+      padding: 24px;
+    }
+
+    .settings-header {
+      align-items: flex-start;
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .settings-header h1 {
+      font-size: 22px;
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    .settings-header p {
+      color: var(--FG-1);
+      font-size: 13px;
+      margin: 5px 0 0;
+    }
+
+    .setting-status {
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--FG-1);
+      display: inline-flex;
+      flex: 0 0 auto;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+
+    .setting-status.is-ready {
+      background: var(--accent-soft);
+      border-color: transparent;
+      color: var(--accent-strong);
+    }
+
+    .setting-status.is-warning {
+      background: var(--danger-soft);
+      border-color: transparent;
+      color: var(--danger);
+    }
+
+    .settings-form {
+      display: grid;
+      gap: 14px;
+      max-width: 760px;
+    }
+
+    .settings-section {
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+      padding-top: 16px;
+    }
+
+    .settings-section:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .settings-section-head {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    .settings-section-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .settings-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settings-field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .settings-field.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .settings-label-row {
+      align-items: center;
+      color: var(--FG-1);
+      display: flex;
+      font-size: 12px;
+      font-weight: 700;
+      justify-content: space-between;
+      min-height: 18px;
+    }
+
+    .settings-required {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    .settings-input,
+    .settings-select,
+    .settings-textarea {
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      min-height: 36px;
+      outline: 0;
+      padding: 0 10px;
+      width: 100%;
+    }
+
+    .settings-textarea {
+      line-height: 1.5;
+      min-height: 72px;
+      padding: 9px 10px;
+      resize: vertical;
+    }
+
+    .settings-input:focus,
+    .settings-select:focus,
+    .settings-textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .settings-secret {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .settings-checks {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .settings-check {
+      align-items: center;
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--FG-0);
+      display: flex;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 10px;
+    }
+
+    .settings-check input {
+      accent-color: var(--accent);
+      height: 15px;
+      width: 15px;
+    }
+
+    .settings-actions {
+      align-items: center;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 2px;
+      padding-top: 16px;
+    }
+
+    .settings-button {
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: inline-flex;
+      gap: 8px;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 12px;
+      white-space: nowrap;
+    }
+
+    .settings-button.is-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .settings-button.is-secondary {
+      background: var(--BG-2);
+      color: var(--FG-0);
+    }
+
+    .settings-button.is-danger {
+      background: transparent;
+      color: var(--danger);
+      margin-right: auto;
+    }
+
+    .settings-button:hover {
+      filter: brightness(0.98);
+    }
+
+    .settings-message {
+      color: var(--FG-1);
+      flex: 1 1 220px;
+      font-size: 12px;
+      min-width: 0;
+    }
+
+    @media (max-width: 620px) {
+      .settings-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .settings-sidebar {
+        border-bottom: 1px solid var(--border);
+        border-right: 0;
+        padding: 14px;
+      }
+
+      .settings-brand {
+        margin-bottom: 10px;
+      }
+
+      .settings-main {
+        padding: 18px 14px;
+      }
+
+      .settings-header {
+        display: grid;
+      }
+
+      .settings-grid,
+      .settings-checks {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .settings-actions {
+        justify-content: stretch;
+      }
+
+      .settings-button {
+        flex: 1 1 auto;
+      }
+
+      .settings-button.is-danger {
+        margin-right: 0;
+      }
+    }
+  </style>
 </head>
+
 <body>
-	<h1>Settings</h1>
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || !saved) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute("data-theme", theme);
+        } else {
+          root.style.colorScheme = saved;
+          root.setAttribute("data-theme", saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
+
+  <div class="settings-shell">
+    <aside class="settings-sidebar" aria-label="设置菜单">
+      <div class="settings-brand">
+        <div class="settings-title">设置</div>
+        <div class="settings-subtitle">Demo Desktop</div>
+      </div>
+      <nav class="settings-nav" aria-label="设置分类">
+        <button class="settings-nav-button is-active" type="button" data-panel="cloud-storage">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H7a5 5 0 1 1 1-9.9 6 6 0 0 1 11.4 2.5A3.8 3.8 0 0 1 17.5 19z"></path></svg>
+          <span>云存储</span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="settings-main">
+      <header class="settings-header">
+        <div>
+          <h1>云存储</h1>
+          <p>S3/OSS 兼容对象存储配置</p>
+        </div>
+        <div class="setting-status" data-config-status>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+          <span data-config-status-text>未配置</span>
+        </div>
+      </header>
+
+      <form class="settings-form" data-cloud-form>
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <span class="settings-section-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"></path><path d="M3 8h18"></path><path d="M3 16h18"></path></svg>
+            </span>
+            <div class="settings-section-title">连接</div>
+          </div>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>存储类型</span>
+                <span class="settings-required">必填</span>
+              </span>
+              <select class="settings-select" name="provider">
+                <option value="s3">S3 Compatible</option>
+                <option value="aws-s3">AWS S3</option>
+                <option value="aliyun-oss">Aliyun OSS</option>
+                <option value="tencent-cos">Tencent COS</option>
+                <option value="qiniu-kodo">Qiniu Kodo</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>Region</span>
+              </span>
+              <input class="settings-input" name="region" placeholder="us-east-1" autocomplete="off" />
+            </label>
+            <label class="settings-field is-wide">
+              <span class="settings-label-row">
+                <span>Endpoint</span>
+                <span class="settings-required">必填</span>
+              </span>
+              <input class="settings-input" name="endpoint" placeholder="https://s3.example.com" autocomplete="off" />
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>Bucket</span>
+                <span class="settings-required">必填</span>
+              </span>
+              <input class="settings-input" name="bucket" placeholder="memo-assets" autocomplete="off" />
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>Path Prefix</span>
+              </span>
+              <input class="settings-input" name="pathPrefix" placeholder="uploads/" autocomplete="off" />
+            </label>
+            <label class="settings-field is-wide">
+              <span class="settings-label-row">
+                <span>Public Base URL</span>
+              </span>
+              <input class="settings-input" name="publicBaseUrl" placeholder="https://cdn.example.com" autocomplete="off" />
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <span class="settings-section-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            </span>
+            <div class="settings-section-title">凭证</div>
+          </div>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>Access Key ID</span>
+                <span class="settings-required">必填</span>
+              </span>
+              <input class="settings-input" name="accessKeyId" autocomplete="off" />
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">
+                <span>Secret Access Key</span>
+                <span class="settings-required">必填</span>
+              </span>
+              <span class="settings-secret">
+                <input class="settings-input" name="secretAccessKey" type="password" autocomplete="new-password" />
+                <button class="settings-button is-secondary" type="button" data-action="toggle-secret">显示</button>
+              </span>
+            </label>
+            <label class="settings-field is-wide">
+              <span class="settings-label-row">
+                <span>Session Token</span>
+              </span>
+              <textarea class="settings-textarea" name="sessionToken" autocomplete="off"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <span class="settings-section-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+            </span>
+            <div class="settings-section-title">选项</div>
+          </div>
+          <div class="settings-checks">
+            <label class="settings-check">
+              <input type="checkbox" name="enabled" />
+              <span>启用</span>
+            </label>
+            <label class="settings-check">
+              <input type="checkbox" name="useSSL" />
+              <span>SSL</span>
+            </label>
+            <label class="settings-check">
+              <input type="checkbox" name="forcePathStyle" />
+              <span>Path Style</span>
+            </label>
+          </div>
+        </section>
+
+        <div class="settings-actions">
+          <button class="settings-button is-danger" type="button" data-action="delete-config">删除配置</button>
+          <div class="settings-message" data-settings-message></div>
+          <button class="settings-button is-secondary" type="button" data-action="reset-defaults">重置</button>
+          <button class="settings-button is-secondary" type="button" data-action="validate-config">检查</button>
+          <button class="settings-button is-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
+      var STORAGE_API = "/api/settings/cloud-storage";
+      var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
+      var STORAGE_DELETE_API = "/api/settings/cloud-storage/delete";
+      var defaults = {
+        accessKeyId: "",
+        bucket: "",
+        enabled: false,
+        endpoint: "",
+        forcePathStyle: true,
+        pathPrefix: "",
+        provider: "s3",
+        publicBaseUrl: "",
+        region: "",
+        secretAccessKey: "",
+        sessionToken: "",
+        useSSL: true,
+      };
+
+      var form = document.querySelector("[data-cloud-form]");
+      var message = document.querySelector("[data-settings-message]");
+      var status = document.querySelector("[data-config-status]");
+      var statusText = document.querySelector("[data-config-status-text]");
+
+      writeForm(defaults);
+      renderStatus(readForm());
+      loadConfig().then(function (config) {
+        writeForm(config);
+        renderStatus(readForm());
+      }, function (err) {
+        setMessage("读取配置失败: " + errorMessage(err), "warning");
+      });
+
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        var config = readForm();
+        setControlsDisabled(true);
+        saveConfig(config).then(function () {
+          renderStatus(config);
+          setMessage("已保存", "ready");
+        }, function (err) {
+          setMessage("保存失败: " + errorMessage(err), "warning");
+        }).finally(function () {
+          setControlsDisabled(false);
+        });
+      });
+
+      form.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) return;
+
+        if (action.dataset.action === "toggle-secret") {
+          toggleSecret(action);
+          return;
+        }
+
+        if (action.dataset.action === "reset-defaults") {
+          writeForm(defaults);
+          renderStatus(readForm());
+          setMessage("已重置为默认值", "");
+          return;
+        }
+
+        if (action.dataset.action === "validate-config") {
+          validateAndReport(readForm());
+          return;
+        }
+
+        if (action.dataset.action === "delete-config") {
+          setControlsDisabled(true);
+          deleteConfig().then(function () {
+            writeForm(defaults);
+            renderStatus(readForm());
+            setMessage("已删除配置", "warning");
+          }, function (err) {
+            setMessage("删除失败: " + errorMessage(err), "warning");
+          }).finally(function () {
+            setControlsDisabled(false);
+          });
+        }
+      });
+
+      form.addEventListener("input", function () {
+        renderStatus(readForm());
+        setMessage("未保存的更改", "");
+      });
+
+      form.addEventListener("change", function () {
+        renderStatus(readForm());
+        setMessage("未保存的更改", "");
+      });
+
+      function loadConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_API, "GET").then(function (data) {
+            if (data && data.found && data.config) {
+              return Object.assign({}, defaults, data.config);
+            }
+            return Object.assign({}, defaults);
+          }, function () {
+            return loadLocalConfig();
+          });
+        }
+        return Promise.resolve(loadLocalConfig());
+      }
+
+      function loadLocalConfig() {
+        try {
+          var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+          return Object.assign({}, defaults, saved || {});
+        } catch (_) {
+          return Object.assign({}, defaults);
+        }
+      }
+
+      function saveConfig(config) {
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_SAVE_API, "POST", config);
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        return Promise.resolve();
+      }
+
+      function deleteConfig() {
+        localStorage.removeItem(STORAGE_KEY);
+        if (canUseNativeStorage()) {
+          return callStorage(STORAGE_DELETE_API, "GET");
+        }
+        return Promise.resolve();
+      }
+
+      function callStorage(url, method, args) {
+        return invoke(url, { method: method, args: args }).then(function (resp) {
+          if (!resp || resp.code !== 0) {
+            throw new Error((resp && resp.msg) || "storage request failed");
+          }
+          return resp.data;
+        });
+      }
+
+      function canUseNativeStorage() {
+        return typeof invoke === "function";
+      }
+
+      function readForm() {
+        return {
+          accessKeyId: form.elements.accessKeyId.value.trim(),
+          bucket: form.elements.bucket.value.trim(),
+          enabled: form.elements.enabled.checked,
+          endpoint: form.elements.endpoint.value.trim(),
+          forcePathStyle: form.elements.forcePathStyle.checked,
+          pathPrefix: form.elements.pathPrefix.value.trim(),
+          provider: form.elements.provider.value,
+          publicBaseUrl: form.elements.publicBaseUrl.value.trim(),
+          region: form.elements.region.value.trim(),
+          secretAccessKey: form.elements.secretAccessKey.value,
+          sessionToken: form.elements.sessionToken.value.trim(),
+          useSSL: form.elements.useSSL.checked,
+        };
+      }
+
+      function writeForm(config) {
+        var next = Object.assign({}, defaults, config || {});
+        form.elements.accessKeyId.value = next.accessKeyId;
+        form.elements.bucket.value = next.bucket;
+        form.elements.enabled.checked = Boolean(next.enabled);
+        form.elements.endpoint.value = next.endpoint;
+        form.elements.forcePathStyle.checked = Boolean(next.forcePathStyle);
+        form.elements.pathPrefix.value = next.pathPrefix;
+        form.elements.provider.value = next.provider;
+        form.elements.publicBaseUrl.value = next.publicBaseUrl;
+        form.elements.region.value = next.region;
+        form.elements.secretAccessKey.value = next.secretAccessKey;
+        form.elements.sessionToken.value = next.sessionToken;
+        form.elements.useSSL.checked = Boolean(next.useSSL);
+      }
+
+      function renderStatus(config) {
+        var missing = missingFields(config);
+        status.classList.remove("is-ready", "is-warning");
+        if (!config.enabled && !hasAnyConfig(config)) {
+          statusText.textContent = "未配置";
+          return;
+        }
+        if (missing.length) {
+          status.classList.add("is-warning");
+          statusText.textContent = "待补充";
+          return;
+        }
+        status.classList.add("is-ready");
+        statusText.textContent = config.enabled ? "已启用" : "已保存";
+      }
+
+      function validateAndReport(config) {
+        var missing = missingFields(config);
+        if (missing.length) {
+          setMessage("缺少: " + missing.join(", "), "warning");
+          return false;
+        }
+        setMessage("配置完整", "ready");
+        return true;
+      }
+
+      function missingFields(config) {
+        var labels = [];
+        if (!config.provider) labels.push("存储类型");
+        if (!config.endpoint) labels.push("Endpoint");
+        if (!config.bucket) labels.push("Bucket");
+        if (!config.accessKeyId) labels.push("Access Key ID");
+        if (!config.secretAccessKey) labels.push("Secret Access Key");
+        return labels;
+      }
+
+      function hasAnyConfig(config) {
+        return [
+          config.endpoint,
+          config.bucket,
+          config.accessKeyId,
+          config.secretAccessKey,
+          config.sessionToken,
+          config.region,
+          config.pathPrefix,
+          config.publicBaseUrl,
+        ].some(Boolean);
+      }
+
+      function setMessage(text, tone) {
+        message.textContent = text || "";
+        message.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
+      }
+
+      function setControlsDisabled(disabled) {
+        Array.prototype.forEach.call(form.elements, function (el) {
+          el.disabled = disabled;
+        });
+      }
+
+      function errorMessage(err) {
+        return (err && err.message) || err || "未知错误";
+      }
+
+      function toggleSecret(button) {
+        var input = form.elements.secretAccessKey;
+        var nextType = input.type === "password" ? "text" : "password";
+        input.type = nextType;
+        button.textContent = nextType === "password" ? "显示" : "隐藏";
+      }
+    })();
+  </script>
 </body>
+
 </html>

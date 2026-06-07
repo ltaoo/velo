@@ -1,21 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Velo Simple Example</title>
-  <link rel="icon" type="image/svg+xml" href="/public/wails.png" />
-  <link rel="stylesheet" href="/public/index.css">
-  <script src="/public/timeless.core.umd.min.js"></script>
-  <script src="/public/timeless.web.umd.min.js"></script>
-  <script src="/public/veloui.umd.min.js"></script>
-  <script src="/public/tailwindcss.3.4.17.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: ['selector', '[data-theme="dark"]'],
-    }
-  </script>
+  <title>Velo Desktop Demo</title>
+  <link rel="stylesheet" href="public/index.css" />
+  <script src="public/prosemirror.umd.min.js"></script>
+  <script src="public/vim.js"></script>
+  <script src="public/prosemirror-editor.umd.js"></script>
   <style>
     :root {
       --background: #ededed;
@@ -65,10 +58,26 @@
 </head>
 
 <body>
-  <script>!function () { try { var d = document.documentElement, n = 'data-theme', s = 'setAttribute'; var e = localStorage.getItem('theme'); if ('system' === e || (!e && true)) { var t = '(prefers-color-scheme: dark)', m = window.matchMedia(t); if (m.media !== t || m.matches) { d.style.colorScheme = 'dark'; d[s](n, 'dark') } else { d.style.colorScheme = 'light'; d[s](n, 'light') } } else if (e) { d[s](n, e || '') } if (e === 'light' || e === 'dark') d.style.colorScheme = e } catch (e) { } }()</script>
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var key = "data-theme";
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || (!saved && true)) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute(key, theme);
+        } else if (saved) {
+          root.style.colorScheme = saved;
+          root.setAttribute(key, saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
   <div id="root"></div>
-  <script type="module" src="/src/components/baseui.js"></script>
-  <script type="module" src="/src/index.js"></script>
+  <script src="index.js"></script>
 </body>
 
 </html>

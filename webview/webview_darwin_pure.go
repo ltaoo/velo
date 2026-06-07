@@ -317,6 +317,7 @@ func open_webview(opts *BoxWebviewOptions) {
 
 	// Set activation policy to Regular
 	nsApp.Send(cocoa.RegisterName("setActivationPolicy:"), cocoa.NSApplicationActivationPolicyRegular)
+	installStandardApplicationMenu(nsApp, opts.AppName)
 	nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
 
 	// Set Application Icon if provided
@@ -340,6 +341,56 @@ func open_webview(opts *BoxWebviewOptions) {
 	fmt.Println("DEBUG: Starting run loop...")
 	nsApp.Send(cocoa.RegisterName("run"))
 	fmt.Println("DEBUG: Run loop ended")
+}
+
+func installStandardApplicationMenu(nsApp cocoa.ID, appName string) {
+	if appName == "" {
+		appName = "App"
+	}
+
+	mainMenu := cocoa.GetClass("NSMenu").Send(cocoa.RegisterName("alloc")).Send(
+		cocoa.RegisterName("initWithTitle:"),
+		cocoa.StringToNSString(""),
+	)
+
+	appMenuItem := newMenuItem("", "", "")
+	mainMenu.Send(cocoa.RegisterName("addItem:"), appMenuItem)
+	appMenu := cocoa.GetClass("NSMenu").Send(cocoa.RegisterName("alloc")).Send(
+		cocoa.RegisterName("initWithTitle:"),
+		cocoa.StringToNSString(appName),
+	)
+	appMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Quit "+appName, "terminate:", "q"))
+	appMenuItem.Send(cocoa.RegisterName("setSubmenu:"), appMenu)
+
+	editMenuItem := newMenuItem("", "", "")
+	mainMenu.Send(cocoa.RegisterName("addItem:"), editMenuItem)
+	editMenu := cocoa.GetClass("NSMenu").Send(cocoa.RegisterName("alloc")).Send(
+		cocoa.RegisterName("initWithTitle:"),
+		cocoa.StringToNSString("Edit"),
+	)
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Undo", "undo:", "z"))
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Redo", "redo:", "Z"))
+	editMenu.Send(cocoa.RegisterName("addItem:"), cocoa.GetClass("NSMenuItem").Send(cocoa.RegisterName("separatorItem")))
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Cut", "cut:", "x"))
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Copy", "copy:", "c"))
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Paste", "paste:", "v"))
+	editMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Select All", "selectAll:", "a"))
+	editMenuItem.Send(cocoa.RegisterName("setSubmenu:"), editMenu)
+
+	nsApp.Send(cocoa.RegisterName("setMainMenu:"), mainMenu)
+}
+
+func newMenuItem(title, action, keyEquivalent string) cocoa.ID {
+	var selector cocoa.Selector
+	if action != "" {
+		selector = cocoa.RegisterName(action)
+	}
+	return cocoa.GetClass("NSMenuItem").Send(cocoa.RegisterName("alloc")).Send(
+		cocoa.RegisterName("initWithTitle:action:keyEquivalent:"),
+		cocoa.StringToNSString(title),
+		selector,
+		cocoa.StringToNSString(keyEquivalent),
+	)
 }
 
 func open_window(opts *BoxWebviewOptions) {
