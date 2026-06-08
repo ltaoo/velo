@@ -1,3 +1,6 @@
+import { errorText } from "../../domain/native.js";
+import { loadVaultStatus, normalizeVaultPath, openVault, selectVaultDirectory } from "../../domain/vaults.js";
+
 const FOLDER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"></path></svg>';
 const PLUS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
 const CHECK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
@@ -62,7 +65,7 @@ function mountVaultPicker(root) {
     }
 
     if (action.dataset.action === "openVault") {
-      openVault(action.dataset.vaultPath || "");
+      openSelectedVault(action.dataset.vaultPath || "");
     }
   }
 
@@ -70,17 +73,17 @@ function mountVaultPicker(root) {
     const form = event.target.closest("[data-vault-form]");
     if (!form || !root.contains(form)) return;
     event.preventDefault();
-    openVault(els.pathInput.value);
+    openSelectedVault(els.pathInput.value);
   }
 
   function loadStatus() {
     setLoading(true);
-    callAPI("/api/vault/status", { method: "GET" }).then(
-      function (data) {
-        state.active = data.active || null;
-        state.dataPath = data.dataPath || "";
-        state.dataFileExists = Boolean(data.dataFileExists);
-        state.vaults = Array.isArray(data.vaults) ? data.vaults : [];
+    loadVaultStatus().then(
+      function (status) {
+        state.active = status.active;
+        state.dataPath = status.dataPath;
+        state.dataFileExists = status.dataFileExists;
+        state.vaults = status.vaults;
         render();
       },
       function (err) {
@@ -93,15 +96,14 @@ function mountVaultPicker(root) {
 
   function chooseVault() {
     setLoading(true);
-    callAPI("/api/vault/select-directory", { method: "GET" }).then(
-      function (data) {
-        const path = data && data.path ? data.path : "";
+    selectVaultDirectory().then(
+      function (path) {
         if (!path) {
           setMessage("没有选择目录", "warning");
           return;
         }
         els.pathInput.value = path;
-        return openVault(path);
+        return openSelectedVault(path);
       },
       function (err) {
         const message = errorText(err);
@@ -112,17 +114,14 @@ function mountVaultPicker(root) {
     });
   }
 
-  function openVault(path) {
-    const value = String(path || "").trim();
+  function openSelectedVault(path) {
+    const value = normalizeVaultPath(path);
     if (!value) {
       setMessage("请输入或选择 vault 目录", "warning");
       return Promise.resolve();
     }
     setLoading(true);
-    return callAPI("/api/vault/open", {
-      method: "POST",
-      args: { path: value },
-    }).then(
+    return openVault(value).then(
       function (data) {
         const created = data && data.created;
         setMessage(created ? "已创建 vault" : "已加载 vault", "success");
@@ -215,22 +214,6 @@ function vaultItemTemplate(vault) {
       </span>
     </button>
   `;
-}
-
-function callAPI(url, options) {
-  if (typeof invoke !== "function") {
-    return Promise.reject(new Error("go bridge not available"));
-  }
-  return invoke(url, options || {}).then(function (resp) {
-    if (!resp || resp.code !== 0) {
-      throw new Error((resp && resp.msg) || "request failed");
-    }
-    return resp.data || {};
-  });
-}
-
-function errorText(err) {
-  return err && err.message ? err.message : String(err || "unknown error");
 }
 
 function escapeHTML(value) {

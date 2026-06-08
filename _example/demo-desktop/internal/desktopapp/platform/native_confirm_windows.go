@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package main
+package platform
 
 import (
 	"syscall"
@@ -21,12 +21,12 @@ const (
 	externalConfirmMBSetFg       = 0x00010000
 )
 
-func confirmExternalBrowserOpen(target string) (bool, error) {
+func ConfirmExternalBrowserOpen(message string) (bool, error) {
 	title, err := syscall.UTF16PtrFromString("打开外部链接")
 	if err != nil {
 		return false, err
 	}
-	text, err := syscall.UTF16PtrFromString(externalBrowserConfirmMessage(target))
+	text, err := syscall.UTF16PtrFromString(message)
 	if err != nil {
 		return false, err
 	}

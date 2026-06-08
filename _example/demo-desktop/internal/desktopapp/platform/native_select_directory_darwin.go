@@ -1,7 +1,7 @@
 //go:build darwin
 // +build darwin
 
-package main
+package platform
 
 /*
 #cgo CFLAGS: -x objective-c
@@ -65,7 +65,7 @@ import (
 	"unsafe"
 )
 
-func selectVaultDirectory() (string, error) {
+func SelectVaultDirectory() (string, error) {
 	runtime.UnlockOSThread()
 
 	var cancelled C.int

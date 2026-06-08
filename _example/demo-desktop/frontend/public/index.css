@@ -1978,6 +1978,17 @@ body.is-fixed-window .memo-window-shell {
   color: var(--memo-accent-strong);
 }
 
+.memo-task-ref-chip {
+  background: var(--memo-accent-soft);
+  border-color: var(--memo-accent-border);
+  color: var(--memo-accent-strong);
+  cursor: default;
+}
+
+.memo-task-ref-chip:hover {
+  border-color: var(--memo-accent);
+}
+
 .memo-ref-chip.is-missing {
   background: var(--memo-warn-soft);
   border-color: var(--memo-warn-border);
@@ -2286,6 +2297,67 @@ body.is-fixed-window .memo-window-shell {
   gap: 8px;
 }
 
+.memo-task-workspace {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: var(--memo-radius);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.memo-task-create {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 120px 150px auto;
+}
+
+.memo-task-create input,
+.memo-task-create select {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--FG-0);
+  font: inherit;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.memo-task-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memo-task-tab {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.memo-task-tab.is-active {
+  background: var(--memo-accent-soft);
+  border-color: var(--memo-accent-border);
+  color: var(--memo-accent-strong);
+}
+
+.memo-task-tab strong {
+  color: inherit;
+  font-size: var(--font-xs);
+  min-width: 10px;
+}
+
 .memo-todo-group + .memo-todo-group {
   margin-top: 4px;
 }
@@ -2319,6 +2391,102 @@ body.is-fixed-window .memo-window-shell {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.memo-task-card {
+  align-items: flex-start;
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--memo-radius);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.memo-task-card.is-priority-high {
+  border-left-color: var(--RED);
+}
+
+.memo-task-card.is-priority-medium {
+  border-left-color: var(--memo-warn);
+}
+
+.memo-task-card.is-priority-low {
+  border-left-color: var(--memo-blue);
+}
+
+.memo-task-card.is-complete {
+  opacity: 0.68;
+}
+
+.memo-task-check {
+  display: inline-flex;
+  padding-top: 2px;
+}
+
+.memo-task-check input {
+  accent-color: var(--memo-accent);
+}
+
+.memo-task-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memo-task-title-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memo-task-title-row strong {
+  overflow-wrap: anywhere;
+}
+
+.memo-task-priority {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  flex: 0 0 auto;
+  font-size: var(--font-xs);
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.memo-task-meta {
+  align-items: center;
+  color: var(--FG-1);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-sm);
+  gap: 6px;
+}
+
+.memo-task-meta span,
+.memo-task-meta time {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+.memo-task-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.memo-secondary-button.is-compact {
+  min-height: 28px;
+  padding: 0 10px;
 }
 
 .memo-resource-card {
@@ -2443,6 +2611,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-todo-source,
+.memo-task-source,
 .memo-resource-source {
   align-items: center;
   border-top: 1px solid var(--border);
@@ -2461,6 +2630,7 @@ body.is-fixed-window .memo-window-shell {
   display: grid;
   font: inherit;
   gap: 2px;
+  grid-template-columns: auto minmax(0, 1fr);
   min-width: 0;
   padding: 4px 6px;
   text-align: left;
@@ -2472,13 +2642,32 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-todo-source-button span {
+  display: grid;
   font-size: var(--font-xs);
   font-weight: 800;
+  gap: 2px;
+  min-width: 0;
 }
 
 .memo-todo-source-button strong {
   color: var(--FG-0);
   font-size: var(--font-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-todo-source-button small {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  font-weight: 800;
+}
+
+.memo-todo-source-button em {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  font-style: normal;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3368,6 +3557,19 @@ body.memo-slim-page {
   .memo-composer-actions {
     margin-left: 0;
     min-width: 0;
+  }
+
+  .memo-task-create {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .memo-task-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .memo-task-actions {
+    grid-column: 2;
+    justify-content: flex-start;
   }
 
   .memo-todo-source,

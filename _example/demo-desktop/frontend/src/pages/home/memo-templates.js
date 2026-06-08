@@ -1,0 +1,821 @@
+import {
+  DEFAULT_VISIBILITY,
+  VISIBILITY,
+  buildMemoReferenceIndex,
+  extractTags,
+  memoBacklinkCount,
+  memoTitle,
+} from "../../domain/memos.js";
+import { fileDisplayName } from "../../domain/memo-resources.js";
+import { normalizeProjectColor, normalizeProjectFilter, normalizeProjectID } from "../../domain/projects.js";
+import {
+  CALENDAR_WEEKDAYS,
+  formatDateKey,
+  formatRelativeDate,
+  generateCalendarDays,
+  memoDateCounts,
+  startOfMonth,
+} from "./memo-date.js";
+import { SVG } from "./memo-icons.js";
+import {
+  compactFileURL,
+  inlineMarkdown,
+  renderMemoMarkdown,
+  renderVSCodeOpenButton,
+  safeImageUrl,
+  safeUrl,
+} from "./memo-markdown.js";
+import { escapeAttr, escapeHTML } from "./memo-utils.js";
+
+function detachedMemoWindowTemplate() {
+  return `
+    <div class="memo-window-shell velo-drag" data-velo-drag>
+      <header class="memo-window-titlebar velo-drag" data-velo-drag>
+        <div class="memo-window-native-controls" aria-hidden="true"></div>
+        <div class="memo-window-drag-region" aria-hidden="true"></div>
+        <div class="memo-window-title-actions">
+          <button class="memo-window-icon-button velo-no-drag" type="button" data-window-control="toggleFixed" title="悬浮在所有窗口上方" aria-label="悬浮在所有窗口上方">
+            ${SVG.pin}
+          </button>
+          <span class="memo-window-visibility memo-visibility" data-window-visibility hidden></span>
+        </div>
+      </header>
+      <main class="memo-window-body velo-no-drag" data-window-content></main>
+      <div class="memo-toast" data-toast role="status"></div>
+    </div>
+  `;
+}
+
+function detachedMemoCardTemplate(memo, renderContext) {
+  const tags = extractTags(memo.content);
+  const backlinks = memoBacklinkCount(renderContext, memo.id);
+
+  return `
+    <article class="memo-card memo-window-card" data-memo-id="${escapeAttr(memo.id)}">
+      <header class="memo-card-head">
+        <div class="memo-author">
+          <div class="memo-avatar">U</div>
+          <div>
+            <div class="memo-author-name">You</div>
+            <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+          </div>
+        </div>
+        <div class="memo-card-meta">
+          ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
+          ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
+        </div>
+      </header>
+      <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+      ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}</div>` : ""}
+      <footer class="memo-card-actions">
+        <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
+        <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
+      </footer>
+    </article>
+  `;
+}
+
+function detachedMemoRenderContext(state, sourceId, options = {}) {
+  const index = state.memoRefIndex || buildMemoReferenceIndex(state.memos);
+  state.memoRefIndex = index;
+  return {
+    depth: options.depth || 0,
+    index,
+    maxDepth: options.maxDepth || 2,
+    readonly: Boolean(options.readonly),
+    sourceId: sourceId || "",
+    stack: options.stack || (sourceId ? [sourceId] : []),
+  };
+}
+
+function activeViewMeta(view) {
+  const metas = {
+    files: {
+      hideComposer: true,
+      searchPlaceholder: "搜索文件、图片或来源 memo",
+      subtitle: "从所有 memo 中汇总文件和图片",
+      title: "文件",
+    },
+    links: {
+      hideComposer: true,
+      searchPlaceholder: "搜索链接或来源 memo",
+      subtitle: "从所有 memo 中汇总超链接",
+      title: "超链接",
+    },
+    memos: {
+      hideComposer: false,
+      searchPlaceholder: "搜索 memos",
+      subtitle: "捕捉、整理、回看",
+      title: "Inbox",
+    },
+    todos: {
+      hideComposer: true,
+      searchPlaceholder: "搜索任务、清单或上下文",
+      subtitle: "Inbox、Today、Scheduled 与任务 notes",
+      title: "GTD",
+    },
+  };
+  return metas[view] || metas.memos;
+}
+
+function shellTemplate() {
+  return `
+    <div class="memo-shell">
+      <aside class="memo-sidebar" aria-label="Memo navigation">
+        <div class="memo-brand">
+          <div class="memo-brand-mark">M</div>
+          <div>
+            <div class="memo-brand-title">Memos</div>
+            <div class="memo-brand-subtitle">Local workspace</div>
+          </div>
+        </div>
+        <nav class="memo-nav" aria-label="Memo filters">
+          ${filterButtonTemplate("all", "全部", SVG.hash)}
+          ${filterButtonTemplate("pinned", "置顶", SVG.pin)}
+          ${filterButtonTemplate("private", "仅自己", SVG.lock)}
+          ${filterButtonTemplate("public", "公开", SVG.globe)}
+          ${filterButtonTemplate("archive", "归档", SVG.archive)}
+        </nav>
+        <div class="memo-sidebar-section">
+          <div class="memo-sidebar-heading">
+            <span>Project</span>
+            <span data-project-summary></span>
+          </div>
+          <div class="memo-project-list" data-project-list></div>
+          <button class="memo-nav-button memo-project-create" type="button" data-action="createProject">
+            ${SVG.plus}
+            <span>新建 Project</span>
+          </button>
+        </div>
+        <div class="memo-sidebar-section">
+          <div class="memo-sidebar-heading">
+            <span>标签</span>
+            <span data-tag-summary></span>
+          </div>
+          <div class="memo-tag-list" data-tag-list></div>
+        </div>
+        <div class="memo-sidebar-section">
+          <div class="memo-sidebar-heading">
+            <span>聚合</span>
+          </div>
+          <nav class="memo-nav memo-collection-nav" aria-label="Memo collections">
+            ${viewNavButtonTemplate("todos", "代办", SVG.check, "data-todo-nav-count")}
+            ${viewNavButtonTemplate("links", "超链接", SVG.link, "data-link-nav-count")}
+            ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
+          </nav>
+        </div>
+        <div class="memo-sidebar-footer">
+          <button class="memo-nav-button memo-settings-button" type="button" data-action="openSettings">
+            ${SVG.settings}
+            <span>设置</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="memo-main">
+        <header class="memo-topbar">
+          <div>
+            <h1 data-main-title>Inbox</h1>
+            <p data-main-subtitle>捕捉、整理、回看</p>
+          </div>
+          <div class="memo-topbar-actions">
+            <button class="memo-icon-text-button" type="button" data-action="openSlimMemos" title="打开精简版">
+              ${SVG.list}
+              <span>精简版</span>
+            </button>
+            <button class="memo-icon-text-button" type="button" data-action="sortMemos" title="排序">
+              ${SVG.sort}
+              <span>排序</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="memo-composer" aria-label="Create memo" data-composer>
+          <div class="memo-composer-head">
+            <div class="memo-tool-group memo-tool-group-head" aria-label="命令">
+              ${toolButtonTemplate("bold", "粗体", SVG.bold)}
+              ${toolButtonTemplate("italic", "斜体", SVG.italic)}
+              ${toolButtonTemplate("code", "代码", SVG.code)}
+              ${toolButtonTemplate("list", "列表", SVG.list)}
+              ${toolButtonTemplate("checklist", "任务", SVG.check)}
+              ${toolButtonTemplate("tag", "标签", SVG.hash)}
+              ${toolButtonTemplate("link", "链接", SVG.link)}
+              ${toolButtonTemplate("image", "图片", SVG.image)}
+              ${toolButtonTemplate("attach", "附件", SVG.paperclip)}
+              ${toolButtonTemplate("date", "时间", SVG.clock)}
+            </div>
+            <label class="memo-select-wrap">
+              <span class="memo-select-icon">${SVG.hash}</span>
+              <select data-project-select aria-label="Project">
+                ${projectOptionsTemplate([], "")}
+              </select>
+              ${SVG.chevronDown}
+            </label>
+            <label class="memo-select-wrap">
+              <span class="memo-select-icon">${SVG.lock}</span>
+              <select data-visibility-select aria-label="可见性">
+                ${visibilityOptionsTemplate(DEFAULT_VISIBILITY)}
+              </select>
+              ${SVG.chevronDown}
+            </label>
+          </div>
+          <div class="memo-editor-host" data-composer-host></div>
+          <div class="memo-composer-toolbar">
+            <div class="memo-composer-status-line">
+              <span data-composer-vim-status></span>
+              <span data-composer-status></span>
+            </div>
+            <div class="memo-composer-actions">
+              <button class="memo-primary-button" type="button" data-action="createMemo">
+                ${SVG.send}
+                <span>发布</span>
+              </button>
+            </div>
+          </div>
+          <input class="memo-hidden-input" type="file" multiple data-attach-input />
+        </section>
+
+        <section class="memo-feed-tools" aria-label="Memo search">
+          <label class="memo-search">
+            ${SVG.search}
+            <input type="search" placeholder="搜索 memos" data-search-input />
+          </label>
+          <button class="memo-clear-button" type="button" data-action="clearFilters">重置</button>
+          <span class="memo-feed-count" data-feed-count></span>
+        </section>
+
+        <section class="memo-list" data-memo-list aria-label="Memo list"></section>
+      </main>
+
+      <aside class="memo-inspector" aria-label="Memo details">
+        <section class="memo-inspector-section">
+          <div class="memo-inspector-title">日历</div>
+          <div class="memo-calendar" data-calendar></div>
+        </section>
+        <section class="memo-inspector-section">
+          <div class="memo-inspector-title">概览</div>
+          <div class="memo-stats" data-stats></div>
+        </section>
+        <section class="memo-inspector-section">
+          <div class="memo-inspector-title">置顶</div>
+          <div class="memo-pinned-list" data-pinned-list></div>
+        </section>
+      </aside>
+      <div class="memo-toast" data-toast role="status"></div>
+    </div>
+  `;
+}
+
+function filterButtonTemplate(filter, label, icon) {
+  return `
+    <button class="memo-nav-button" type="button" data-filter="${filter}">
+      ${icon}
+      <span>${label}</span>
+    </button>
+  `;
+}
+
+function projectFilterTemplate(filter, label, count, color, activeFilter) {
+  const active = normalizeProjectFilter(filter) === normalizeProjectFilter(activeFilter);
+  const swatch = color ? `<span class="memo-project-dot" style="--project-color: ${escapeAttr(color)}"></span>` : SVG.hash;
+  return `
+    <button class="memo-nav-button memo-project-filter ${active ? "is-active" : ""}" type="button" data-project-filter="${escapeAttr(filter)}">
+      ${swatch}
+      <span>${escapeHTML(label)}</span>
+      <strong>${count ? escapeHTML(String(count)) : ""}</strong>
+    </button>
+  `;
+}
+
+function projectOptionsTemplate(projects, selected) {
+  const selectedID = normalizeProjectID(selected);
+  const activeProjects = Array.isArray(projects) ? projects : [];
+  const options = ['<option value="">未归属</option>'].concat(
+    activeProjects
+      .filter((project) => !project.archived)
+      .map((project) => `<option value="${escapeAttr(project.id)}" ${project.id === selectedID ? "selected" : ""}>${escapeHTML(project.name)}</option>`),
+  );
+  if (!selectedID) options[0] = '<option value="" selected>未归属</option>';
+  return options.join("");
+}
+
+function projectBadgeTemplate(projectId, projects = []) {
+  const id = normalizeProjectID(projectId);
+  if (!id) return '<span class="memo-project-badge">未归属</span>';
+  const project = (Array.isArray(projects) ? projects : []).find((item) => item && item.id === id);
+  const label = project ? project.name : "未知 Project";
+  const color = normalizeProjectColor(project && project.color);
+  return `<span class="memo-project-badge" style="--project-color: ${escapeAttr(color)}">${escapeHTML(label)}</span>`;
+}
+
+function viewNavButtonTemplate(view, label, icon, countAttr) {
+  return `
+    <button class="memo-nav-button" type="button" data-view="${view}">
+      ${icon}
+      <span>${label}</span>
+      <strong ${countAttr}></strong>
+    </button>
+  `;
+}
+
+function toolButtonTemplate(command, label, icon) {
+  return `
+    <button class="memo-tool-button" type="button" data-command="${command}" title="${label}" aria-label="${label}">
+      ${icon}
+    </button>
+  `;
+}
+
+function statTemplate(label, value) {
+  return `
+    <div class="memo-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `;
+}
+
+function calendarTemplate(monthDate, memos, selectedDate) {
+  const month = startOfMonth(monthDate);
+  const counts = memoDateCounts(memos);
+  const days = generateCalendarDays(month);
+  const todayKey = formatDateKey(new Date());
+
+  return `
+    <div class="memo-calendar-head">
+      <button class="memo-calendar-nav" type="button" data-calendar-action="prevMonth" title="上个月" aria-label="上个月">
+        ${SVG.chevronLeft}
+      </button>
+      <div class="memo-calendar-title">
+        <strong>${month.getFullYear()} 年 ${month.getMonth() + 1} 月</strong>
+        <span>${selectedDate || "未选择日期"}</span>
+      </div>
+      <button class="memo-calendar-nav" type="button" data-calendar-action="nextMonth" title="下个月" aria-label="下个月">
+        ${SVG.chevronRight}
+      </button>
+    </div>
+    <div class="memo-calendar-toolbar ${selectedDate ? "" : "is-single"}">
+      <button class="memo-calendar-today" type="button" data-calendar-action="today">今天</button>
+      ${selectedDate ? '<button class="memo-calendar-clear" type="button" data-calendar-action="clearDate">清除</button>' : ""}
+    </div>
+    <div class="memo-calendar-weekdays">
+      ${CALENDAR_WEEKDAYS.map((day) => `<span>${day}</span>`).join("")}
+    </div>
+    <div class="memo-calendar-grid">
+      ${days
+        .map((day) => {
+          const count = counts.get(day.key) || 0;
+          const classes = [
+            "memo-calendar-day",
+            day.inMonth ? "" : "is-outside",
+            day.key === todayKey ? "is-today" : "",
+            day.key === selectedDate ? "is-selected" : "",
+            count ? "has-memo" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return `
+            <button
+              class="${classes}"
+              type="button"
+              data-calendar-date="${escapeAttr(day.key)}"
+              aria-label="${escapeAttr(day.key)}"
+            >
+              <span>${day.date.getDate()}</span>
+              ${count ? `<strong>${count}</strong>` : ""}
+            </button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function memoTemplate(memo, editingId, renderContext, expanded = false, projects = []) {
+  const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const tags = extractTags(memo.content);
+  const archived = memo.archived;
+  const editing = memo.id === editingId;
+  const backlinks = memoBacklinkCount(renderContext, memo.id);
+  const expandLabel = expanded ? "收起" : "展开";
+  const projectBadge = projectBadgeTemplate(memo.projectId, projects);
+
+  return `
+    <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
+      <header class="memo-card-head">
+        <div class="memo-author">
+          <div class="memo-avatar">U</div>
+          <div>
+            <div class="memo-author-name">You</div>
+            <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+          </div>
+        </div>
+        <div class="memo-card-meta">
+          <div class="memo-card-head-actions">
+            <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
+            <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口">${SVG.external}</button>
+            <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
+          </div>
+          <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
+          ${projectBadge}
+          ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
+          ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
+        </div>
+      </header>
+      ${
+        editing
+          ? editTemplate(memo, projects)
+          : `
+            <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
+              <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+              <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
+                <span>${expandLabel}</span>
+                ${SVG.chevronDown}
+              </button>
+            </div>
+            ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`).join("")}</div>` : ""}
+          `
+      }
+      <footer class="memo-card-actions">
+        <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
+        <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
+        ${
+          archived
+            ? `<button class="memo-action-button" type="button" data-action="restoreMemo" title="恢复">${SVG.restore}</button>`
+            : `<button class="memo-action-button" type="button" data-action="archiveMemo" title="归档">${SVG.archive}</button>`
+        }
+        <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
+      </footer>
+    </article>
+  `;
+}
+
+function todoGroupTemplate(label, todos, renderContextFor, projects = []) {
+  if (!todos.length) return "";
+  return `
+    <section class="memo-todo-group" aria-label="${escapeAttr(label)}">
+      <div class="memo-todo-group-head">
+        <span>${escapeHTML(label)}</span>
+        <strong>${todos.length}</strong>
+      </div>
+      ${todos.map((todo) => todoTemplate(todo, renderContextFor ? renderContextFor(todo) : {}, projects)).join("")}
+    </section>
+  `;
+}
+
+function todoTemplate(todo, renderContext, projects = []) {
+  const visibility = VISIBILITY[todo.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const tags = extractTags(todo.memo.content);
+  const projectBadge = projectBadgeTemplate(todo.memo.projectId, projects);
+  return `
+    <article class="memo-todo-card ${todo.checked ? "is-complete" : ""}" data-memo-id="${escapeAttr(todo.memoId)}">
+      <label class="memo-todo-check">
+        <input type="checkbox" data-task-line="${todo.lineIndex}" ${todo.checked ? "checked" : ""} />
+        <span>${inlineMarkdown(todo.text, renderContext)}</span>
+      </label>
+      <div class="memo-todo-source">
+        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
+          <span>来源 memo</span>
+          <strong>${escapeHTML(todo.sourceText)}</strong>
+        </button>
+        <div class="memo-todo-meta">
+          <time datetime="${escapeAttr(todo.memo.createdAt)}">${formatRelativeDate(todo.memo.createdAt)}</time>
+          ${projectBadge}
+          <span>${SVG[visibility.icon]} ${visibility.label}</span>
+          ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function taskWorkspaceTemplate(options) {
+  const state = options || {};
+  const filters = [
+    ["inbox", "Inbox"],
+    ["today", "Today"],
+    ["scheduled", "Scheduled"],
+    ["next", "Next"],
+    ["completed", "Completed"],
+    ["all", "All"],
+  ];
+  return `
+    <section class="memo-task-workspace">
+      <form class="memo-task-create" data-task-create-form>
+        <input name="title" type="text" placeholder="添加任务到 Inbox" autocomplete="off" />
+        <select name="priority" aria-label="优先级">
+          <option value="none">无优先级</option>
+          <option value="low">低</option>
+          <option value="medium">中</option>
+          <option value="high">高</option>
+        </select>
+        <input name="dueAt" type="date" aria-label="截止日期" />
+        <button class="memo-primary-button" type="submit">${SVG.plus}<span>添加</span></button>
+      </form>
+      <div class="memo-task-tabs" role="tablist" aria-label="Task filters">
+        ${filters
+          .map(([value, label]) => `
+            <button class="memo-task-tab ${state.filter === value ? "is-active" : ""}" type="button" data-task-filter="${value}">
+              <span>${label}</span>
+              <strong>${state.counts && state.counts[value] ? state.counts[value] : ""}</strong>
+            </button>
+          `)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function taskGroupTemplate(label, tasks, context) {
+  if (!tasks.length) return "";
+  return `
+    <section class="memo-todo-group memo-task-group" aria-label="${escapeAttr(label)}">
+      <div class="memo-todo-group-head">
+        <span>${escapeHTML(label)}</span>
+        <strong>${tasks.length}</strong>
+      </div>
+      ${tasks.map((task) => taskCardTemplate(task, context || {})).join("")}
+    </section>
+  `;
+}
+
+function taskCardTemplate(task, context) {
+  const projects = (context && context.projects) || [];
+  const projectBadge = projectBadgeTemplate(task.projectId, projects);
+  const priority = task.priority || "none";
+  const complete = task.status === "completed";
+  const dueLabel = task.dueAt ? formatTaskDate(task.dueAt) : "";
+  const startLabel = task.startAt ? formatTaskDate(task.startAt) : "";
+  const source = taskSourceMemo(task, context);
+  return `
+    <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-task-id="${escapeAttr(task.id)}">
+      <label class="memo-task-check">
+        <input type="checkbox" data-task-complete ${complete ? "checked disabled" : ""} />
+        <span></span>
+      </label>
+      <div class="memo-task-body">
+        <div class="memo-task-title-row">
+          <strong>${escapeHTML(task.title)}</strong>
+          <span class="memo-task-priority">${taskPriorityLabel(priority)}</span>
+        </div>
+        <div class="memo-task-meta">
+          ${projectBadge}
+          <span>${escapeHTML(task.listId || "inbox")}</span>
+          ${task.parentId ? `<span>子任务</span>` : ""}
+          ${dueLabel ? `<time datetime="${escapeAttr(task.dueAt)}">截止 ${escapeHTML(dueLabel)}</time>` : ""}
+          ${startLabel ? `<time datetime="${escapeAttr(task.startAt)}">开始 ${escapeHTML(startLabel)}</time>` : ""}
+          ${task.noteCount ? `<span>${task.noteCount} notes</span>` : ""}
+          ${task.subtaskCount ? `<span>${task.subtaskCount} subtasks</span>` : ""}
+          ${(task.contexts || []).slice(0, 3).map((item) => `<span>@${escapeHTML(item)}</span>`).join("")}
+          ${(task.tags || []).slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+        </div>
+        ${source ? taskSourceTemplate(source) : ""}
+      </div>
+      <div class="memo-task-actions">
+        <button class="memo-action-button" type="button" data-action="addTaskNote" title="添加 note">${SVG.edit}</button>
+        <button class="memo-action-button" type="button" data-action="copyTaskRef" title="复制引用">${SVG.link}</button>
+      </div>
+    </article>
+  `;
+}
+
+function taskSourceMemo(task, context) {
+  const source = task && task.source ? task.source : {};
+  const memoId = String(source.memoId || "").trim();
+  if (!memoId) return null;
+  const memos = (context && context.memos) || [];
+  const memo = memos.find((item) => item.id === memoId) || null;
+  return {
+    line: Number.isFinite(Number(source.line)) ? Math.max(0, Number(source.line)) : 0,
+    memo,
+    memoId,
+    text: String(source.text || "").trim(),
+    title: memo ? memoTitle(memo) : memoId,
+  };
+}
+
+function taskSourceTemplate(source) {
+  const lineLabel = source.line ? `L${source.line}` : "";
+  return `
+    <div class="memo-task-source">
+      <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" data-memo-id="${escapeAttr(source.memoId)}" title="查看来源 memo">
+        ${SVG.link}
+        <span>
+          <small>来源 memo ${lineLabel ? escapeHTML(lineLabel) : ""}</small>
+          <strong>${escapeHTML(source.title)}</strong>
+          ${source.text ? `<em>${escapeHTML(source.text)}</em>` : ""}
+        </span>
+      </button>
+    </div>
+  `;
+}
+
+function emptyTasksTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.check}</div>
+      <h2>没有匹配的任务</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function formatTaskDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString();
+}
+
+function taskPriorityLabel(priority) {
+  switch (priority) {
+    case "high":
+      return "高";
+    case "medium":
+      return "中";
+    case "low":
+      return "低";
+    default:
+      return "无";
+  }
+}
+
+function linkTemplate(link) {
+  const visibility = VISIBILITY[link.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const tags = extractTags(link.memo.content);
+  const href = safeUrl(link.url);
+  return `
+    <article class="memo-resource-card is-link" data-memo-id="${escapeAttr(link.memoId)}">
+      <a class="memo-resource-target" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">
+        <span class="memo-resource-icon">${SVG.link}</span>
+        <span class="memo-resource-body">
+          <span class="memo-resource-title">${escapeHTML(link.label || link.url)}</span>
+          <span class="memo-resource-url">${escapeHTML(compactFileURL(link.url))}</span>
+        </span>
+      </a>
+      <div class="memo-resource-source">
+        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
+          <span>来源 memo</span>
+          <strong>${escapeHTML(link.sourceText)}</strong>
+        </button>
+        <div class="memo-todo-meta">
+          <time datetime="${escapeAttr(link.memo.createdAt)}">${formatRelativeDate(link.memo.createdAt)}</time>
+          <span>${SVG[visibility.icon]} ${visibility.label}</span>
+          ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function resourceGroupTemplate(label, resources) {
+  if (!resources.length) return "";
+  return `
+    <section class="memo-todo-group" aria-label="${escapeAttr(label)}">
+      <div class="memo-todo-group-head">
+        <span>${escapeHTML(label)}</span>
+        <strong>${resources.length}</strong>
+      </div>
+      ${resources.map(resourceTemplate).join("")}
+    </section>
+  `;
+}
+
+function resourceTemplate(resource) {
+  const visibility = VISIBILITY[resource.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const tags = extractTags(resource.memo.content);
+  const preview = resource.type === "image" ? resourcePreviewTemplate(resource) : "";
+  const openButton = renderVSCodeOpenButton(resource.url);
+  const href = safeUrl(resource.url);
+  const targetBody = `
+    ${preview || `<span class="memo-resource-icon">${SVG.paperclip}</span>`}
+    <span class="memo-resource-body">
+      <span class="memo-resource-title">${escapeHTML(resource.label || fileDisplayName("", resource.url))}</span>
+      <span class="memo-resource-url">${escapeHTML(compactFileURL(resource.url))}</span>
+    </span>
+  `;
+  const target =
+    href !== "#" && !openButton
+      ? `<a class="memo-resource-target" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${targetBody}</a>`
+      : `<div class="memo-resource-target${openButton ? " has-editor-open" : ""}">${targetBody}${openButton}</div>`;
+
+  return `
+    <article class="memo-resource-card is-${resource.type}" data-memo-id="${escapeAttr(resource.memoId)}">
+      ${target}
+      <div class="memo-resource-source">
+        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
+          <span>来源 memo</span>
+          <strong>${escapeHTML(resource.sourceText)}</strong>
+        </button>
+        <div class="memo-todo-meta">
+          <time datetime="${escapeAttr(resource.memo.createdAt)}">${formatRelativeDate(resource.memo.createdAt)}</time>
+          <span>${SVG[visibility.icon]} ${visibility.label}</span>
+          ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function resourcePreviewTemplate(resource) {
+  const src = safeImageUrl(resource.url);
+  if (!src) return `<span class="memo-resource-icon">${SVG.image}</span>`;
+  return `
+    <span class="memo-resource-preview">
+      <img src="${escapeAttr(src)}" alt="${escapeAttr(resource.label || "image")}" loading="lazy" />
+    </span>
+  `;
+}
+
+function editTemplate(memo, projects = []) {
+  return `
+    <div class="memo-inline-editor">
+      <div class="memo-editor-host is-inline" data-edit-host></div>
+      <div class="memo-inline-actions">
+        <div class="memo-inline-status-line" data-edit-vim-status></div>
+        <label class="memo-select-wrap is-compact">
+          <select data-edit-project aria-label="编辑 Project">
+            ${projectOptionsTemplate(projects, memo.projectId || "")}
+          </select>
+          ${SVG.chevronDown}
+        </label>
+        <label class="memo-select-wrap is-compact">
+          <select data-edit-visibility aria-label="编辑可见性">
+            ${visibilityOptionsTemplate(memo.visibility)}
+          </select>
+          ${SVG.chevronDown}
+        </label>
+        <button class="memo-secondary-button" type="button" data-action="cancelEdit">${SVG.x}<span>取消</span></button>
+        <button class="memo-primary-button" type="button" data-action="saveEdit">${SVG.check}<span>保存</span></button>
+      </div>
+    </div>
+  `;
+}
+
+function emptyFeedTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.search}</div>
+      <h2>没有匹配的 memo</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function emptyTodosTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.check}</div>
+      <h2>没有匹配的代办</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function emptyLinksTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.link}</div>
+      <h2>没有匹配的超链接</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function emptyFilesTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.paperclip}</div>
+      <h2>没有匹配的文件或图片</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function visibilityOptionsTemplate(selected) {
+  return Object.entries(VISIBILITY)
+    .map(([value, item]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${item.label}</option>`)
+    .join("");
+}
+
+export {
+  activeViewMeta,
+  calendarTemplate,
+  detachedMemoCardTemplate,
+  detachedMemoRenderContext,
+  detachedMemoWindowTemplate,
+  emptyFeedTemplate,
+  emptyFilesTemplate,
+  emptyLinksTemplate,
+  emptyTasksTemplate,
+  emptyTodosTemplate,
+  linkTemplate,
+  memoTemplate,
+  projectFilterTemplate,
+  projectOptionsTemplate,
+  resourceGroupTemplate,
+  shellTemplate,
+  statTemplate,
+  taskGroupTemplate,
+  taskWorkspaceTemplate,
+  todoGroupTemplate,
+};

@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package main
+package platform
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func selectVaultDirectory() (string, error) {
+func SelectVaultDirectory() (string, error) {
 	commands := [][]string{
 		{"zenity", "--file-selection", "--directory", "--title=Select Velo vault"},
 		{"kdialog", "--getexistingdirectory", ".", "--title", "Select Velo vault"},
