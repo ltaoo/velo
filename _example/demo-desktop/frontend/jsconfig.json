@@ -8,6 +8,7 @@
   },
   "include": [
     "src/**/*.js",
+    "src/types/**/*.d.ts",
     "types/index.d.ts",
     "types/global.d.ts",
     "types/timeless.core.d.ts"

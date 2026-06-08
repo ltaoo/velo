@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package main
+package platform
 
 import (
 	"fmt"
@@ -9,8 +9,7 @@ import (
 	"os/exec"
 )
 
-func confirmExternalBrowserOpen(target string) (bool, error) {
-	message := externalBrowserConfirmMessage(target)
+func ConfirmExternalBrowserOpen(message string) (bool, error) {
 	commands := [][]string{
 		{"zenity", "--question", "--modal", "--title=打开外部链接", "--ok-label=使用默认浏览器打开", "--cancel-label=取消", "--text=" + message},
 		{"kdialog", "--warningyesno", message, "--title", "打开外部链接"},

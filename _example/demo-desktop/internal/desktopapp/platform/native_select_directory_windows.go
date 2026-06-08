@@ -1,10 +1,10 @@
 //go:build windows
 // +build windows
 
-package main
+package platform
 
 import "fmt"
 
-func selectVaultDirectory() (string, error) {
+func SelectVaultDirectory() (string, error) {
 	return "", fmt.Errorf("directory picker is not implemented on Windows")
 }

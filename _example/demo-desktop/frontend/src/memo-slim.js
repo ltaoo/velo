@@ -1,5 +1,10 @@
-const MEMOS_STORAGE_KEY = "demo-desktop:memos:items:v1";
-const DEFAULT_VISIBILITY = "PRIVATE";
+import { DEFAULT_VISIBILITY, normalizeMemoPayload } from "./domain/memos.js";
+import {
+  createMemoInVault,
+  errorMessage,
+  loadMemosFromVault,
+  saveMemos,
+} from "./domain/memo-repository.js";
 
 const SVG = {
   send:
@@ -153,82 +158,6 @@ function memoItemTemplate(memo) {
   `;
 }
 
-function loadMemosFromVault() {
-  if (typeof invoke !== "function") {
-    return Promise.resolve(loadMemos());
-  }
-  return invoke("/api/memos", { method: "GET" }).then(function (resp) {
-    if (!resp || resp.code !== 0) {
-      throw new Error((resp && resp.msg) || "读取 memo 失败");
-    }
-    const data = resp.data || {};
-    return Array.isArray(data.memos) ? data.memos : [];
-  });
-}
-
-function createMemoInVault(content, visibility) {
-  if (typeof invoke !== "function") {
-    const now = new Date().toISOString();
-    return Promise.resolve({
-      archived: false,
-      content,
-      createdAt: now,
-      id: createId(),
-      pinned: false,
-      updatedAt: "",
-      visibility,
-    });
-  }
-  return invoke("/api/memos/create", {
-    method: "POST",
-    args: {
-      content,
-      visibility,
-    },
-  }).then(function (resp) {
-    if (!resp || resp.code !== 0 || !resp.data || !resp.data.memo) {
-      throw new Error((resp && resp.msg) || "发布失败");
-    }
-    return resp.data.memo;
-  });
-}
-
-function loadMemos() {
-  const saved = loadJSON(MEMOS_STORAGE_KEY, []);
-  return Array.isArray(saved) ? saved : [];
-}
-
-function saveMemos(memos) {
-  if (typeof invoke === "function") return;
-  localStorage.setItem(MEMOS_STORAGE_KEY, JSON.stringify(memos));
-}
-
-function normalizeMemoPayload(memo) {
-  if (!memo || !memo.id) return null;
-  return {
-    archived: Boolean(memo.archived),
-    content: String(memo.content || ""),
-    createdAt: memo.createdAt || new Date().toISOString(),
-    id: String(memo.id),
-    pinned: Boolean(memo.pinned),
-    updatedAt: memo.updatedAt || "",
-    visibility: memo.visibility || DEFAULT_VISIBILITY,
-  };
-}
-
-function loadJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function createId() {
-  return `memo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
 function formatDate(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -252,8 +181,4 @@ function escapeHTML(value) {
 
 function escapeAttr(value) {
   return escapeHTML(value);
-}
-
-function errorMessage(err) {
-  return err && err.message ? err.message : String(err || "unknown error");
 }

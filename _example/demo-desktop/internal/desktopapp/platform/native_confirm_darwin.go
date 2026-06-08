@@ -1,7 +1,7 @@
 //go:build darwin
 // +build darwin
 
-package main
+package platform
 
 /*
 #cgo CFLAGS: -x objective-c
@@ -47,8 +47,7 @@ static int BoxConfirmExternalLinkOpen(const char* message) {
 import "C"
 import "unsafe"
 
-func confirmExternalBrowserOpen(target string) (bool, error) {
-	message := externalBrowserConfirmMessage(target)
+func ConfirmExternalBrowserOpen(message string) (bool, error) {
 	cMessage := C.CString(message)
 	defer C.free(unsafe.Pointer(cMessage))
 	return C.BoxConfirmExternalLinkOpen(cMessage) == 1, nil

@@ -1,4 +1,4 @@
-package main
+package desktopapp
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"example/simple/internal/desktopapp/external"
 )
 
 func TestNormalizeExternalBrowserURL(t *testing.T) {
@@ -28,7 +30,7 @@ func TestNormalizeExternalBrowserURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeExternalBrowserURL(tt.value)
+			got, err := external.NormalizeBrowserURL(tt.value)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got %q", got)
@@ -195,6 +197,292 @@ func TestCreateVaultMemoRejectsUnknownProject(t *testing.T) {
 		ProjectID: "project_missing",
 	}); err == nil {
 		t.Fatalf("expected unknown project error")
+	}
+}
+
+func TestCreateVaultTaskWritesJSONAndIndex(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	project, err := createVaultProject(ctx, ProjectCreateRequest{Name: "Release", Color: "#10b981"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task, err := createVaultTask(ctx, TaskCreateRequest{
+		Contexts:  []string{"office", "office"},
+		DueAt:     "2026-06-09T18:00:00+08:00",
+		ListID:    "",
+		Notes:     "ship notes\n",
+		Priority:  "high",
+		ProjectID: project.ID,
+		Reminders: []TaskReminder{{Type: "relative", Base: "dueAt", OffsetMinutes: -30}},
+		Repeat:    TaskRepeat{Frequency: "weekly", Interval: 1, Weekdays: []string{"MO"}},
+		Source:    TaskSource{Type: "memo", MemoID: "memo_source", Line: 12, Text: "- [ ] Ship"},
+		Tags:      []string{"release", "release"},
+		Title:     "Ship release",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if task.ID == "" {
+		t.Fatalf("task id is empty")
+	}
+	if task.Status != taskStatusOpen {
+		t.Fatalf("status = %q, want open", task.Status)
+	}
+	if task.ListID != "inbox" {
+		t.Fatalf("list id = %q, want inbox", task.ListID)
+	}
+	if len(task.Tags) != 1 || task.Tags[0] != "release" {
+		t.Fatalf("tags = %#v, want release", task.Tags)
+	}
+	if len(task.Contexts) != 1 || task.Contexts[0] != "office" {
+		t.Fatalf("contexts = %#v, want office", task.Contexts)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(ctx.RootDir, filepath.FromSlash(task.Path)))
+	if err != nil {
+		t.Fatalf("read task file: %v", err)
+	}
+	var stored TaskRecord
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("task file is not json: %v\n%s", err, string(raw))
+	}
+	if stored.ID != task.ID || stored.Title != "Ship release" || stored.Status != taskStatusOpen || stored.Priority != taskPriorityHigh {
+		t.Fatalf("stored task = %#v, want json task", stored)
+	}
+	if len(stored.Tags) != 1 || stored.Tags[0] != "release" || len(stored.Reminders) != 1 || stored.Repeat.Frequency != "weekly" {
+		t.Fatalf("stored task metadata = %#v, want task metadata", stored)
+	}
+	if stored.Notes != "ship notes\n" {
+		t.Fatalf("stored notes = %q, want preserved notes", stored.Notes)
+	}
+
+	readBack, err := getVaultTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if readBack.Title != task.Title || readBack.ProjectID != project.ID || len(readBack.Reminders) != 1 {
+		t.Fatalf("read task = %#v, want persisted task", readBack)
+	}
+
+	index, err := loadTaskIndex(ctx)
+	if err != nil {
+		t.Fatalf("load task index: %v", err)
+	}
+	entry, ok := index.Tasks[task.ID]
+	if !ok {
+		t.Fatalf("task missing from index: %#v", index.Tasks)
+	}
+	if entry.Path != task.Path || entry.Title != task.Title || entry.Status != taskStatusOpen {
+		t.Fatalf("index entry = %#v, want task summary", entry)
+	}
+	if entry.Source.Type != "memo" || entry.Source.MemoID != "memo_source" || entry.Source.Line != 12 {
+		t.Fatalf("index source = %#v, want memo source", entry.Source)
+	}
+}
+
+func TestCompleteVaultTaskMovesFileAndRebuildsIndex(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	task, err := createVaultTask(ctx, TaskCreateRequest{Title: "Done task"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	oldPath := filepath.Join(ctx.RootDir, filepath.FromSlash(task.Path))
+
+	completed, err := completeVaultTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	if completed.Status != taskStatusCompleted {
+		t.Fatalf("status = %q, want completed", completed.Status)
+	}
+	if completed.CompletedAt == "" {
+		t.Fatalf("completedAt is empty")
+	}
+	if !strings.Contains(completed.Path, "/completed/") {
+		t.Fatalf("completed path = %q, want completed folder", completed.Path)
+	}
+	if filepath.Ext(completed.Path) != ".json" {
+		t.Fatalf("completed path = %q, want json file", completed.Path)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old task file still exists or stat failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ctx.RootDir, filepath.FromSlash(completed.Path))); err != nil {
+		t.Fatalf("completed task file missing: %v", err)
+	}
+
+	index, err := rebuildTaskIndex(ctx)
+	if err != nil {
+		t.Fatalf("rebuild task index: %v", err)
+	}
+	entry, ok := index.Tasks[task.ID]
+	if !ok {
+		t.Fatalf("completed task missing from index")
+	}
+	if entry.Status != taskStatusCompleted || entry.Path != completed.Path {
+		t.Fatalf("index entry = %#v, want completed path %q", entry, completed.Path)
+	}
+}
+
+func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "计划\n- [ ] 跟进发布 #release\n",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	if !strings.Contains(memo.Content, "- [ ] [[task:") {
+		t.Fatalf("memo content = %q, want task ref", memo.Content)
+	}
+	tasks, err := listVaultTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want one task", tasks)
+	}
+	task := tasks[0]
+	if task.Title != "跟进发布 #release" || task.Source.MemoID != memo.ID || task.Source.Line != 2 {
+		t.Fatalf("task = %#v, want task from memo line", task)
+	}
+
+	updatedContent := strings.Replace(memo.Content, "- [ ]", "- [x]", 1)
+	updated, err := updateVaultMemo(ctx, MemoUpdateRequest{ID: memo.ID, Content: &updatedContent})
+	if err != nil {
+		t.Fatalf("update memo: %v", err)
+	}
+	if !strings.Contains(updated.Content, "[[task:"+task.ID) {
+		t.Fatalf("updated memo content = %q, want same task ref", updated.Content)
+	}
+	completed, err := getVaultTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get completed task: %v", err)
+	}
+	if completed.Status != taskStatusCompleted {
+		t.Fatalf("task status = %q, want completed", completed.Status)
+	}
+}
+
+func TestDeleteVaultMemoWithTasksDeletesSourceTasks(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "计划\n- [ ] 跟进发布\n- [ ] 写发布日志\n",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	keep, err := createVaultTask(ctx, TaskCreateRequest{Title: "Keep standalone task"})
+	if err != nil {
+		t.Fatalf("create standalone task: %v", err)
+	}
+
+	tasks, err := listVaultTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("tasks = %#v, want two memo tasks and one standalone", tasks)
+	}
+
+	result, err := deleteVaultMemoWithOptions(ctx, memo.ID, MemoDeleteOptions{DeleteTasks: true})
+	if err != nil {
+		t.Fatalf("delete memo: %v", err)
+	}
+	if result.TasksDeleted != 2 {
+		t.Fatalf("tasks deleted = %d, want 2", result.TasksDeleted)
+	}
+	if _, err := findMemoFilePath(ctx, memo.ID); err == nil {
+		t.Fatalf("memo file still exists")
+	}
+
+	tasks, err = listVaultTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks after delete: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != keep.ID {
+		t.Fatalf("remaining tasks = %#v, want standalone task", tasks)
+	}
+	index, err := loadTaskIndex(ctx)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+	if _, ok := index.Tasks[keep.ID]; !ok || len(index.Tasks) != 1 {
+		t.Fatalf("index tasks = %#v, want standalone task only", index.Tasks)
+	}
+}
+
+func TestTaskNoteAutoCreatesSubtaskFromTodoLine(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	parent, err := createVaultTask(ctx, TaskCreateRequest{Priority: "medium", Tags: []string{"release"}, Title: "Parent task"})
+	if err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+
+	parent, note, err := createVaultTaskNote(ctx, TaskNoteCreateRequest{
+		Content:    "执行记录\n- [ ] 检查更新包 #qa\n",
+		TaskID:     parent.ID,
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create task note: %v", err)
+	}
+	if note.Kind != "task_note" || note.TaskID != parent.ID {
+		t.Fatalf("note metadata = %#v, want task note for parent", note)
+	}
+	if len(parent.NoteRefs) != 1 || parent.NoteRefs[0].MemoID != note.ID {
+		t.Fatalf("parent note refs = %#v, want created note", parent.NoteRefs)
+	}
+	notePath := filepath.Join(ctx.RootDir, filepath.FromSlash(note.Path))
+	rawNote, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read note: %v", err)
+	}
+	if !strings.Contains(string(rawNote), "kind: \"task_note\"") || !strings.Contains(string(rawNote), "taskId: \""+parent.ID+"\"") {
+		t.Fatalf("note file missing task metadata:\n%s", string(rawNote))
+	}
+	if !strings.Contains(note.Content, "- [ ] [[task:") {
+		t.Fatalf("note content = %q, want task ref", note.Content)
+	}
+	parent, err = getVaultTask(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("get parent task: %v", err)
+	}
+	if len(parent.SubtaskIDs) != 1 {
+		t.Fatalf("parent subtasks = %#v, want one child", parent.SubtaskIDs)
+	}
+	child, err := getVaultTask(ctx, parent.SubtaskIDs[0])
+	if err != nil {
+		t.Fatalf("get child task: %v", err)
+	}
+	if child.ParentID != parent.ID {
+		t.Fatalf("child parent id = %q, want %q", child.ParentID, parent.ID)
+	}
+	if child.Title != "检查更新包 #qa" {
+		t.Fatalf("child title = %q, want todo text", child.Title)
+	}
+	if !strings.Contains(note.Content, "[[task:"+child.ID+"|"+child.Title+"]]") {
+		t.Fatalf("note content = %q, want child task ref", note.Content)
 	}
 }
 
