@@ -23,6 +23,12 @@
       --accent-soft: rgba(15, 159, 110, 0.12);
       --danger: #c93a32;
       --danger-soft: rgba(201, 58, 50, 0.1);
+      --font-root: 14px;
+      --font-xs: 0.8571rem;
+      --font-sm: 0.9286rem;
+      --font-md: 1rem;
+      --font-body: 1rem;
+      --font-3xl: 1.4286rem;
     }
 
     [data-theme="dark"] {
@@ -54,11 +60,15 @@
       overscroll-behavior: none;
     }
 
+    html {
+      font-size: var(--font-root);
+    }
+
     body {
       background: var(--background);
       color: var(--FG-0);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-size: var(--font-body);
     }
 
     button,
@@ -93,7 +103,7 @@
     }
 
     .manager-title h1 {
-      font-size: 20px;
+      font-size: var(--font-3xl);
       line-height: 1.2;
       margin: 0;
       overflow: hidden;
@@ -103,7 +113,7 @@
 
     .manager-meta {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       margin-top: 4px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -176,7 +186,7 @@
     .manager-message {
       color: var(--FG-1);
       flex: 1 1 220px;
-      font-size: 12px;
+      font-size: var(--font-sm);
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -189,7 +199,7 @@
       border-radius: 6px;
       color: var(--FG-1);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
+      font-size: var(--font-sm);
       line-height: 1.45;
       min-height: 32px;
       overflow-wrap: anywhere;
@@ -221,7 +231,7 @@
 
     .manager-empty {
       color: var(--FG-1);
-      font-size: 13px;
+      font-size: var(--font-md);
       padding: 22px;
       text-align: center;
     }
@@ -243,7 +253,7 @@
     .manager-row.is-header {
       background: var(--BG-1);
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
       min-height: 34px;
     }
@@ -289,7 +299,7 @@
       color: var(--FG-2);
       flex: 0 0 auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
+      font-size: var(--font-xs);
       width: 28px;
     }
 
@@ -305,7 +315,7 @@
       align-items: center;
       color: var(--FG-1);
       display: flex;
-      font-size: 12px;
+      font-size: var(--font-sm);
     }
 
     .manager-row-actions {
@@ -950,7 +960,7 @@
         }
         var labels = [];
         if (!config.id) labels.push("Storage ID");
-        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
+        if (!config.endpoint && !(isLocalProvider(config.provider) && normalizeLocalSettings(config.local))) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
         if (!config.bucket) labels.push("Bucket");
         if (!isLocalProvider(config.provider)) {
           if (!config.accessKeyId) labels.push("Access Key ID");
@@ -1045,6 +1055,7 @@
           endpoint: String(raw.endpoint || "").trim(),
           forcePathStyle: raw.forcePathStyle !== false,
           id: sanitizeStorageId(raw.id || ""),
+          local: normalizeLocalSettings(raw.local),
           name: String(raw.name || "").trim(),
           pathPrefix: String(raw.pathPrefix || "").trim(),
           provider: String(raw.provider || "s3").trim() || "s3",
@@ -1060,6 +1071,7 @@
         return Boolean(config && typeof config === "object" && (
           config.enabled ||
           config.endpoint ||
+          config.local ||
           config.bucket ||
           config.accessKeyId ||
           config.secretAccessKey ||
@@ -1222,6 +1234,24 @@
       function isLocalProvider(provider) {
         var value = String(provider || "").trim().toLowerCase();
         return value === "local" || value === "local-oss";
+      }
+
+      function normalizeLocalSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var root = String(raw.root || "").trim();
+        var rootMode = String(raw.rootMode || "").trim().toLowerCase();
+        if (!rootMode) {
+          if (!root) return null;
+          rootMode = root.charAt(0) === "/" || root.indexOf(":\\") === 1 || root.indexOf("~/") === 0 ? "absolute" : "vault";
+        }
+        if (rootMode === "vault") {
+          root = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") || "storage";
+          return { root: root, rootMode: "vault" };
+        }
+        if (rootMode === "absolute" && root) {
+          return { root: root, rootMode: "absolute" };
+        }
+        return null;
       }
 
       function sanitizeStorageId(value) {

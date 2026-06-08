@@ -194,7 +194,7 @@ function render_errors(errors) {
   for (let i = 0; i < errors.length; i += 1) {
     const e = errors[i];
     var $type = document.createElement("div");
-    $type.style.cssText = "font-size: 18px";
+    $type.style.cssText = "font-size: var(--font-2xl, 1.2857rem)";
     $type.innerHTML = e.type;
     var $msg = document.createElement("div");
     $msg.innerHTML = e.msg;

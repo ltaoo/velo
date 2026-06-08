@@ -27,12 +27,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/ltaoo/velo"
-	"github.com/ltaoo/velo/autostart"
 	veloerr "github.com/ltaoo/velo/error"
 	"github.com/ltaoo/velo/file"
 	"github.com/ltaoo/velo/shortcut"
 	"github.com/ltaoo/velo/store"
-	"github.com/ltaoo/velo/tray"
 	updater "github.com/ltaoo/velo/updater/api"
 	utypes "github.com/ltaoo/velo/updater/types"
 	uversion "github.com/ltaoo/velo/updater/version"
@@ -53,10 +51,14 @@ var Version = "1.0.0"
 var Mode = "dev"
 
 const cloudStorageSettingsKey = "demo-desktop:settings:cloud-storage:v1"
+const defaultLocalStorageRelativeRoot = "storage"
 const globalVeloDirName = ".velo"
+const localStorageRootModeAbsolute = "absolute"
+const localStorageRootModeVault = "vault"
 const globalVaultDataFileName = "data.json"
 const vaultConfigDirName = ".velo"
 const vaultMemoDirName = "memo"
+const vaultProjectsFileName = "projects.json"
 const vaultSchemaVersion = 1
 
 var memoTagPattern = regexp.MustCompile(`(?:^|\s)#([\p{L}\p{N}_-]+)`)
@@ -84,21 +86,27 @@ type MemoWindowPayload struct {
 	Memos json.RawMessage `json:"memos"`
 }
 
+type LocalOSSSettings struct {
+	Root     string `json:"root,omitempty"`
+	RootMode string `json:"rootMode,omitempty"`
+}
+
 type OSSConfig struct {
-	AccessKeyID     string `json:"accessKeyId"`
-	Bucket          string `json:"bucket"`
-	Enabled         bool   `json:"enabled"`
-	Endpoint        string `json:"endpoint"`
-	ForcePathStyle  bool   `json:"forcePathStyle"`
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	PathPrefix      string `json:"pathPrefix"`
-	Provider        string `json:"provider"`
-	PublicBaseURL   string `json:"publicBaseUrl"`
-	Region          string `json:"region"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	SessionToken    string `json:"sessionToken"`
-	UseSSL          bool   `json:"useSSL"`
+	AccessKeyID     string            `json:"accessKeyId"`
+	Bucket          string            `json:"bucket"`
+	Enabled         bool              `json:"enabled"`
+	Endpoint        string            `json:"endpoint"`
+	ForcePathStyle  bool              `json:"forcePathStyle"`
+	ID              string            `json:"id"`
+	Local           *LocalOSSSettings `json:"local,omitempty"`
+	Name            string            `json:"name"`
+	PathPrefix      string            `json:"pathPrefix"`
+	Provider        string            `json:"provider"`
+	PublicBaseURL   string            `json:"publicBaseUrl"`
+	Region          string            `json:"region"`
+	SecretAccessKey string            `json:"secretAccessKey"`
+	SessionToken    string            `json:"sessionToken"`
+	UseSSL          bool              `json:"useSSL"`
 }
 
 type CloudStorageSettings struct {
@@ -128,6 +136,22 @@ type VaultFile struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 
+type ProjectFile struct {
+	ActiveProjectID string          `json:"activeProjectId"`
+	Projects        []ProjectRecord `json:"projects"`
+	SchemaVersion   int             `json:"schemaVersion"`
+}
+
+type ProjectRecord struct {
+	Archived  bool   `json:"archived"`
+	Color     string `json:"color"`
+	CreatedAt string `json:"createdAt"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	SortOrder int    `json:"sortOrder"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
 type VaultContext struct {
 	Entry   VaultEntry `json:"entry"`
 	RootDir string     `json:"rootDir"`
@@ -146,6 +170,7 @@ type MemoRecord struct {
 	ID         string   `json:"id"`
 	Path       string   `json:"path"`
 	Pinned     bool     `json:"pinned"`
+	ProjectID  string   `json:"projectId,omitempty"`
 	References []string `json:"references"`
 	Tags       []string `json:"tags"`
 	UpdatedAt  string   `json:"updatedAt"`
@@ -154,6 +179,7 @@ type MemoRecord struct {
 
 type MemoCreateRequest struct {
 	Content    string `json:"content"`
+	ProjectID  string `json:"projectId,omitempty"`
 	Visibility string `json:"visibility"`
 }
 
@@ -162,7 +188,25 @@ type MemoUpdateRequest struct {
 	Content    *string `json:"content"`
 	ID         string  `json:"id"`
 	Pinned     *bool   `json:"pinned"`
+	ProjectID  *string `json:"projectId,omitempty"`
 	Visibility *string `json:"visibility"`
+}
+
+type ProjectCreateRequest struct {
+	Color string `json:"color"`
+	Name  string `json:"name"`
+}
+
+type ProjectUpdateRequest struct {
+	Archived  *bool   `json:"archived"`
+	Color     *string `json:"color"`
+	ID        string  `json:"id"`
+	Name      *string `json:"name"`
+	SortOrder *int    `json:"sortOrder"`
+}
+
+type ProjectActivateRequest struct {
+	ProjectID string `json:"projectId"`
 }
 
 type MemoDeleteRequest struct {
@@ -636,6 +680,183 @@ func requireActiveVault() (*VaultContext, error) {
 	return ctx, nil
 }
 
+func loadVaultProjects(ctx *VaultContext) (ProjectFile, error) {
+	path := filepath.Join(ctx.VeloDir, vaultProjectsFileName)
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ProjectFile{SchemaVersion: vaultSchemaVersion, Projects: []ProjectRecord{}}, nil
+	}
+	if err != nil {
+		return ProjectFile{}, fmt.Errorf("read projects: %w", err)
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return ProjectFile{SchemaVersion: vaultSchemaVersion, Projects: []ProjectRecord{}}, nil
+	}
+	var file ProjectFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return ProjectFile{}, fmt.Errorf("read projects: %w", err)
+	}
+	return normalizeProjectFile(file), nil
+}
+
+func normalizeProjectFile(file ProjectFile) ProjectFile {
+	if file.SchemaVersion == 0 {
+		file.SchemaVersion = vaultSchemaVersion
+	}
+	projects := make([]ProjectRecord, 0, len(file.Projects))
+	seen := map[string]bool{}
+	for _, project := range file.Projects {
+		project.ID = sanitizeProjectID(project.ID)
+		project.Name = strings.TrimSpace(project.Name)
+		if project.ID == "" || project.Name == "" || seen[project.ID] {
+			continue
+		}
+		project.Color = normalizeProjectColor(project.Color)
+		seen[project.ID] = true
+		projects = append(projects, project)
+	}
+	sort.SliceStable(projects, func(i, j int) bool {
+		if projects[i].SortOrder == projects[j].SortOrder {
+			return projects[i].CreatedAt < projects[j].CreatedAt
+		}
+		return projects[i].SortOrder < projects[j].SortOrder
+	})
+	file.Projects = projects
+	file.ActiveProjectID = sanitizeProjectID(file.ActiveProjectID)
+	if file.ActiveProjectID != "" && !projectFileHasID(file, file.ActiveProjectID) {
+		file.ActiveProjectID = ""
+	}
+	return file
+}
+
+func saveVaultProjects(ctx *VaultContext, file ProjectFile) error {
+	file = normalizeProjectFile(file)
+	file.SchemaVersion = vaultSchemaVersion
+	return writeJSONFileAtomic(filepath.Join(ctx.VeloDir, vaultProjectsFileName), file)
+}
+
+func listVaultProjects(ctx *VaultContext) (ProjectFile, error) {
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return ProjectFile{}, err
+	}
+	return file, nil
+}
+
+func createVaultProject(ctx *VaultContext, req ProjectCreateRequest) (ProjectRecord, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return ProjectRecord{}, fmt.Errorf("project name is required")
+	}
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return ProjectRecord{}, err
+	}
+	sortOrder := len(file.Projects)
+	for _, project := range file.Projects {
+		if project.SortOrder >= sortOrder {
+			sortOrder = project.SortOrder + 1
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	project := ProjectRecord{
+		Archived:  false,
+		Color:     normalizeProjectColor(req.Color),
+		CreatedAt: now,
+		ID:        newProjectID(),
+		Name:      name,
+		SortOrder: sortOrder,
+		UpdatedAt: now,
+	}
+	file.Projects = append(file.Projects, project)
+	if file.ActiveProjectID == "" {
+		file.ActiveProjectID = project.ID
+	}
+	if err := saveVaultProjects(ctx, file); err != nil {
+		return ProjectRecord{}, err
+	}
+	return project, nil
+}
+
+func updateVaultProject(ctx *VaultContext, req ProjectUpdateRequest) (ProjectRecord, error) {
+	id := sanitizeProjectID(req.ID)
+	if id == "" {
+		return ProjectRecord{}, fmt.Errorf("project id is required")
+	}
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return ProjectRecord{}, err
+	}
+	for i, project := range file.Projects {
+		if project.ID != id {
+			continue
+		}
+		if req.Name != nil {
+			name := strings.TrimSpace(*req.Name)
+			if name == "" {
+				return ProjectRecord{}, fmt.Errorf("project name is required")
+			}
+			project.Name = name
+		}
+		if req.Color != nil {
+			project.Color = normalizeProjectColor(*req.Color)
+		}
+		if req.Archived != nil {
+			project.Archived = *req.Archived
+		}
+		if req.SortOrder != nil {
+			project.SortOrder = *req.SortOrder
+		}
+		project.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		file.Projects[i] = project
+		if err := saveVaultProjects(ctx, file); err != nil {
+			return ProjectRecord{}, err
+		}
+		return project, nil
+	}
+	return ProjectRecord{}, fmt.Errorf("project not found: %s", id)
+}
+
+func activateVaultProject(ctx *VaultContext, projectID string) (ProjectFile, error) {
+	projectID = sanitizeProjectID(projectID)
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return ProjectFile{}, err
+	}
+	if projectID != "" && !projectFileHasID(file, projectID) {
+		return ProjectFile{}, fmt.Errorf("project not found: %s", projectID)
+	}
+	file.ActiveProjectID = projectID
+	if err := saveVaultProjects(ctx, file); err != nil {
+		return ProjectFile{}, err
+	}
+	return file, nil
+}
+
+func validateMemoProjectID(ctx *VaultContext, projectID string) (string, error) {
+	projectID = sanitizeProjectID(projectID)
+	if projectID == "" {
+		return "", nil
+	}
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !projectFileHasID(file, projectID) {
+		return "", fmt.Errorf("project not found: %s", projectID)
+	}
+	return projectID, nil
+}
+
+func projectFileHasID(file ProjectFile, id string) bool {
+	for _, project := range file.Projects {
+		if project.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func listVaultMemos(ctx *VaultContext) ([]MemoRecord, error) {
 	memos := []MemoRecord{}
 	if err := filepath.WalkDir(ctx.MemoDir, func(path string, entry os.DirEntry, err error) error {
@@ -673,6 +894,10 @@ func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, erro
 	if strings.TrimSpace(content) == "" {
 		return MemoRecord{}, fmt.Errorf("memo content is required")
 	}
+	projectID, err := validateMemoProjectID(ctx, req.ProjectID)
+	if err != nil {
+		return MemoRecord{}, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	memo := MemoRecord{
 		Archived:   false,
@@ -680,6 +905,7 @@ func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, erro
 		CreatedAt:  now,
 		ID:         newMemoID(),
 		Pinned:     false,
+		ProjectID:  projectID,
 		UpdatedAt:  "",
 		Visibility: normalizeMemoVisibility(req.Visibility),
 	}
@@ -720,6 +946,13 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 	}
 	if req.Archived != nil {
 		memo.Archived = *req.Archived
+	}
+	if req.ProjectID != nil {
+		projectID, err := validateMemoProjectID(ctx, *req.ProjectID)
+		if err != nil {
+			return MemoRecord{}, err
+		}
+		memo.ProjectID = projectID
 	}
 	memo.Tags = extractMemoTags(memo.Content)
 	memo.References = extractMemoReferences(memo.Content)
@@ -813,6 +1046,7 @@ func readMemoFile(ctx *VaultContext, path string) (MemoRecord, error) {
 		ID:         id,
 		Path:       relativeVaultPath(ctx, path),
 		Pinned:     parseMemoBool(meta["pinned"]),
+		ProjectID:  sanitizeProjectID(meta["projectId"]),
 		References: parseMemoList(meta, "references"),
 		Tags:       parseMemoList(meta, "tags"),
 		UpdatedAt:  firstNonEmpty(meta["updatedAt"], meta["updated_at"]),
@@ -862,13 +1096,18 @@ func renderMemoMarkdownFile(memo MemoRecord) string {
 		"---",
 		"schemaVersion: " + fmt.Sprintf("%d", vaultSchemaVersion),
 		"id: " + yamlQuote(memo.ID),
-		"createdAt: " + yamlQuote(memo.CreatedAt),
-		"updatedAt: " + yamlQuote(memo.UpdatedAt),
-		"visibility: " + yamlQuote(normalizeMemoVisibility(memo.Visibility)),
-		"pinned: " + fmt.Sprintf("%t", memo.Pinned),
-		"archived: " + fmt.Sprintf("%t", memo.Archived),
-		"contentWhitespace: \"preserve\"",
 	}
+	if memo.ProjectID != "" {
+		lines = append(lines, "projectId: "+yamlQuote(sanitizeProjectID(memo.ProjectID)))
+	}
+	lines = append(lines,
+		"createdAt: "+yamlQuote(memo.CreatedAt),
+		"updatedAt: "+yamlQuote(memo.UpdatedAt),
+		"visibility: "+yamlQuote(normalizeMemoVisibility(memo.Visibility)),
+		"pinned: "+fmt.Sprintf("%t", memo.Pinned),
+		"archived: "+fmt.Sprintf("%t", memo.Archived),
+		"contentWhitespace: \"preserve\"",
+	)
 	if len(tags) == 0 {
 		lines = append(lines, "tags: []")
 	} else {
@@ -1258,6 +1497,37 @@ func newMemoID() string {
 	return "memo_" + time.Now().UTC().Format("20060102T150405") + "_" + randomVaultSuffix()
 }
 
+func newProjectID() string {
+	return "project_" + randomVaultSuffix()
+}
+
+func sanitizeProjectID(value string) string {
+	id := strings.TrimSpace(value)
+	if id == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func normalizeProjectColor(value string) string {
+	color := strings.TrimSpace(value)
+	if color == "" {
+		return "#2563eb"
+	}
+	if matched, _ := regexp.MatchString(`^#[0-9a-fA-F]{6}$`, color); matched {
+		return strings.ToLower(color)
+	}
+	return "#2563eb"
+}
+
 func sanitizeMemoID(value string) string {
 	id := strings.TrimSpace(value)
 	if id == "" {
@@ -1353,7 +1623,7 @@ func main() {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	quitOnLastWindowClosed := true
+	quitOnLastWindowClosed := false
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 	initialPathname := "/vault-picker"
@@ -1431,6 +1701,72 @@ func main() {
 			"created":  !existing,
 			"existing": existing,
 			"registry": registry,
+		})
+	})
+
+	b.Get("/api/projects", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		file, err := listVaultProjects(ctx)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{
+			"activeProjectId": file.ActiveProjectID,
+			"projects":        file.Projects,
+		})
+	})
+
+	b.Post("/api/projects/create", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req ProjectCreateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		project, err := createVaultProject(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"project": project})
+	})
+
+	b.Post("/api/projects/update", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req ProjectUpdateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		project, err := updateVaultProject(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"project": project})
+	})
+
+	b.Post("/api/projects/activate", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req ProjectActivateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		file, err := activateVaultProject(ctx, req.ProjectID)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{
+			"activeProjectId": file.ActiveProjectID,
+			"projects":        file.Projects,
 		})
 	})
 
@@ -1688,7 +2024,7 @@ func main() {
 			return c.Error(err.Error())
 		}
 		if raw == nil || changed {
-			stored, err := json.Marshal(settings)
+			stored, err := marshalCloudStorageSettingsForStore(settings)
 			if err != nil {
 				return c.Error(err.Error())
 			}
@@ -1710,7 +2046,7 @@ func main() {
 		if err != nil {
 			return c.Error(err.Error())
 		}
-		raw, err := json.Marshal(settings)
+		raw, err := marshalCloudStorageSettingsForStore(settings)
 		if err != nil {
 			return c.Error(err.Error())
 		}
@@ -1748,6 +2084,9 @@ func main() {
 			req.Config = cfg
 		} else if strings.TrimSpace(req.Config.ID) == "" && strings.TrimSpace(req.StorageID) != "" {
 			req.Config.ID = req.StorageID
+		}
+		if isLocalOSSConfig(req.Config) {
+			req.Config, _ = prepareLocalOSSConfig(req.Config, b.Store.Path())
 		}
 
 		result, err := uploadOSSObject(c.Context(), req)
@@ -2004,6 +2343,13 @@ func main() {
 				name += "-" + sanitizeStorageID(objectPath)
 			}
 		}
+		if pathBase == "/memo-slim" {
+			entryPage = "memo-slim.html"
+			name = "memo-slim"
+			title = "Memos"
+			width = 430
+			height = 640
+		}
 		b.OpenWindow(&velo.VeloWebviewOpt{
 			Name:       name,
 			Title:      title,
@@ -2027,46 +2373,6 @@ func main() {
 		b.Webview.Hide()
 	})
 	_ = sm
-
-	as := autostart.New("MyApp")
-
-	proxyEnabled := false
-	proxyItem := &tray.MenuItem{Label: "设置系统代理", Click: func(m *tray.MenuItem) {
-		proxyEnabled = !proxyEnabled
-		if proxyEnabled {
-			m.Check()
-		} else {
-			m.Uncheck()
-		}
-	}}
-
-	autoStartItem := &tray.MenuItem{Label: "开机自启动", Checked: as.IsEnabled(), Click: func(m *tray.MenuItem) {
-		if as.IsEnabled() {
-			as.Disable()
-			m.Uncheck()
-		} else {
-			as.Enable()
-			m.Check()
-		}
-	}}
-
-	tray.Setup(&tray.Tray{
-		Icon:    appIcon,
-		Tooltip: "MyApp",
-		Menu: &tray.Menu{
-			Items: []*tray.MenuItem{
-				{Label: "显示主窗口", Click: func(m *tray.MenuItem) {
-					b.Webview.Show()
-				}},
-				proxyItem,
-				autoStartItem,
-				{IsSeparator: true},
-				{Label: "退出", Click: func(m *tray.MenuItem) {
-					tray.Quit()
-				}},
-			},
-		},
-	})
 
 	b.NewWebview(&velo.VeloWebviewOpt{
 		Name:       "desktop",
@@ -3398,7 +3704,11 @@ func localOSSBucketRoot(cfg OSSConfig) (string, error) {
 	if err := validateOSSAccessConfig(cfg); err != nil {
 		return "", err
 	}
-	root := expandLocalPath(strings.TrimSpace(cfg.Endpoint))
+	root := strings.TrimSpace(cfg.Endpoint)
+	if root == "" {
+		root = localOSSAbsoluteRoot(cfg)
+	}
+	root = expandLocalPath(root)
 	if root == "" {
 		return "", fmt.Errorf("local root is required")
 	}
@@ -3411,6 +3721,14 @@ func localOSSBucketRoot(cfg OSSConfig) (string, error) {
 		return "", err
 	}
 	return filepath.Join(absRoot, bucket), nil
+}
+
+func localOSSAbsoluteRoot(cfg OSSConfig) string {
+	local := normalizeLocalOSSSettings(cfg.Local)
+	if local == nil || local.RootMode != localStorageRootModeAbsolute {
+		return ""
+	}
+	return strings.TrimSpace(local.Root)
 }
 
 func localOSSObjectDiskPath(cfg OSSConfig, objectPath string) (string, error) {
@@ -3487,6 +3805,36 @@ func loadStoredCloudStorageSettings(raw json.RawMessage) (CloudStorageSettings, 
 	}), nil
 }
 
+func marshalCloudStorageSettingsForStore(settings CloudStorageSettings) ([]byte, error) {
+	return json.Marshal(cloudStorageSettingsForStore(settings))
+}
+
+func cloudStorageSettingsForStore(settings CloudStorageSettings) CloudStorageSettings {
+	settings = normalizeCloudStorageSettings(settings)
+	storages := make([]OSSConfig, len(settings.Storages))
+	for i, cfg := range settings.Storages {
+		if cfg.Local != nil {
+			local := *cfg.Local
+			cfg.Local = &local
+		}
+		if isLocalOSSConfig(cfg) {
+			cfg.Local = normalizeLocalOSSSettings(cfg.Local)
+			if cfg.Local != nil {
+				if cfg.Local.RootMode == localStorageRootModeVault {
+					cfg.Endpoint = ""
+				} else if cfg.Local.RootMode == localStorageRootModeAbsolute {
+					cfg.Endpoint = cfg.Local.Root
+				}
+			}
+		} else {
+			cfg.Local = nil
+		}
+		storages[i] = cfg
+	}
+	settings.Storages = storages
+	return settings
+}
+
 func normalizeCloudStorageSettings(settings CloudStorageSettings) CloudStorageSettings {
 	seen := map[string]int{}
 	next := make([]OSSConfig, 0, len(settings.Storages))
@@ -3500,6 +3848,11 @@ func normalizeCloudStorageSettings(settings CloudStorageSettings) CloudStorageSe
 		cfg.PathPrefix = strings.TrimSpace(cfg.PathPrefix)
 		cfg.PublicBaseURL = strings.TrimSpace(cfg.PublicBaseURL)
 		cfg.Region = strings.TrimSpace(cfg.Region)
+		if isLocalOSSConfig(cfg) {
+			cfg.Local = normalizeLocalOSSSettings(cfg.Local)
+		} else {
+			cfg.Local = nil
+		}
 		baseID := sanitizeStorageID(cfg.ID)
 		if baseID == "" {
 			baseID = sanitizeStorageID(firstNonEmpty(cfg.Name, cfg.Provider, cfg.Bucket))
@@ -3558,7 +3911,11 @@ func prepareCloudStorageSettings(settings CloudStorageSettings, storePath string
 	defaultRoot := defaultLocalStorageRoot(storePath)
 	legacyRoot := legacyDefaultLocalStorageRoot(storePath)
 	for i := range settings.Storages {
-		cfg := settings.Storages[i]
+		cfg, localChanged := prepareLocalOSSConfig(settings.Storages[i], storePath)
+		if localChanged {
+			settings.Storages[i] = cfg
+			changed = true
+		}
 		if cfg.ID == "memo-local" && isLocalOSSConfig(cfg) && samePath(cfg.Endpoint, legacyRoot) && !samePath(cfg.Endpoint, defaultRoot) {
 			settings.Storages[i].Endpoint = defaultRoot
 			changed = true
@@ -3593,24 +3950,180 @@ func defaultLocalMemoOSSConfig(storePath string) OSSConfig {
 		Endpoint:       defaultLocalStorageRoot(storePath),
 		ForcePathStyle: true,
 		ID:             "memo-local",
-		Name:           "本地 Memo 存储",
-		Provider:       "local",
-		UseSSL:         false,
+		Local: &LocalOSSSettings{
+			Root:     defaultLocalStorageRelativeRoot,
+			RootMode: localStorageRootModeVault,
+		},
+		Name:     "本地 Memo 存储",
+		Provider: "local",
+		UseSSL:   false,
 	}
 }
 
-func defaultLocalStorageRoot(storePath string) string {
+func prepareLocalOSSConfig(cfg OSSConfig, storePath string) (OSSConfig, bool) {
+	if !isLocalOSSConfig(cfg) {
+		if cfg.Local != nil {
+			cfg.Local = nil
+			return cfg, true
+		}
+		return cfg, false
+	}
+
+	changed := false
+	local := normalizeLocalOSSSettings(cfg.Local)
+	if !sameLocalOSSSettings(cfg.Local, local) {
+		changed = true
+	}
+	cfg.Local = local
+	if cfg.Local == nil {
+		cfg.Local = inferLocalOSSSettings(cfg, storePath)
+		if cfg.Local != nil {
+			changed = true
+		}
+	}
+
+	if cfg.Local != nil {
+		root := resolveLocalOSSRoot(*cfg.Local, storePath)
+		if root != "" && !samePath(cfg.Endpoint, root) {
+			cfg.Endpoint = root
+			changed = true
+		}
+	}
+	return cfg, changed
+}
+
+func inferLocalOSSSettings(cfg OSSConfig, storePath string) *LocalOSSSettings {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if endpoint == "" ||
+		samePath(endpoint, defaultLocalStorageRoot(storePath)) ||
+		samePath(endpoint, legacyDefaultLocalStorageRoot(storePath)) ||
+		looksLikeVaultLocalStorageRoot(endpoint) {
+		return &LocalOSSSettings{
+			Root:     defaultLocalStorageRelativeRoot,
+			RootMode: localStorageRootModeVault,
+		}
+	}
+	return &LocalOSSSettings{
+		Root:     endpoint,
+		RootMode: localStorageRootModeAbsolute,
+	}
+}
+
+func normalizeLocalOSSSettings(local *LocalOSSSettings) *LocalOSSSettings {
+	if local == nil {
+		return nil
+	}
+	root := strings.TrimSpace(local.Root)
+	rootMode := strings.ToLower(strings.TrimSpace(local.RootMode))
+	if rootMode == "" {
+		if root == "" {
+			return nil
+		}
+		if filepath.IsAbs(expandLocalPath(root)) || strings.HasPrefix(root, "~") {
+			rootMode = localStorageRootModeAbsolute
+		} else {
+			rootMode = localStorageRootModeVault
+		}
+	}
+
+	switch rootMode {
+	case localStorageRootModeVault:
+		root = cleanLocalRelativeRoot(root)
+		if root == "" {
+			root = defaultLocalStorageRelativeRoot
+		}
+	case localStorageRootModeAbsolute:
+		root = strings.TrimSpace(root)
+		if root == "" {
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	return &LocalOSSSettings{
+		Root:     root,
+		RootMode: rootMode,
+	}
+}
+
+func sameLocalOSSSettings(a *LocalOSSSettings, b *LocalOSSSettings) bool {
+	a = normalizeLocalOSSSettings(a)
+	b = normalizeLocalOSSSettings(b)
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Root == b.Root && a.RootMode == b.RootMode
+}
+
+func resolveLocalOSSRoot(local LocalOSSSettings, storePath string) string {
+	normalized := normalizeLocalOSSSettings(&local)
+	if normalized == nil {
+		return ""
+	}
+	switch normalized.RootMode {
+	case localStorageRootModeVault:
+		base := vaultRootForLocalStorage(storePath)
+		if base == "" {
+			return ""
+		}
+		return filepath.Join(base, filepath.FromSlash(normalized.Root))
+	case localStorageRootModeAbsolute:
+		return expandLocalPath(normalized.Root)
+	default:
+		return ""
+	}
+}
+
+func vaultRootForLocalStorage(storePath string) string {
 	if vault := activeVaultSnapshot(); vault != nil && strings.TrimSpace(vault.RootDir) != "" {
-		return filepath.Join(vault.RootDir, "storage")
+		return vault.RootDir
 	}
 	if root := vaultRootFromStorePath(storePath); root != "" {
-		return filepath.Join(root, "storage")
+		return root
 	}
 	base := filepath.Dir(strings.TrimSpace(storePath))
 	if base == "" || base == "." {
 		base = projectDir()
 	}
-	return filepath.Join(base, "storage")
+	return base
+}
+
+func cleanLocalRelativeRoot(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	value = strings.Trim(value, "/")
+	if value == "" || value == "." {
+		return ""
+	}
+	parts := strings.Split(value, "/")
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if len(clean) > 0 {
+				clean = clean[:len(clean)-1]
+			}
+			continue
+		}
+		clean = append(clean, part)
+	}
+	return strings.Join(clean, "/")
+}
+
+func looksLikeVaultLocalStorageRoot(endpoint string) bool {
+	root := expandLocalPath(strings.TrimSpace(endpoint))
+	if root == "" {
+		return false
+	}
+	clean := filepath.Clean(root)
+	return filepath.Base(clean) == defaultLocalStorageRelativeRoot
+}
+
+func defaultLocalStorageRoot(storePath string) string {
+	return filepath.Join(vaultRootForLocalStorage(storePath), defaultLocalStorageRelativeRoot)
 }
 
 func legacyDefaultLocalStorageRoot(storePath string) string {
@@ -3707,6 +4220,7 @@ func firstNonEmpty(values ...string) string {
 func hasOSSConfig(cfg OSSConfig) bool {
 	return cfg.Enabled ||
 		strings.TrimSpace(cfg.Endpoint) != "" ||
+		cfg.Local != nil ||
 		strings.TrimSpace(cfg.Bucket) != "" ||
 		strings.TrimSpace(cfg.AccessKeyID) != "" ||
 		strings.TrimSpace(cfg.SecretAccessKey) != "" ||
@@ -3727,7 +4241,9 @@ func validateOSSAccessConfig(cfg OSSConfig) error {
 	missing := make([]string, 0, 5)
 	if strings.TrimSpace(cfg.Endpoint) == "" {
 		if isLocalOSSConfig(cfg) {
-			missing = append(missing, "local root")
+			if localOSSAbsoluteRoot(cfg) == "" {
+				missing = append(missing, "local root")
+			}
 		} else {
 			missing = append(missing, "endpoint")
 		}

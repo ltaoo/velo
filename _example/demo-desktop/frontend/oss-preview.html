@@ -20,6 +20,11 @@
       --accent-strong: #08784f;
       --accent-soft: rgba(15, 159, 110, 0.12);
       --danger: #c93a32;
+      --font-root: 14px;
+      --font-sm: 0.9286rem;
+      --font-md: 1rem;
+      --font-body: 1rem;
+      --font-3xl: 1.4286rem;
     }
 
     [data-theme="dark"] {
@@ -48,11 +53,15 @@
       overscroll-behavior: none;
     }
 
+    html {
+      font-size: var(--font-root);
+    }
+
     body {
       background: var(--background);
       color: var(--FG-0);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-size: var(--font-body);
     }
 
     button {
@@ -82,7 +91,7 @@
     }
 
     .preview-title h1 {
-      font-size: 20px;
+      font-size: var(--font-3xl);
       line-height: 1.2;
       margin: 0;
       overflow: hidden;
@@ -92,7 +101,7 @@
 
     .preview-meta {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       margin-top: 4px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -125,7 +134,7 @@
 
     .preview-empty {
       color: var(--FG-1);
-      font-size: 13px;
+      font-size: var(--font-md);
       padding: 28px;
       text-align: center;
     }

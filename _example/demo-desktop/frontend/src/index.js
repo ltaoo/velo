@@ -2,7 +2,12 @@ import { app, history, client, views } from "./store/index.js";
 import { storage } from "./store/storage.js";
 import { RouterSubViews } from "./components/sub-views.js";
 
-let snapshotTimer = null;
+const WINDOW_STATE_POLL_INTERVAL = 250;
+const WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
+
+let snapshotPollTimer = null;
+let snapshotDebounceTimer = null;
+let lastWindowState = null;
 
 function windowStateName() {
   return window.location.pathname === "/vault-picker" ? "vault-picker" : "desktop";
@@ -53,16 +58,28 @@ function restoreWindowState() {
 }
 
 function startWindowStateSnapshots() {
-  if (typeof invoke !== "function" || snapshotTimer) return;
-  snapshotTimer = window.setInterval(function () {
-    invoke("/api/window/state/snapshot?name=" + encodeURIComponent(windowStateName()), { method: "GET" }).catch(function () {});
-  }, 3000);
+  if (typeof invoke !== "function" || snapshotPollTimer) return;
+  lastWindowState = readWindowStateHint();
+  window.addEventListener("resize", scheduleWindowStateSnapshot);
+  snapshotPollTimer = window.setInterval(function () {
+    const nextWindowState = readWindowStateHint();
+    if (!isSameWindowStateHint(lastWindowState, nextWindowState)) {
+      lastWindowState = nextWindowState;
+      scheduleWindowStateSnapshot();
+    }
+  }, WINDOW_STATE_POLL_INTERVAL);
 }
 
 function stopWindowStateSnapshots() {
-  if (!snapshotTimer) return;
-  window.clearInterval(snapshotTimer);
-  snapshotTimer = null;
+  if (snapshotPollTimer) {
+    window.clearInterval(snapshotPollTimer);
+    snapshotPollTimer = null;
+  }
+  if (snapshotDebounceTimer) {
+    window.clearTimeout(snapshotDebounceTimer);
+    snapshotDebounceTimer = null;
+  }
+  window.removeEventListener("resize", scheduleWindowStateSnapshot);
 }
 
 function snapshotWindowStateSync() {
@@ -71,4 +88,28 @@ function snapshotWindowStateSync() {
     xhr.open("GET", "/api/window/state/snapshot?name=" + encodeURIComponent(windowStateName()), false);
     xhr.send();
   } catch (_) {}
+}
+
+function scheduleWindowStateSnapshot() {
+  if (typeof invoke !== "function") return;
+  if (snapshotDebounceTimer) {
+    window.clearTimeout(snapshotDebounceTimer);
+  }
+  snapshotDebounceTimer = window.setTimeout(function () {
+    snapshotDebounceTimer = null;
+    invoke("/api/window/state/snapshot?name=" + encodeURIComponent(windowStateName()), { method: "GET" }).catch(function () {});
+  }, WINDOW_STATE_SNAPSHOT_DEBOUNCE);
+}
+
+function readWindowStateHint() {
+  return {
+    x: Math.round(Number(window.screenX ?? window.screenLeft ?? 0)),
+    y: Math.round(Number(window.screenY ?? window.screenTop ?? 0)),
+    width: Math.round(Number(window.outerWidth ?? window.innerWidth ?? 0)),
+    height: Math.round(Number(window.outerHeight ?? window.innerHeight ?? 0)),
+  };
+}
+
+function isSameWindowStateHint(a, b) {
+  return Boolean(a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
 }
