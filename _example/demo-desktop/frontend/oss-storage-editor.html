@@ -20,6 +20,10 @@
       --accent-strong: #08784f;
       --accent-soft: rgba(15, 159, 110, 0.12);
       --danger: #c93a32;
+      --font-root: 14px;
+      --font-sm: 0.9286rem;
+      --font-body: 1rem;
+      --font-3xl: 1.4286rem;
     }
 
     [data-theme="dark"] {
@@ -48,11 +52,15 @@
       overscroll-behavior: none;
     }
 
+    html {
+      font-size: var(--font-root);
+    }
+
     body {
       background: var(--background);
       color: var(--FG-0);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-size: var(--font-body);
     }
 
     button,
@@ -84,14 +92,14 @@
     }
 
     .editor-header h1 {
-      font-size: 20px;
+      font-size: var(--font-3xl);
       line-height: 1.2;
       margin: 0;
     }
 
     .editor-header p {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       margin: 4px 0 0;
     }
 
@@ -120,7 +128,7 @@
 
     .editor-section-title {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
     }
 
@@ -144,7 +152,7 @@
       align-items: center;
       color: var(--FG-1);
       display: flex;
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
       justify-content: space-between;
       min-height: 18px;
@@ -253,7 +261,7 @@
     .editor-message {
       color: var(--FG-1);
       flex: 1 1 220px;
-      font-size: 12px;
+      font-size: var(--font-sm);
       min-width: 0;
     }
 
@@ -451,6 +459,7 @@
         endpoint: "",
         forcePathStyle: true,
         id: "",
+        local: null,
         name: "",
         pathPrefix: "",
         provider: "s3",
@@ -652,21 +661,46 @@
       }
 
       function readForm() {
-        return {
+        var provider = form.elements.provider.value;
+        var endpoint = form.elements.endpoint.value.trim();
+        var storage = {
           accessKeyId: form.elements.accessKeyId.value.trim(),
           bucket: form.elements.bucket.value.trim(),
           enabled: false,
-          endpoint: form.elements.endpoint.value.trim(),
+          endpoint: endpoint,
           forcePathStyle: form.elements.forcePathStyle.checked,
           id: sanitizeStorageId(form.elements.storageId.value),
+          local: null,
           name: form.elements.name.value.trim(),
           pathPrefix: form.elements.pathPrefix.value.trim(),
-          provider: form.elements.provider.value,
+          provider: provider,
           publicBaseUrl: form.elements.publicBaseUrl.value.trim(),
           region: form.elements.region.value.trim(),
           secretAccessKey: form.elements.secretAccessKey.value,
           sessionToken: form.elements.sessionToken.value.trim(),
           useSSL: form.elements.useSSL.checked,
+        };
+        if (isLocalProvider(provider)) {
+          storage.local = localSettingsFromEndpoint(endpoint);
+        }
+        return storage;
+      }
+
+      function localSettingsFromEndpoint(endpoint) {
+        var current = normalizeLocalSettings(state.storage && state.storage.local);
+        var cleanEndpoint = String(endpoint || "").trim();
+        var currentEndpoint = String((state.storage && state.storage.endpoint) || "").trim();
+        if (current && current.rootMode === "vault") {
+          if (!cleanEndpoint || cleanEndpoint === currentEndpoint) {
+            return current;
+          }
+        }
+        if (!cleanEndpoint || cleanEndpoint === defaults.localRoot) {
+          return { root: "storage", rootMode: "vault" };
+        }
+        return {
+          root: cleanEndpoint,
+          rootMode: "absolute",
         };
       }
 
@@ -712,6 +746,7 @@
             endpoint: defaults.localRoot || "",
             forcePathStyle: true,
             id: uniqueStorageId(index === 1 ? "memo-local" : "local-" + bucket, ""),
+            local: { root: "storage", rootMode: "vault" },
             name: index === 1 ? "本地 Memo 存储" : "本地存储 " + index,
             provider: "local",
             useSSL: false,
@@ -777,7 +812,7 @@
         if (!config.name) labels.push("名称");
         if (!config.id) labels.push("Storage ID");
         if (!config.provider) labels.push("存储类型");
-        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
+        if (!config.endpoint && !(isLocalProvider(config.provider) && normalizeLocalSettings(config.local))) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
         if (!config.bucket) labels.push("Bucket");
         if (!isLocalProvider(config.provider)) {
           if (!config.accessKeyId) labels.push("Access Key ID");
@@ -831,6 +866,7 @@
           endpoint: String(raw.endpoint || "").trim(),
           forcePathStyle: raw.forcePathStyle !== false,
           id: sanitizeStorageId(raw.id || ""),
+          local: normalizeLocalSettings(raw.local),
           name: String(raw.name || "").trim(),
           pathPrefix: String(raw.pathPrefix || "").trim(),
           provider: String(raw.provider || "s3").trim() || "s3",
@@ -846,6 +882,7 @@
         return Boolean(config && typeof config === "object" && (
           config.enabled ||
           config.endpoint ||
+          config.local ||
           config.bucket ||
           config.accessKeyId ||
           config.secretAccessKey ||
@@ -862,6 +899,24 @@
           localRoot: String(raw.localRoot || "").trim(),
           memoBucket: String(raw.memoBucket || "memos").trim() || "memos",
         };
+      }
+
+      function normalizeLocalSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var root = String(raw.root || "").trim();
+        var rootMode = String(raw.rootMode || "").trim().toLowerCase();
+        if (!rootMode) {
+          if (!root) return null;
+          rootMode = root.charAt(0) === "/" || root.indexOf(":\\") === 1 || root.indexOf("~/") === 0 ? "absolute" : "vault";
+        }
+        if (rootMode === "vault") {
+          root = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") || "storage";
+          return { root: root, rootMode: "vault" };
+        }
+        if (rootMode === "absolute" && root) {
+          return { root: root, rootMode: "absolute" };
+        }
+        return null;
       }
 
       function sanitizeStorageId(value) {

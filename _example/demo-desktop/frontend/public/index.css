@@ -6,7 +6,12 @@ body {
   margin: 0;
 }
 
+html {
+  font-size: var(--font-root);
+}
+
 body {
+  font-size: var(--font-body);
   width: 100vw;
   height: 100vh;
   font-family:
@@ -56,6 +61,18 @@ ol {
   --danger: var(--RED);
   --muted: var(--FG-1);
   --text: var(--FG-0);
+  --font-root: 14px;
+  --font-2xs: 0.7143rem;
+  --font-xs: 0.8571rem;
+  --font-sm: 0.9286rem;
+  --font-md: 1rem;
+  --font-body: 1rem;
+  --font-lg: 1.0714rem;
+  --font-xl: 1.1429rem;
+  --font-1xl: 1.2143rem;
+  --font-2xl: 1.2857rem;
+  --font-3xl: 1.4286rem;
+  --font-display: 1.7143rem;
   --input-line-height: 1.55;
   --memo-accent: #0f9f6e;
   --memo-accent-strong: #08784f;
@@ -87,7 +104,7 @@ ol {
   color: var(--FG-0);
   counter-reset: memo-editor-line;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: var(--input-line-height);
   max-height: min(42vh, 360px);
   min-height: 120px;
@@ -115,7 +132,7 @@ ol {
   color: var(--FG-2);
   content: counter(memo-editor-line);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   left: -42px;
   line-height: var(--input-line-height);
@@ -145,7 +162,7 @@ ol {
   border-radius: 5px;
   color: #fff;
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 700;
   justify-content: center;
   letter-spacing: 0;
@@ -208,7 +225,7 @@ ol {
   color: var(--FG-0);
   display: inline-flex;
   font-family: system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 6px;
   line-height: 1.45;
   margin: 0 1px;
@@ -236,7 +253,7 @@ ol {
   border-radius: 4px;
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: var(--font-2xs);
   font-weight: 700;
   height: 18px;
   justify-content: center;
@@ -313,7 +330,7 @@ ol {
 
 .mini-editor .mini-markdown-block-image-caption {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.35;
 }
 
@@ -332,7 +349,7 @@ ol {
 }
 
 .mini-editor .mini-markdown-block-file-name {
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 650;
   line-height: 1.35;
   overflow: hidden;
@@ -342,7 +359,7 @@ ol {
 
 .mini-editor .mini-markdown-block-file-url {
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -549,7 +566,7 @@ ol {
   border-radius: 6px;
   color: var(--FG-0);
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 800;
   justify-content: center;
   min-height: 30px;
@@ -587,7 +604,7 @@ ol {
 .time-picker-label,
 .slash-command-label {
   color: var(--FG-0);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 700;
 }
 
@@ -600,7 +617,7 @@ ol {
 .time-picker-empty,
 .slash-command-empty {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .file-picker-empty,
@@ -784,7 +801,7 @@ body.is-fixed-window .memo-window-shell {
   border-radius: var(--memo-radius);
   color: var(--FG-1);
   display: flex;
-  font-size: 13px;
+  font-size: var(--font-md);
   justify-content: center;
   min-height: 180px;
   padding: 18px;
@@ -835,7 +852,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-brand-title {
   color: var(--FG-0);
-  font-size: 15px;
+  font-size: var(--font-lg);
   font-weight: 700;
   line-height: 1.1;
 }
@@ -852,7 +869,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-brand-subtitle {
-  font-size: 11px;
+  font-size: var(--font-xs);
   margin-top: 3px;
 }
 
@@ -907,7 +924,7 @@ body.is-fixed-window .memo-window-shell {
   background: var(--BG-3);
   border-radius: 999px;
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 800;
   line-height: 1;
   margin-left: auto;
@@ -952,7 +969,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-inspector-title {
   align-items: center;
   display: flex;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 700;
   justify-content: space-between;
   margin-bottom: 10px;
@@ -960,13 +977,27 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-inspector-title {
   color: var(--FG-0);
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
+.memo-project-list,
 .memo-tag-list,
 .memo-pinned-list {
   display: grid;
   gap: 6px;
+}
+
+.memo-project-create {
+  margin-top: 8px;
+}
+
+.memo-project-dot {
+  background: var(--project-color, var(--memo-blue));
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--project-color, var(--memo-blue)) 18%, transparent);
+  flex: 0 0 auto;
+  height: 10px;
+  width: 10px;
 }
 
 .memo-calendar {
@@ -990,13 +1021,13 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-calendar-title strong {
   color: var(--FG-0);
-  font-size: 14px;
+  font-size: var(--font-body);
   line-height: 1.25;
 }
 
 .memo-calendar-title span {
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1048,7 +1079,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-calendar-today,
 .memo-calendar-clear {
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 700;
   height: 30px;
   padding: 0 8px;
@@ -1066,7 +1097,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-calendar-weekdays {
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 800;
   text-align: center;
 }
@@ -1090,7 +1121,7 @@ body.is-fixed-window .memo-window-shell {
   border-radius: 0;
   color: var(--FG-0);
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 1px;
   min-height: 30px;
   min-width: 0;
@@ -1125,7 +1156,7 @@ body.is-fixed-window .memo-window-shell {
   background: var(--memo-accent);
   border-radius: 999px;
   color: #fff;
-  font-size: 9px;
+  font-size: var(--font-2xs);
   line-height: 1;
   min-width: 14px;
   padding: 2px 4px;
@@ -1157,7 +1188,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-pinned-content {
   color: var(--FG-0);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.5;
   max-height: 120px;
   overflow: hidden;
@@ -1184,18 +1215,18 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-pinned-content h1 {
-  font-size: 15px;
+  font-size: var(--font-lg);
 }
 
 .memo-pinned-content h2 {
-  font-size: 14px;
+  font-size: var(--font-body);
 }
 
 .memo-pinned-content h3,
 .memo-pinned-content h4,
 .memo-pinned-content h5,
 .memo-pinned-content h6 {
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .memo-pinned-content pre {
@@ -1218,19 +1249,29 @@ body.is-fixed-window .memo-window-shell {
 .memo-topbar {
   align-items: flex-start;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
   margin-bottom: 14px;
 }
 
 .memo-topbar h1 {
-  font-size: 24px;
+  font-size: var(--font-display);
   line-height: 1.1;
   margin: 0;
 }
 
 .memo-topbar p {
-  font-size: 13px;
+  font-size: var(--font-md);
   margin: 6px 0 0;
+}
+
+.memo-topbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .memo-icon-text-button,
@@ -1274,7 +1315,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-composer-title {
-  font-size: 14px;
+  font-size: var(--font-body);
   font-weight: 700;
 }
 
@@ -1406,7 +1447,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-inline-status-line {
   color: var(--FG-1);
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: var(--font-sm);
   min-height: 30px;
   min-width: 0;
 }
@@ -1586,12 +1627,12 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-author-name {
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 700;
 }
 
 .memo-author time {
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .memo-card-meta {
@@ -1622,7 +1663,7 @@ body.is-fixed-window .memo-window-shell {
   border-radius: 999px;
   color: var(--FG-1);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 4px;
   min-height: 24px;
   padding: 0 8px;
@@ -1642,7 +1683,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-content {
   color: var(--FG-0);
-  font-size: 14px;
+  font-size: var(--font-body);
   line-height: 1.62;
   overflow-wrap: anywhere;
 }
@@ -1683,7 +1724,7 @@ body.is-fixed-window .memo-window-shell {
   background: var(--BG-1);
   border: 1px solid var(--border);
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   min-height: 28px;
   padding: 0 9px;
   position: relative;
@@ -1722,7 +1763,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-line-number {
   color: var(--FG-2);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.62;
   pointer-events: none;
@@ -1775,28 +1816,28 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-content h1 {
-  font-size: 20px;
+  font-size: var(--font-3xl);
 }
 
 .memo-content h2 {
-  font-size: 18px;
+  font-size: var(--font-2xl);
 }
 
 .memo-content h3 {
-  font-size: 16px;
+  font-size: var(--font-xl);
 }
 
 .memo-content h4 {
-  font-size: 15px;
+  font-size: var(--font-lg);
 }
 
 .memo-content h5 {
-  font-size: 14px;
+  font-size: var(--font-body);
 }
 
 .memo-content h6 {
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
 }
 
 .memo-source-line.is-heading {
@@ -1904,7 +1945,7 @@ body.is-fixed-window .memo-window-shell {
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 650;
   gap: 5px;
   line-height: 1.3;
@@ -1923,7 +1964,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-ref-chip small {
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
 }
 
@@ -1968,7 +2009,7 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-0);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 700;
   min-width: 0;
   overflow: hidden;
@@ -1996,7 +2037,7 @@ body.is-fixed-window .memo-window-shell {
   display: inline-flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 6px;
   justify-content: flex-end;
 }
@@ -2007,7 +2048,7 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-1);
   display: flex;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 6px;
   min-height: 30px;
   padding: 5px 10px;
@@ -2026,7 +2067,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-ref-state {
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
   padding: 10px 12px;
 }
 
@@ -2041,6 +2082,41 @@ body.is-fixed-window .memo-window-shell {
   border-radius: 999px;
   color: var(--memo-blue);
   padding: 1px 6px;
+}
+
+.memo-time-token {
+  align-items: center;
+  background: var(--memo-accent-soft);
+  border: 1px solid var(--memo-accent-border);
+  border-radius: 6px;
+  color: var(--memo-accent-strong);
+  display: inline-flex;
+  font-size: var(--font-sm);
+  font-weight: 650;
+  gap: 5px;
+  line-height: 1.3;
+  margin: 0 1px;
+  max-width: min(260px, 100%);
+  padding: 2px 7px;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.memo-time-token svg {
+  fill: none;
+  flex: 0 0 auto;
+  height: 12px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 12px;
+}
+
+.memo-time-token span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .memo-markdown-gap {
@@ -2071,7 +2147,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-image-block figcaption {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.35;
 }
 
@@ -2110,7 +2186,7 @@ body.is-fixed-window .memo-window-shell {
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 650;
   gap: 4px;
   height: 28px;
@@ -2186,7 +2262,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-file-block-url {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2218,7 +2294,7 @@ body.is-fixed-window .memo-window-shell {
   align-items: center;
   color: var(--FG-1);
   display: flex;
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 800;
   justify-content: space-between;
   min-height: 28px;
@@ -2229,7 +2305,7 @@ body.is-fixed-window .memo-window-shell {
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--FG-1);
-  font-size: 11px;
+  font-size: var(--font-xs);
   line-height: 1;
   min-width: 24px;
   padding: 4px 7px;
@@ -2330,7 +2406,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-resource-url {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2396,13 +2472,13 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-todo-source-button span {
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 800;
 }
 
 .memo-todo-source-button strong {
   color: var(--FG-0);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2414,7 +2490,7 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-1);
   display: flex;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--font-sm);
   gap: 6px;
   justify-content: flex-end;
 }
@@ -2534,10 +2610,24 @@ body.is-fixed-window .memo-window-shell {
   border-radius: 999px;
   color: var(--memo-accent-strong);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--font-sm);
   justify-content: center;
   line-height: 24px;
   min-height: 24px;
+  padding: 0 8px;
+}
+
+.memo-project-badge {
+  align-items: center;
+  background: color-mix(in srgb, var(--project-color, var(--memo-blue)) 12%, var(--BG-1));
+  border: 1px solid color-mix(in srgb, var(--project-color, var(--memo-blue)) 28%, var(--border));
+  border-radius: 999px;
+  color: var(--FG-0);
+  display: inline-flex;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  line-height: 1;
+  min-height: 22px;
   padding: 0 8px;
 }
 
@@ -2576,12 +2666,12 @@ body.is-fixed-window .memo-window-shell {
 .memo-stat span {
   color: var(--FG-1);
   display: block;
-  font-size: 12px;
+  font-size: var(--font-sm);
 }
 
 .memo-stat strong {
   display: block;
-  font-size: 20px;
+  font-size: var(--font-3xl);
   line-height: 1.2;
   margin-top: 4px;
 }
@@ -2621,7 +2711,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-update-message,
 .memo-update-current {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.5;
 }
 
@@ -2632,7 +2722,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-update-version {
   color: var(--memo-accent-strong);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 700;
 }
 
@@ -2641,7 +2731,7 @@ body.is-fixed-window .memo-window-shell {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--FG-0);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.55;
   max-height: 160px;
   overflow: auto;
@@ -2663,7 +2753,7 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-empty-state h2 {
   color: var(--FG-0);
-  font-size: 16px;
+  font-size: var(--font-xl);
   margin: 0;
 }
 
@@ -2726,14 +2816,14 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-delete-head h2 {
-  font-size: 17px;
+  font-size: var(--font-1xl);
   line-height: 1.25;
   margin: 0;
 }
 
 .memo-delete-head p {
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.45;
   margin: 4px 0 0;
   overflow-wrap: anywhere;
@@ -2769,13 +2859,13 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-delete-option strong {
-  font-size: 13px;
+  font-size: var(--font-md);
   line-height: 1.35;
 }
 
 .memo-delete-option small {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.35;
 }
 
@@ -2805,6 +2895,154 @@ body.is-fixed-window .memo-window-shell {
 .memo-toast.is-visible {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+body.memo-slim-page {
+  background: var(--BG-0);
+  color: var(--FG-0);
+}
+
+.memo-slim-shell {
+  background: var(--BG-0);
+  color: var(--FG-0);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.memo-slim-form {
+  background: var(--BG-2);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  min-width: 0;
+  position: relative;
+}
+
+.memo-slim-input {
+  background: transparent;
+  border: 0;
+  color: var(--FG-0);
+  display: block;
+  font: inherit;
+  line-height: 1.5;
+  max-height: 34vh;
+  min-height: 112px;
+  outline: 0;
+  overflow-wrap: anywhere;
+  padding: 16px 56px 16px 16px;
+  resize: vertical;
+  width: 100%;
+  word-break: break-word;
+}
+
+.memo-slim-input::placeholder {
+  color: var(--FG-2);
+}
+
+.memo-slim-submit {
+  align-items: center;
+  background: var(--memo-accent);
+  border: 1px solid var(--memo-accent);
+  border-radius: 6px;
+  bottom: 12px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 12px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease;
+  width: 34px;
+}
+
+.memo-slim-submit:hover {
+  background: var(--memo-accent-strong);
+  border-color: var(--memo-accent-strong);
+}
+
+.memo-slim-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.memo-slim-submit svg {
+  display: inline-block;
+  fill: none;
+  height: 16px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 16px;
+}
+
+.memo-slim-list {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 18px;
+}
+
+.memo-slim-item {
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 13px 16px 14px;
+}
+
+.memo-slim-item.is-pinned {
+  background: var(--memo-accent-soft);
+}
+
+.memo-slim-meta {
+  align-items: center;
+  color: var(--FG-1);
+  display: flex;
+  font-size: var(--font-sm);
+  gap: 8px;
+  min-width: 0;
+}
+
+.memo-slim-pin {
+  color: var(--memo-accent-strong);
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.memo-slim-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-slim-content {
+  color: var(--FG-0);
+  font-size: var(--font-body);
+  line-height: 1.55;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memo-slim-state {
+  align-items: center;
+  color: var(--FG-1);
+  display: flex;
+  font-size: var(--font-md);
+  justify-content: center;
+  min-height: 180px;
+  padding: 18px;
+  text-align: center;
 }
 
 .vault-picker-page {
@@ -2838,7 +3076,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .vault-picker-header h1 {
-  font-size: 24px;
+  font-size: var(--font-display);
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.2;
@@ -2847,7 +3085,7 @@ body.is-fixed-window .memo-window-shell {
 
 .vault-picker-header p {
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
   margin: 4px 0 0;
 }
 
@@ -2890,13 +3128,13 @@ body.is-fixed-window .memo-window-shell {
 .vault-picker-meta span,
 .vault-picker-section-title {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-weight: 700;
 }
 
 .vault-picker-meta strong {
   color: var(--FG-0);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -2913,7 +3151,7 @@ body.is-fixed-window .memo-window-shell {
   border: 1px solid var(--FG-4);
   border-radius: 8px;
   color: var(--FG-0);
-  font-size: 14px;
+  font-size: var(--font-body);
   height: 42px;
   min-width: 0;
   outline: none;
@@ -2939,7 +3177,7 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-0);
   cursor: pointer;
   display: inline-flex;
-  font-size: 14px;
+  font-size: var(--font-body);
   font-weight: 650;
   gap: 8px;
   height: 42px;
@@ -3004,7 +3242,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .vault-picker-item-copy strong {
-  font-size: 14px;
+  font-size: var(--font-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3012,7 +3250,7 @@ body.is-fixed-window .memo-window-shell {
 
 .vault-picker-item-copy small {
   color: var(--FG-1);
-  font-size: 12px;
+  font-size: var(--font-sm);
   overflow-wrap: anywhere;
 }
 
@@ -3020,14 +3258,14 @@ body.is-fixed-window .memo-window-shell {
   border: 1px dashed var(--FG-4);
   border-radius: 8px;
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
   padding: 16px;
   text-align: center;
 }
 
 .vault-picker-message {
   color: var(--FG-1);
-  font-size: 13px;
+  font-size: var(--font-md);
   min-height: 20px;
   padding-top: 14px;
 }
@@ -3116,6 +3354,15 @@ body.is-fixed-window .memo-window-shell {
 
   .memo-card-meta {
     justify-content: flex-end;
+  }
+
+  .memo-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .memo-topbar-actions {
+    justify-content: flex-start;
   }
 
   .memo-composer-actions {

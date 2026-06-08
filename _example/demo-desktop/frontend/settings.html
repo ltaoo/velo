@@ -23,6 +23,14 @@
       --accent-soft: rgba(15, 159, 110, 0.12);
       --danger: #c93a32;
       --danger-soft: rgba(201, 58, 50, 0.1);
+      --font-root: 14px;
+      --font-xs: 0.8571rem;
+      --font-sm: 0.9286rem;
+      --font-md: 1rem;
+      --font-body: 1rem;
+      --font-2xl: 1.2857rem;
+      --font-3xl: 1.4286rem;
+      --font-title: 1.5714rem;
     }
 
     [data-theme="dark"] {
@@ -54,11 +62,15 @@
       overscroll-behavior: none;
     }
 
+    html {
+      font-size: var(--font-root);
+    }
+
     body {
       background: var(--background);
       color: var(--FG-0);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-size: var(--font-body);
     }
 
     button,
@@ -94,14 +106,14 @@
     }
 
     .settings-title {
-      font-size: 18px;
+      font-size: var(--font-2xl);
       font-weight: 700;
       line-height: 1.2;
     }
 
     .settings-subtitle {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       margin-top: 4px;
     }
 
@@ -160,14 +172,14 @@
     }
 
     .settings-header h1 {
-      font-size: 22px;
+      font-size: var(--font-title);
       line-height: 1.2;
       margin: 0;
     }
 
     .settings-header p {
       color: var(--FG-1);
-      font-size: 13px;
+      font-size: var(--font-md);
       margin: 5px 0 0;
     }
 
@@ -227,7 +239,7 @@
 
     .settings-profile-title {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
     }
 
@@ -302,7 +314,7 @@
 
     .settings-storage-item-meta {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -312,7 +324,7 @@
       background: var(--accent-soft);
       border-radius: 999px;
       color: var(--accent-strong);
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
       padding: 3px 8px;
       white-space: nowrap;
@@ -325,7 +337,7 @@
     }
 
     .settings-section-title {
-      font-size: 14px;
+      font-size: var(--font-body);
       font-weight: 700;
     }
 
@@ -349,7 +361,7 @@
       align-items: center;
       color: var(--FG-1);
       display: flex;
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
       justify-content: space-between;
       min-height: 18px;
@@ -469,7 +481,7 @@
     .settings-message {
       color: var(--FG-1);
       flex: 1 1 220px;
-      font-size: 12px;
+      font-size: var(--font-sm);
       min-width: 0;
     }
 
@@ -492,7 +504,7 @@
 
     .settings-info-label {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
       font-weight: 700;
     }
 
@@ -531,7 +543,7 @@
     .settings-update-message,
     .settings-update-current {
       color: var(--FG-1);
-      font-size: 12px;
+      font-size: var(--font-sm);
     }
 
     .settings-update-release {
@@ -1195,7 +1207,7 @@
         if (!config.name) labels.push("名称");
         if (!config.id) labels.push("Storage ID");
         if (!config.provider) labels.push("存储类型");
-        if (!config.endpoint) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
+        if (!config.endpoint && !(isLocalProvider(config.provider) && normalizeLocalSettings(config.local))) labels.push(isLocalProvider(config.provider) ? "本地根目录" : "Endpoint");
         if (!config.bucket) labels.push("Bucket");
         if (!isLocalProvider(config.provider)) {
           if (!config.accessKeyId) labels.push("Access Key ID");
@@ -1210,6 +1222,7 @@
           config.id,
           config.name,
           config.endpoint,
+          config.local,
           config.bucket,
           config.accessKeyId,
           config.secretAccessKey,
@@ -1265,6 +1278,7 @@
           endpoint: String(raw.endpoint || "").trim(),
           forcePathStyle: raw.forcePathStyle !== false,
           id: sanitizeStorageId(raw.id || ""),
+          local: normalizeLocalSettings(raw.local),
           name: String(raw.name || "").trim(),
           pathPrefix: String(raw.pathPrefix || "").trim(),
           provider: String(raw.provider || "s3").trim() || "s3",
@@ -1280,6 +1294,7 @@
         return Boolean(config && typeof config === "object" && (
           config.enabled ||
           config.endpoint ||
+          config.local ||
           config.bucket ||
           config.accessKeyId ||
           config.secretAccessKey ||
@@ -1322,6 +1337,24 @@
       function isLocalProvider(provider) {
         var value = String(provider || "").trim().toLowerCase();
         return value === "local" || value === "local-oss";
+      }
+
+      function normalizeLocalSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var root = String(raw.root || "").trim();
+        var rootMode = String(raw.rootMode || "").trim().toLowerCase();
+        if (!rootMode) {
+          if (!root) return null;
+          rootMode = root.charAt(0) === "/" || root.indexOf(":\\") === 1 || root.indexOf("~/") === 0 ? "absolute" : "vault";
+        }
+        if (rootMode === "vault") {
+          root = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") || "storage";
+          return { root: root, rootMode: "vault" };
+        }
+        if (rootMode === "absolute" && root) {
+          return { root: root, rootMode: "absolute" };
+        }
+        return null;
       }
 
       function setMessage(text, tone) {

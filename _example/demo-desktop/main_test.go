@@ -142,6 +142,62 @@ func TestCreateVaultMemoPreservesBlankLines(t *testing.T) {
 	}
 }
 
+func TestCreateVaultMemoCanBelongToProject(t *testing.T) {
+	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if existing {
+		t.Fatalf("new temp vault should not be existing")
+	}
+
+	project, err := createVaultProject(ctx, ProjectCreateRequest{Name: "Work", Color: "#10b981"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "project memo",
+		ProjectID:  project.ID,
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	if memo.ProjectID != project.ID {
+		t.Fatalf("memo project id = %q, want %q", memo.ProjectID, project.ID)
+	}
+
+	path := filepath.Join(ctx.RootDir, filepath.FromSlash(memo.Path))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read memo file: %v", err)
+	}
+	if !strings.Contains(string(raw), "projectId: \""+project.ID+"\"") {
+		t.Fatalf("memo file missing projectId:\n%s", string(raw))
+	}
+
+	listed, err := listVaultMemos(ctx)
+	if err != nil {
+		t.Fatalf("list memos: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ProjectID != project.ID {
+		t.Fatalf("listed memos = %#v, want project %s", listed, project.ID)
+	}
+}
+
+func TestCreateVaultMemoRejectsUnknownProject(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if _, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:   "orphan",
+		ProjectID: "project_missing",
+	}); err == nil {
+		t.Fatalf("expected unknown project error")
+	}
+}
+
 func TestExtractMemoAssetReferences(t *testing.T) {
 	content := strings.Join([]string{
 		"![image](@assets/memo-local/images/a%29.png)",
@@ -357,7 +413,121 @@ func TestPrepareCloudStorageSettingsRepointsLegacyLocalRoot(t *testing.T) {
 	if got.Storages[0].Endpoint != wantEndpoint {
 		t.Fatalf("endpoint = %q, want %q", got.Storages[0].Endpoint, wantEndpoint)
 	}
+	if got.Storages[0].Local == nil || got.Storages[0].Local.RootMode != localStorageRootModeVault || got.Storages[0].Local.Root != defaultLocalStorageRelativeRoot {
+		t.Fatalf("local settings = %#v, want vault storage", got.Storages[0].Local)
+	}
 	if _, err := os.Stat(filepath.Join(wantEndpoint, "memos")); err != nil {
 		t.Fatalf("local bucket was not created under vault storage: %v", err)
+	}
+}
+
+func TestPrepareCloudStorageSettingsResolvesSyncedLocalRootForCurrentVault(t *testing.T) {
+	sourceVaultDir := t.TempDir()
+	targetVaultDir := t.TempDir()
+	sourceStorePath := filepath.Join(sourceVaultDir, ".velo", "storage.json")
+	targetStorePath := filepath.Join(targetVaultDir, ".velo", "storage.json")
+	settings := CloudStorageSettings{
+		ActiveStorageID:     "attachments",
+		DefaultsInitialized: true,
+		Storages: []OSSConfig{
+			{
+				Bucket:         "files",
+				Enabled:        true,
+				Endpoint:       defaultLocalStorageRoot(sourceStorePath),
+				ForcePathStyle: true,
+				ID:             "attachments",
+				Name:           "Attachments",
+				Provider:       "local",
+				UseSSL:         false,
+			},
+		},
+	}
+
+	got, changed, err := prepareCloudStorageSettings(settings, targetStorePath, false)
+	if err != nil {
+		t.Fatalf("prepareCloudStorageSettings: %v", err)
+	}
+	if !changed {
+		t.Fatalf("prepareCloudStorageSettings changed = false, want true")
+	}
+	if len(got.Storages) != 1 {
+		t.Fatalf("storages length = %d, want 1", len(got.Storages))
+	}
+	wantEndpoint := filepath.Join(targetVaultDir, "storage")
+	if got.Storages[0].Endpoint != wantEndpoint {
+		t.Fatalf("endpoint = %q, want %q", got.Storages[0].Endpoint, wantEndpoint)
+	}
+	if got.Storages[0].Local == nil || got.Storages[0].Local.RootMode != localStorageRootModeVault || got.Storages[0].Local.Root != defaultLocalStorageRelativeRoot {
+		t.Fatalf("local settings = %#v, want vault storage", got.Storages[0].Local)
+	}
+	if _, err := os.Stat(filepath.Join(wantEndpoint, "files")); err != nil {
+		t.Fatalf("local bucket was not created under target vault storage: %v", err)
+	}
+
+	raw, err := marshalCloudStorageSettingsForStore(got)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	text := string(raw)
+	if strings.Contains(text, sourceVaultDir) || strings.Contains(text, targetVaultDir) {
+		t.Fatalf("stored settings should not include machine-specific vault paths: %s", text)
+	}
+	var stored CloudStorageSettings
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	if stored.Storages[0].Endpoint != "" {
+		t.Fatalf("stored endpoint = %q, want empty portable endpoint", stored.Storages[0].Endpoint)
+	}
+	if stored.Storages[0].Local == nil || stored.Storages[0].Local.RootMode != localStorageRootModeVault || stored.Storages[0].Local.Root != defaultLocalStorageRelativeRoot {
+		t.Fatalf("stored local settings = %#v, want vault storage", stored.Storages[0].Local)
+	}
+}
+
+func TestPrepareCloudStorageSettingsKeepsCustomLocalAbsoluteRoot(t *testing.T) {
+	vaultDir := t.TempDir()
+	storePath := filepath.Join(vaultDir, ".velo", "storage.json")
+	customRoot := filepath.Join(t.TempDir(), "asset-root")
+	settings := CloudStorageSettings{
+		ActiveStorageID:     "custom-local",
+		DefaultsInitialized: true,
+		Storages: []OSSConfig{
+			{
+				Bucket:         "files",
+				Enabled:        true,
+				Endpoint:       customRoot,
+				ForcePathStyle: true,
+				ID:             "custom-local",
+				Name:           "Custom Local",
+				Provider:       "local",
+				UseSSL:         false,
+			},
+		},
+	}
+
+	got, _, err := prepareCloudStorageSettings(settings, storePath, false)
+	if err != nil {
+		t.Fatalf("prepareCloudStorageSettings: %v", err)
+	}
+	if got.Storages[0].Endpoint != customRoot {
+		t.Fatalf("endpoint = %q, want custom root %q", got.Storages[0].Endpoint, customRoot)
+	}
+	if got.Storages[0].Local == nil || got.Storages[0].Local.RootMode != localStorageRootModeAbsolute || got.Storages[0].Local.Root != customRoot {
+		t.Fatalf("local settings = %#v, want absolute custom root", got.Storages[0].Local)
+	}
+
+	raw, err := marshalCloudStorageSettingsForStore(got)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var stored CloudStorageSettings
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored settings: %v", err)
+	}
+	if stored.Storages[0].Endpoint != customRoot {
+		t.Fatalf("stored endpoint = %q, want custom root %q", stored.Storages[0].Endpoint, customRoot)
+	}
+	if stored.Storages[0].Local == nil || stored.Storages[0].Local.RootMode != localStorageRootModeAbsolute || stored.Storages[0].Local.Root != customRoot {
+		t.Fatalf("stored local settings = %#v, want absolute custom root", stored.Storages[0].Local)
 	}
 }

@@ -5,8 +5,7 @@
     "description": "A desktop application built with Velo",
     "version": "1.0.0",
     "author": "Author",
-    "icon": "assets/appicon.png",
-    "tray_icon": "assets/appicon.png"
+    "icon": "assets/appicon.png"
   },
   "binary": {
     "project_name": "myapp"

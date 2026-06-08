@@ -1,6 +1,8 @@
 const MEMOS_STORAGE_KEY = "demo-desktop:memos:items:v1";
 const DRAFT_STORAGE_KEY = "demo-desktop:memos:draft:v1";
 const CLOUD_STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
+const PROJECTS_STORAGE_KEY = "demo-desktop:memos:projects:v1";
+const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
 const DEFAULT_VISIBILITY = "PRIVATE";
 const TASK_LINE_REGEX = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/;
 const CALENDAR_WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -82,12 +84,17 @@ export function mountMemosHome(root) {
     calendarMonth: startOfMonth(new Date()),
     editingId: "",
     editDraft: "",
+    editProjectId: "",
     editVisibility: DEFAULT_VISIBILITY,
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
+    activeProjectFilter: "all",
+    composerProjectId: localStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "",
+    lastComposerProjectId: localStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "",
     memoRefIndex: null,
     memos: loadMemos(),
+    projects: loadProjects(),
     query: "",
     selectedCalendarDate: "",
     sortDesc: true,
@@ -116,6 +123,9 @@ export function mountMemosHome(root) {
     mainTitle: root.querySelector("[data-main-title]"),
     memoList: root.querySelector("[data-memo-list]"),
     pinnedList: root.querySelector("[data-pinned-list]"),
+    projectList: root.querySelector("[data-project-list]"),
+    projectSelect: root.querySelector("[data-project-select]"),
+    projectSummary: root.querySelector("[data-project-summary]"),
     searchInput: root.querySelector("[data-search-input]"),
     stats: root.querySelector("[data-stats]"),
     tagList: root.querySelector("[data-tag-list]"),
@@ -143,6 +153,7 @@ export function mountMemosHome(root) {
   renderAll();
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
+  refreshProjectsFromVault();
   refreshMemosFromVault();
   refreshStorageForRender();
   window.addEventListener("focus", refreshStorageForRender);
@@ -216,6 +227,12 @@ export function mountMemosHome(root) {
       return;
     }
 
+    const projectFilter = closestElement(event.target, "[data-project-filter]");
+    if (projectFilter && root.contains(projectFilter)) {
+      selectProjectFilter(projectFilter.dataset.projectFilter || "all");
+      return;
+    }
+
     const tag = closestElement(event.target, "[data-tag]");
     if (tag && root.contains(tag)) {
       state.activeTag = state.activeTag === tag.dataset.tag ? "" : tag.dataset.tag;
@@ -268,6 +285,8 @@ export function mountMemosHome(root) {
       case "clearFilters":
         state.activeFilter = "all";
         state.activeTag = "";
+        state.activeProjectFilter = "all";
+        state.composerProjectId = state.lastComposerProjectId || "";
         state.query = "";
         state.selectedCalendarDate = "";
         els.searchInput.value = "";
@@ -281,6 +300,9 @@ export function mountMemosHome(root) {
         break;
       case "createMemo":
         createMemo();
+        break;
+      case "createProject":
+        createProjectFromPrompt();
         break;
       case "deleteMemo":
         deleteMemo(memoId);
@@ -296,6 +318,9 @@ export function mountMemosHome(root) {
         break;
       case "openSettings":
         openSettings();
+        break;
+      case "openSlimMemos":
+        openSlimMemos();
         break;
       case "openSourceMemo":
         openSourceMemo(memoId);
@@ -406,6 +431,28 @@ export function mountMemosHome(root) {
     );
   }
 
+  function openSlimMemos() {
+    if (typeof invoke !== "function") {
+      window.open("memo-slim.html", "_blank", "noopener");
+      return;
+    }
+
+    invoke("/api/open_window?pathname=%2Fmemo-slim", { method: "GET" }).then(
+      function (resp) {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开精简版失败");
+          return;
+        }
+        invoke("__velo/window/close", { args: {} }).catch(function () {
+          window.close();
+        });
+      },
+      function (err) {
+        showToast("打开精简版失败: " + err);
+      },
+    );
+  }
+
   function detachMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
@@ -445,6 +492,7 @@ export function mountMemosHome(root) {
     state.activeView = "memos";
     state.activeFilter = memo.archived ? "archive" : "all";
     state.activeTag = "";
+    state.activeProjectFilter = "all";
     state.editingId = "";
     state.query = "";
     state.selectedCalendarDate = "";
@@ -468,6 +516,27 @@ export function mountMemosHome(root) {
     focusMemo(memoId);
   }
 
+  function selectProjectFilter(value) {
+    const next = normalizeProjectFilter(value);
+    state.activeProjectFilter = next;
+    state.activeTag = "";
+    state.selectedCalendarDate = "";
+    if (next === "unassigned") {
+      state.composerProjectId = "";
+    } else if (next !== "all") {
+      state.composerProjectId = next;
+      rememberComposerProject(next);
+    } else {
+      state.composerProjectId = state.lastComposerProjectId || "";
+    }
+    renderAll();
+  }
+
+  function rememberComposerProject(projectId) {
+    state.lastComposerProjectId = projectId || "";
+    localStorage.setItem(LAST_PROJECT_STORAGE_KEY, state.lastComposerProjectId);
+  }
+
   function handleInput(event) {
     if (event.target.matches("[data-search-input]")) {
       state.query = event.target.value.trim();
@@ -481,8 +550,20 @@ export function mountMemosHome(root) {
       return;
     }
 
+    if (event.target.matches("[data-project-select]")) {
+      state.composerProjectId = normalizeProjectID(event.target.value);
+      rememberComposerProject(state.composerProjectId);
+      renderComposerProjectSelect();
+      return;
+    }
+
     if (event.target.matches("[data-edit-visibility]")) {
       state.editVisibility = event.target.value;
+      return;
+    }
+
+    if (event.target.matches("[data-edit-project]")) {
+      state.editProjectId = normalizeProjectID(event.target.value);
       return;
     }
 
@@ -550,10 +631,12 @@ export function mountMemosHome(root) {
 
     state.saving = true;
     renderComposerStatus(content);
-    createMemoInVault(content, state.visibility).then(
+    createMemoInVault(content, state.visibility, state.composerProjectId).then(
       function (memo) {
-        state.memos = [normalizeMemoPayload(memo)].filter(Boolean).concat(state.memos);
+        const normalized = normalizeMemoPayload(memo);
+        state.memos = [normalized].filter(Boolean).concat(state.memos);
         saveMemos(state.memos);
+        rememberComposerProject(state.composerProjectId);
         composerEditor.setText("");
         localStorage.removeItem(DRAFT_STORAGE_KEY);
         state.activeView = "memos";
@@ -562,7 +645,7 @@ export function mountMemosHome(root) {
         state.selectedCalendarDate = "";
         renderAll();
         renderComposerStatus("");
-        showToast("已发布");
+        showToast("已发布到 " + projectLabel(normalized && normalized.projectId));
         window.requestAnimationFrame(() => {
           if (composerEditor && els.composerHost.isConnected) composerEditor.focus();
         });
@@ -581,6 +664,7 @@ export function mountMemosHome(root) {
     if (!memo) return;
     state.editingId = memoId;
     state.editDraft = memo.content;
+    state.editProjectId = memo.projectId || "";
     state.editVisibility = memo.visibility || DEFAULT_VISIBILITY;
     renderFeed();
   }
@@ -613,6 +697,7 @@ export function mountMemosHome(root) {
     state.editDraft = "";
     updateMemo(memoId, {
       content,
+      projectId: state.editProjectId,
       updatedAt: new Date().toISOString(),
       visibility: state.editVisibility,
     });
@@ -717,7 +802,7 @@ export function mountMemosHome(root) {
     const todoLines = lines.filter((line) => parseTaskLine(line));
     const content = todoLines.join("\n").trim();
     if (!content) return Promise.resolve(null);
-    return createMemoInVault(content, memo.visibility || DEFAULT_VISIBILITY).then(function (created) {
+    return createMemoInVault(content, memo.visibility || DEFAULT_VISIBILITY, memo.projectId || "").then(function (created) {
       const normalized = normalizeMemoPayload(created);
       if (!normalized) throw new Error("无法创建 todo memo");
       return normalized;
@@ -892,6 +977,8 @@ export function mountMemosHome(root) {
   function renderAll() {
     state.memoRefIndex = buildMemoReferenceIndex(state.memos);
     renderMainChrome();
+    renderProjects();
+    renderComposerProjectSelect();
     renderViewButtons();
     renderFilterButtons();
     renderCalendar();
@@ -927,13 +1014,34 @@ export function mountMemosHome(root) {
     }
   }
 
+  function renderProjects() {
+    if (!els.projectList) return;
+    const activeProjects = state.projects.filter((project) => !project.archived);
+    const unassignedCount = state.memos.filter((memo) => !memo.projectId && !memo.archived).length;
+    els.projectSummary.textContent = activeProjects.length ? `${activeProjects.length} 个项目` : "暂无项目";
+    els.projectList.innerHTML = [
+      projectFilterTemplate("all", "全部", state.memos.filter((memo) => !memo.archived).length, "", state.activeProjectFilter),
+      projectFilterTemplate("unassigned", "未归属", unassignedCount, "", state.activeProjectFilter),
+      ...activeProjects.map((project) =>
+        projectFilterTemplate(project.id, project.name, projectMemoCount(project.id), project.color, state.activeProjectFilter),
+      ),
+    ].join("");
+  }
+
+  function renderComposerProjectSelect() {
+    if (!els.projectSelect) return;
+    els.projectSelect.innerHTML = projectOptionsTemplate(state.projects, state.composerProjectId);
+    els.projectSelect.value = state.composerProjectId || "";
+  }
+
   function renderViewButtons() {
     root.querySelectorAll("[data-view]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.view === state.activeView);
     });
-    const todoStats = getTodoStats(state.memos);
-    const linkCount = collectLinks(state.memos).length;
-    const resourceCount = collectResources(state.memos).length;
+    const memos = scopedMemos();
+    const todoStats = getTodoStats(memos);
+    const linkCount = collectLinks(memos).length;
+    const resourceCount = collectResources(memos).length;
     els.todoNavCount.textContent = todoStats.open ? String(todoStats.open) : "";
     els.linkNavCount.textContent = linkCount ? String(linkCount) : "";
     els.fileNavCount.textContent = resourceCount ? String(resourceCount) : "";
@@ -949,17 +1057,18 @@ export function mountMemosHome(root) {
   }
 
   function renderCalendar() {
-    els.calendar.innerHTML = calendarTemplate(state.calendarMonth, state.memos, state.selectedCalendarDate);
+    els.calendar.innerHTML = calendarTemplate(state.calendarMonth, scopedMemos(), state.selectedCalendarDate);
   }
 
   function renderStats() {
-    const active = state.memos.filter((memo) => !memo.archived);
-    const archived = state.memos.length - active.length;
+    const memos = scopedMemos();
+    const active = memos.filter((memo) => !memo.archived);
+    const archived = memos.length - active.length;
     const publicCount = active.filter((memo) => memo.visibility === "PUBLIC").length;
     const tags = collectTags(active);
-    const todoStats = getTodoStats(state.memos);
-    const linkCount = collectLinks(state.memos).length;
-    const resourceStats = getResourceStats(state.memos);
+    const todoStats = getTodoStats(memos);
+    const linkCount = collectLinks(memos).length;
+    const resourceStats = getResourceStats(memos);
 
     els.stats.innerHTML = [
       statTemplate("全部", active.length),
@@ -975,7 +1084,7 @@ export function mountMemosHome(root) {
   }
 
   function renderTags() {
-    const tags = collectTags(state.memos.filter((memo) => !memo.archived));
+    const tags = collectTags(scopedMemos().filter((memo) => !memo.archived));
     els.tagSummary.textContent = tags.length ? `${tags.length} 个标签` : "暂无标签";
     els.tagList.innerHTML = tags.length
       ? tags
@@ -992,7 +1101,7 @@ export function mountMemosHome(root) {
   }
 
   function renderPinned() {
-    const pinned = state.memos.filter((memo) => memo.pinned && !memo.archived).slice(0, 3);
+    const pinned = scopedMemos().filter((memo) => memo.pinned && !memo.archived).slice(0, 3);
     els.pinnedList.innerHTML = pinned.length
       ? pinned
           .map(
@@ -1017,7 +1126,7 @@ export function mountMemosHome(root) {
     els.feedCount.textContent = `${memos.length} 条`;
     els.memoList.innerHTML = memos.length
       ? memos
-          .map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id), state.expandedMemoIds.has(memo.id)))
+          .map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id), state.expandedMemoIds.has(memo.id), state.projects))
           .join("")
       : emptyFeedTemplate();
 
@@ -1080,8 +1189,8 @@ export function mountMemosHome(root) {
     els.feedCount.textContent = todos.length ? `${openTodos.length} 未完成 / ${todos.length} 项` : "0 项";
     els.memoList.innerHTML = todos.length
       ? [
-          todoGroupTemplate("未完成", openTodos, (todo) => memoRenderContext(todo.memoId, { readonly: true })),
-          todoGroupTemplate("已完成", doneTodos, (todo) => memoRenderContext(todo.memoId, { readonly: true })),
+          todoGroupTemplate("未完成", openTodos, (todo) => memoRenderContext(todo.memoId, { readonly: true }), state.projects),
+          todoGroupTemplate("已完成", doneTodos, (todo) => memoRenderContext(todo.memoId, { readonly: true }), state.projects),
         ].join("")
       : emptyTodosTemplate();
   }
@@ -1125,6 +1234,46 @@ export function mountMemosHome(root) {
     els.createButton.disabled = chars === 0 || state.saving;
   }
 
+  function refreshProjectsFromVault() {
+    loadProjectsFromVault().then(
+      function (payload) {
+        state.projects = payload.projects.map(normalizeProjectPayload).filter(Boolean);
+        saveProjects(state.projects);
+        if (payload.activeProjectId && state.activeProjectFilter === "all") {
+          state.composerProjectId = payload.activeProjectId;
+          rememberComposerProject(payload.activeProjectId);
+        }
+        renderAll();
+      },
+      function (err) {
+        showToast("读取 project 失败: " + errorMessage(err));
+      },
+    );
+  }
+
+  function createProjectFromPrompt() {
+    const name = window.prompt("Project 名称");
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      showToast("Project 名称不能为空");
+      return;
+    }
+    createProjectInVault(trimmed).then(
+      function (project) {
+        const normalized = normalizeProjectPayload(project);
+        if (!normalized) return;
+        state.projects = state.projects.concat(normalized);
+        saveProjects(state.projects);
+        selectProjectFilter(normalized.id);
+        showToast("已创建 Project");
+      },
+      function (err) {
+        showToast("创建 Project 失败: " + errorMessage(err));
+      },
+    );
+  }
+
   function refreshMemosFromVault() {
     loadMemosFromVault().then(
       function (memos) {
@@ -1140,7 +1289,7 @@ export function mountMemosHome(root) {
 
   function visibleMemos() {
     const query = state.query.toLowerCase();
-    return state.memos
+    return scopedMemos()
       .filter((memo) => {
         if (state.activeFilter === "archive") return memo.archived;
         if (memo.archived) return false;
@@ -1161,7 +1310,7 @@ export function mountMemosHome(root) {
 
   function visibleTodos() {
     const query = state.query.toLowerCase();
-    return collectTodos(state.memos)
+    return collectTodos(scopedMemos())
       .filter((todo) => {
         if (state.activeTag && !extractTags(todo.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -1177,7 +1326,7 @@ export function mountMemosHome(root) {
 
   function visibleLinks() {
     const query = state.query.toLowerCase();
-    return collectLinks(state.memos)
+    return collectLinks(scopedMemos())
       .filter((link) => {
         if (state.activeTag && !extractTags(link.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -1188,13 +1337,34 @@ export function mountMemosHome(root) {
 
   function visibleResources() {
     const query = state.query.toLowerCase();
-    return collectResources(state.memos)
+    return collectResources(scopedMemos())
       .filter((resource) => {
         if (state.activeTag && !extractTags(resource.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
         return `${resource.label} ${resource.url} ${resource.sourceText} ${resource.memo.content} ${resource.memo.visibility} ${resource.type}`.toLowerCase().includes(query);
       })
       .sort((a, b) => sortMemoReference(a, b, state.sortDesc));
+  }
+
+  function scopedMemos() {
+    if (state.activeProjectFilter === "unassigned") {
+      return state.memos.filter((memo) => !memo.projectId);
+    }
+    if (state.activeProjectFilter && state.activeProjectFilter !== "all") {
+      return state.memos.filter((memo) => memo.projectId === state.activeProjectFilter);
+    }
+    return state.memos;
+  }
+
+  function projectMemoCount(projectId) {
+    return state.memos.filter((memo) => memo.projectId === projectId && !memo.archived).length;
+  }
+
+  function projectLabel(projectId) {
+    projectId = normalizeProjectID(projectId);
+    if (!projectId) return "未归属";
+    const project = state.projects.find((item) => item.id === projectId);
+    return project ? project.name : "未知 Project";
   }
 
   function findMemo(memoId) {
@@ -1649,9 +1819,41 @@ function normalizeMemoPayload(memo) {
     createdAt: memo.createdAt || new Date().toISOString(),
     id,
     pinned: Boolean(memo.pinned),
+    projectId: normalizeProjectID(memo.projectId),
     updatedAt: memo.updatedAt || "",
     visibility: memo.visibility || DEFAULT_VISIBILITY,
   };
+}
+
+function normalizeProjectPayload(project) {
+  if (!project || typeof project !== "object") return null;
+  const id = normalizeProjectID(project.id);
+  const name = String(project.name || "").trim();
+  if (!id || !name) return null;
+  return {
+    archived: Boolean(project.archived),
+    color: normalizeProjectColor(project.color),
+    createdAt: project.createdAt || new Date().toISOString(),
+    id,
+    name,
+    sortOrder: Number.isFinite(Number(project.sortOrder)) ? Number(project.sortOrder) : 0,
+    updatedAt: project.updatedAt || "",
+  };
+}
+
+function normalizeProjectID(value) {
+  return String(value || "").trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function normalizeProjectFilter(value) {
+  const raw = String(value || "").trim();
+  if (raw === "all" || raw === "unassigned") return raw;
+  return normalizeProjectID(raw) || "all";
+}
+
+function normalizeProjectColor(value) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : "#2563eb";
 }
 
 function activeViewMeta(view) {
@@ -1704,6 +1906,17 @@ function shellTemplate() {
         </nav>
         <div class="memo-sidebar-section">
           <div class="memo-sidebar-heading">
+            <span>Project</span>
+            <span data-project-summary></span>
+          </div>
+          <div class="memo-project-list" data-project-list></div>
+          <button class="memo-nav-button memo-project-create" type="button" data-action="createProject">
+            ${SVG.plus}
+            <span>新建 Project</span>
+          </button>
+        </div>
+        <div class="memo-sidebar-section">
+          <div class="memo-sidebar-heading">
             <span>标签</span>
             <span data-tag-summary></span>
           </div>
@@ -1733,10 +1946,16 @@ function shellTemplate() {
             <h1 data-main-title>Inbox</h1>
             <p data-main-subtitle>捕捉、整理、回看</p>
           </div>
-          <button class="memo-icon-text-button" type="button" data-action="sortMemos" title="排序">
-            ${SVG.sort}
-            <span>排序</span>
-          </button>
+          <div class="memo-topbar-actions">
+            <button class="memo-icon-text-button" type="button" data-action="openSlimMemos" title="打开精简版">
+              ${SVG.list}
+              <span>精简版</span>
+            </button>
+            <button class="memo-icon-text-button" type="button" data-action="sortMemos" title="排序">
+              ${SVG.sort}
+              <span>排序</span>
+            </button>
+          </div>
         </header>
 
         <section class="memo-composer" aria-label="Create memo" data-composer>
@@ -1753,6 +1972,13 @@ function shellTemplate() {
               ${toolButtonTemplate("attach", "附件", SVG.paperclip)}
               ${toolButtonTemplate("date", "时间", SVG.clock)}
             </div>
+            <label class="memo-select-wrap">
+              <span class="memo-select-icon">${SVG.hash}</span>
+              <select data-project-select aria-label="Project">
+                ${projectOptionsTemplate([], "")}
+              </select>
+              ${SVG.chevronDown}
+            </label>
             <label class="memo-select-wrap">
               <span class="memo-select-icon">${SVG.lock}</span>
               <select data-visibility-select aria-label="可见性">
@@ -1815,6 +2041,39 @@ function filterButtonTemplate(filter, label, icon) {
       <span>${label}</span>
     </button>
   `;
+}
+
+function projectFilterTemplate(filter, label, count, color, activeFilter) {
+  const active = normalizeProjectFilter(filter) === normalizeProjectFilter(activeFilter);
+  const swatch = color ? `<span class="memo-project-dot" style="--project-color: ${escapeAttr(color)}"></span>` : SVG.hash;
+  return `
+    <button class="memo-nav-button memo-project-filter ${active ? "is-active" : ""}" type="button" data-project-filter="${escapeAttr(filter)}">
+      ${swatch}
+      <span>${escapeHTML(label)}</span>
+      <strong>${count ? escapeHTML(String(count)) : ""}</strong>
+    </button>
+  `;
+}
+
+function projectOptionsTemplate(projects, selected) {
+  const selectedID = normalizeProjectID(selected);
+  const activeProjects = Array.isArray(projects) ? projects : [];
+  const options = ['<option value="">未归属</option>'].concat(
+    activeProjects
+      .filter((project) => !project.archived)
+      .map((project) => `<option value="${escapeAttr(project.id)}" ${project.id === selectedID ? "selected" : ""}>${escapeHTML(project.name)}</option>`),
+  );
+  if (!selectedID) options[0] = '<option value="" selected>未归属</option>';
+  return options.join("");
+}
+
+function projectBadgeTemplate(projectId, projects = []) {
+  const id = normalizeProjectID(projectId);
+  if (!id) return '<span class="memo-project-badge">未归属</span>';
+  const project = (Array.isArray(projects) ? projects : []).find((item) => item && item.id === id);
+  const label = project ? project.name : "未知 Project";
+  const color = normalizeProjectColor(project && project.color);
+  return `<span class="memo-project-badge" style="--project-color: ${escapeAttr(color)}">${escapeHTML(label)}</span>`;
 }
 
 function viewNavButtonTemplate(view, label, icon, countAttr) {
@@ -1900,13 +2159,14 @@ function calendarTemplate(monthDate, memos, selectedDate) {
   `;
 }
 
-function memoTemplate(memo, editingId, renderContext, expanded = false) {
+function memoTemplate(memo, editingId, renderContext, expanded = false, projects = []) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
   const archived = memo.archived;
   const editing = memo.id === editingId;
   const backlinks = memoBacklinkCount(renderContext, memo.id);
   const expandLabel = expanded ? "收起" : "展开";
+  const projectBadge = projectBadgeTemplate(memo.projectId, projects);
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -1925,13 +2185,14 @@ function memoTemplate(memo, editingId, renderContext, expanded = false) {
             <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
           </div>
           <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
+          ${projectBadge}
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
       </header>
       ${
         editing
-          ? editTemplate(memo)
+          ? editTemplate(memo, projects)
           : `
             <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
               <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
@@ -1957,7 +2218,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false) {
   `;
 }
 
-function todoGroupTemplate(label, todos, renderContextFor) {
+function todoGroupTemplate(label, todos, renderContextFor, projects = []) {
   if (!todos.length) return "";
   return `
     <section class="memo-todo-group" aria-label="${escapeAttr(label)}">
@@ -1965,14 +2226,15 @@ function todoGroupTemplate(label, todos, renderContextFor) {
         <span>${escapeHTML(label)}</span>
         <strong>${todos.length}</strong>
       </div>
-      ${todos.map((todo) => todoTemplate(todo, renderContextFor ? renderContextFor(todo) : {})).join("")}
+      ${todos.map((todo) => todoTemplate(todo, renderContextFor ? renderContextFor(todo) : {}, projects)).join("")}
     </section>
   `;
 }
 
-function todoTemplate(todo, renderContext) {
+function todoTemplate(todo, renderContext, projects = []) {
   const visibility = VISIBILITY[todo.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(todo.memo.content);
+  const projectBadge = projectBadgeTemplate(todo.memo.projectId, projects);
   return `
     <article class="memo-todo-card ${todo.checked ? "is-complete" : ""}" data-memo-id="${escapeAttr(todo.memoId)}">
       <label class="memo-todo-check">
@@ -1986,6 +2248,7 @@ function todoTemplate(todo, renderContext) {
         </button>
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(todo.memo.createdAt)}">${formatRelativeDate(todo.memo.createdAt)}</time>
+          ${projectBadge}
           <span>${SVG[visibility.icon]} ${visibility.label}</span>
           ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
         </div>
@@ -2081,12 +2344,18 @@ function resourcePreviewTemplate(resource) {
   `;
 }
 
-function editTemplate(memo) {
+function editTemplate(memo, projects = []) {
   return `
     <div class="memo-inline-editor">
       <div class="memo-editor-host is-inline" data-edit-host></div>
       <div class="memo-inline-actions">
         <div class="memo-inline-status-line" data-edit-vim-status></div>
+        <label class="memo-select-wrap is-compact">
+          <select data-edit-project aria-label="编辑 Project">
+            ${projectOptionsTemplate(projects, memo.projectId || "")}
+          </select>
+          ${SVG.chevronDown}
+        </label>
         <label class="memo-select-wrap is-compact">
           <select data-edit-visibility aria-label="编辑可见性">
             ${visibilityOptionsTemplate(memo.visibility)}
@@ -3512,6 +3781,7 @@ function normalizeCloudStorageProfile(profile) {
     endpoint: String(value.endpoint || "").trim(),
     forcePathStyle: value.forcePathStyle !== false,
     id: sanitizeStorageId(value.id || ""),
+    local: normalizeLocalStorageSettings(value.local),
     name: String(value.name || "").trim(),
     pathPrefix: String(value.pathPrefix || "").trim(),
     provider: String(value.provider || "s3").trim() || "s3",
@@ -3527,6 +3797,7 @@ function hasLegacyCloudStorageProfile(value) {
   return Boolean(value && typeof value === "object" && (
     value.enabled ||
     value.endpoint ||
+    value.local ||
     value.bucket ||
     value.accessKeyId ||
     value.secretAccessKey ||
@@ -3634,7 +3905,7 @@ function encodeObjectKey(key) {
 
 function missingCloudStorageFields(config) {
   const missing = [];
-  if (!String(config.endpoint || "").trim()) missing.push(isLocalCloudStorage(config) ? "本地根目录" : "Endpoint");
+  if (!String(config.endpoint || "").trim() && !(isLocalCloudStorage(config) && normalizeLocalStorageSettings(config.local))) missing.push(isLocalCloudStorage(config) ? "本地根目录" : "Endpoint");
   if (!String(config.bucket || "").trim()) missing.push("Bucket");
   if (!isLocalCloudStorage(config)) {
     if (!String(config.accessKeyId || "").trim()) missing.push("Access Key ID");
@@ -3646,6 +3917,24 @@ function missingCloudStorageFields(config) {
 function isLocalCloudStorage(config) {
   const provider = String((config && config.provider) || "").trim().toLowerCase();
   return provider === "local" || provider === "local-oss";
+}
+
+function normalizeLocalStorageSettings(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  let root = String(raw.root || "").trim();
+  let rootMode = String(raw.rootMode || "").trim().toLowerCase();
+  if (!rootMode) {
+    if (!root) return null;
+    rootMode = root.charAt(0) === "/" || root.indexOf(":\\") === 1 || root.indexOf("~/") === 0 ? "absolute" : "vault";
+  }
+  if (rootMode === "vault") {
+    root = root.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "") || "storage";
+    return { root, rootMode: "vault" };
+  }
+  if (rootMode === "absolute" && root) {
+    return { root, rootMode: "absolute" };
+  }
+  return null;
 }
 
 function dataURLToBase64(value) {
@@ -3789,6 +4078,60 @@ function loadMemos() {
   return memos;
 }
 
+function loadProjects() {
+  if (typeof invoke === "function") return [];
+  const saved = loadJSON(PROJECTS_STORAGE_KEY, null);
+  return Array.isArray(saved) ? saved.map(normalizeProjectPayload).filter(Boolean) : [];
+}
+
+function saveProjects(projects) {
+  if (typeof invoke === "function") return;
+  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+}
+
+function loadProjectsFromVault() {
+  if (typeof invoke !== "function") {
+    return Promise.resolve({ activeProjectId: "", projects: loadProjects() });
+  }
+  return invoke("/api/projects", { method: "GET" }).then(function (resp) {
+    if (!resp || resp.code !== 0) {
+      throw new Error((resp && resp.msg) || "读取 project 失败");
+    }
+    const data = resp.data || {};
+    return {
+      activeProjectId: normalizeProjectID(data.activeProjectId),
+      projects: Array.isArray(data.projects) ? data.projects : [],
+    };
+  });
+}
+
+function createProjectInVault(name, color) {
+  if (typeof invoke !== "function") {
+    const now = new Date().toISOString();
+    return Promise.resolve({
+      archived: false,
+      color: color || "#2563eb",
+      createdAt: now,
+      id: "project_" + Date.now().toString(36),
+      name,
+      sortOrder: 0,
+      updatedAt: now,
+    });
+  }
+  return invoke("/api/projects/create", {
+    method: "POST",
+    args: {
+      color: color || "",
+      name,
+    },
+  }).then(function (resp) {
+    if (!resp || resp.code !== 0 || !resp.data || !resp.data.project) {
+      throw new Error((resp && resp.msg) || "创建 project 失败");
+    }
+    return resp.data.project;
+  });
+}
+
 function saveMemos(memos) {
   if (typeof invoke === "function") return;
   localStorage.setItem(MEMOS_STORAGE_KEY, JSON.stringify(memos));
@@ -3807,7 +4150,7 @@ function loadMemosFromVault() {
   });
 }
 
-function createMemoInVault(content, visibility) {
+function createMemoInVault(content, visibility, projectId) {
   if (typeof invoke !== "function") {
     const now = new Date().toISOString();
     return Promise.resolve({
@@ -3816,6 +4159,7 @@ function createMemoInVault(content, visibility) {
       createdAt: now,
       id: createId(),
       pinned: false,
+      projectId: normalizeProjectID(projectId),
       updatedAt: "",
       visibility,
     });
@@ -3824,6 +4168,7 @@ function createMemoInVault(content, visibility) {
     method: "POST",
     args: {
       content,
+      projectId: normalizeProjectID(projectId),
       visibility,
     },
   }).then(function (resp) {
@@ -3840,6 +4185,7 @@ function updateMemoInVault(id, patch) {
   }
   const args = { id };
   if (Object.prototype.hasOwnProperty.call(patch, "content")) args.content = patch.content;
+  if (Object.prototype.hasOwnProperty.call(patch, "projectId")) args.projectId = normalizeProjectID(patch.projectId);
   if (Object.prototype.hasOwnProperty.call(patch, "visibility")) args.visibility = patch.visibility;
   if (Object.prototype.hasOwnProperty.call(patch, "pinned")) args.pinned = patch.pinned;
   if (Object.prototype.hasOwnProperty.call(patch, "archived")) args.archived = patch.archived;
@@ -3942,6 +4288,7 @@ function collectTodos(memos) {
         lineIndex,
         memo,
         memoId: memo.id,
+        projectId: memo.projectId || "",
         sourceText: memoSourceText(lines, lineIndex),
         text: task.text,
       });
@@ -4427,7 +4774,33 @@ function inlineMarkdownBase(value) {
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   html = html.replace(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g, '$1<span class="memo-hashtag">#$2</span>');
+  html = replaceMemoTimeSyntax(html);
   return html;
+}
+
+function replaceMemoTimeSyntax(html) {
+  return String(html || "")
+    .split(/(<code\b[^>]*>.*?<\/code>|<[^>]+>)/gi)
+    .map(function (part) {
+      if (!part || part.charAt(0) === "<") return part;
+      return part.replace(
+        /(^|[\s([{（【「『])(::|：：)((?:\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))/g,
+        function (_, prefix, trigger, value) {
+          return prefix + renderMemoTimeToken(trigger, value);
+        },
+      );
+    })
+    .join("");
+}
+
+function renderMemoTimeToken(trigger, value) {
+  const label = String(value || "");
+  return `
+    <span class="memo-time-token" title="${escapeAttr(trigger + label)}" aria-label="时间 ${escapeAttr(label)}">
+      ${SVG.clock}
+      <span>${label}</span>
+    </span>
+  `;
 }
 
 function renderMemoRefChip(ref, context) {
