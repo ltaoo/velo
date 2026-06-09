@@ -160,6 +160,7 @@ export function mountMemosHome(root) {
 
   let composerEditor = null;
   let editEditor = null;
+  let editEditorMemoId = "";
 
   root.innerHTML = shellTemplate();
 
@@ -218,7 +219,6 @@ export function mountMemosHome(root) {
   refreshTasksFromVault();
   refreshGTDFromVault();
   refreshStorageForRender();
-  window.addEventListener("focus", refreshStorageForRender);
 
   window.addEventListener("click", handleExternalLinkClick, true);
   root.addEventListener("click", handleClick);
@@ -235,11 +235,11 @@ export function mountMemosHome(root) {
       root.removeEventListener("change", handleChange);
       root.removeEventListener("submit", handleSubmit);
       window.removeEventListener("keydown", handleKeydown);
-      window.removeEventListener("focus", refreshStorageForRender);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
       if (composerEditor) composerEditor.destroy();
       if (editEditor) editEditor.destroy();
+      editEditorMemoId = "";
       root.innerHTML = "";
     },
   };
@@ -1579,6 +1579,11 @@ export function mountMemosHome(root) {
     }
   }
 
+  function syncEditDraftFromEditor() {
+    if (!editEditor || !state.editingId || editEditorMemoId !== state.editingId) return;
+    state.editDraft = editEditor.getText();
+  }
+
   function renderProjects() {
     if (!els.projectList) return;
     const activeProjects = state.projects.filter((project) => !project.archived);
@@ -1691,8 +1696,10 @@ export function mountMemosHome(root) {
 
   function renderFeed() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const memos = visibleMemos();
@@ -1720,9 +1727,10 @@ export function mountMemosHome(root) {
           },
           placeholder: "编辑 memo...",
           sourceMemoId: memo.id,
-          value: memo.content,
+          value: state.editDraft,
           vimStatusHost: statusHost,
         });
+        editEditorMemoId = memo.id;
         editEditor.focus();
       }
     }
@@ -1752,8 +1760,10 @@ export function mountMemosHome(root) {
 
   function renderTodos() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const tasks = visibleTasks();
@@ -1776,8 +1786,10 @@ export function mountMemosHome(root) {
 
   function renderGTDItems() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const items = visibleGTDItems();
@@ -1800,8 +1812,10 @@ export function mountMemosHome(root) {
 
   function renderGTDMilestones() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const milestones = visibleGTDMilestones();
@@ -1824,8 +1838,10 @@ export function mountMemosHome(root) {
 
   function renderLinks() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const links = visibleLinks();
@@ -1835,8 +1851,10 @@ export function mountMemosHome(root) {
 
   function renderFiles() {
     if (editEditor) {
+      syncEditDraftFromEditor();
       editEditor.destroy();
       editEditor = null;
+      editEditorMemoId = "";
     }
 
     const resources = visibleResources();

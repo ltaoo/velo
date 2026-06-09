@@ -56,3 +56,24 @@
 - Fix: `handleKeyDown` now checks `event.isComposing`, `key === "Process"`, `keyCode === 229`, and `which === 229` before key mapping; in non-insert modes those events are prevented and swallowed.
 - Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM; a normal-mode composing `h` keydown returned `true`, called `preventDefault`, and left the cursor unchanged. A non-composing `h` still moved left, and insert-mode composing keydown returned `false`.
 - Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-composing-key-block`.
+
+## 2026-06-09: normal-mode IME composition has no visible feedback
+
+- Symptom: after blocking IME input and vim key dispatch in normal mode, composing text produced no visible feedback. Expected behavior: like VS Code vim mode, show a white underline that advances as composition input changes, while still keeping the document unchanged.
+- Fix: added transient `imeFeedback` plugin state with an anchor and offset. Non-insert composition events and composing keydowns update the offset; `compositionend` clears it. Decorations render a white underline at the feedback position without inserting text.
+- Styling: added `.vim-ime-feedback` and `.vim-ime-feedback-empty` in `index.css`.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM; normal-mode `compositionstart` set offset `0`, composing `h` keydown advanced to `1`, `compositionupdate` with `hj` advanced to `2`, and `compositionend` cleared feedback while the document stayed unchanged.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-ime-feedback`.
+
+## 2026-06-09: IME feedback underline should grow continuously
+
+- Symptom: the normal-mode IME feedback underline moved one character at a time. Expected behavior: a continuous white underline that grows forward as composition input advances.
+- Fix: changed the IME feedback decoration from a single-character inline range to an anchored range from `anchor` to `anchor + offset + 1`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-ime-feedback-range`.
+
+## 2026-06-09: IME feedback underline remains after composition ends
+
+- Symptom: the white underline was still visible after IME composition ended.
+- Root cause: `compositionend` cleared `imeFeedback`, but a following native `beforeinput`/`textInput` event could be blocked and treated as another feedback advance, recreating the underline.
+- Fix: `beforeinput` and `textInput` now only block native input in non-insert modes; they no longer advance IME feedback. Feedback advances only on `compositionupdate` and composing keydown, and `compositionend` clears it.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-ime-feedback-clear`.
