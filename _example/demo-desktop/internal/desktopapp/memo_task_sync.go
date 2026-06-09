@@ -18,8 +18,16 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 	var parent TaskRecord
 	var parentLoaded bool
 	var parentOK bool
+	inCode := false
 
 	for index, line := range lines {
+		if isMemoCodeFenceLine(line) {
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
 		parsed, ok := parseTaskLineText(line)
 		if !ok || strings.TrimSpace(parsed.Text) == "" {
 			continue
@@ -31,7 +39,9 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 			continue
 		}
 
+		metadata := parseTaskMetadataFromTodoText(parsed.Text)
 		req := TaskCreateRequest{
+			DueAt:     metadata.DueAt,
 			ProjectID: memo.ProjectID,
 			Source: TaskSource{
 				Line:     index + 1,
@@ -40,8 +50,8 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 				Text:     line,
 				Type:     "memo",
 			},
-			Tags:  extractMemoTags(parsed.Text),
-			Title: taskTitleFromTodoText(parsed.Text),
+			Tags:  metadata.Tags,
+			Title: metadata.Title,
 		}
 		if memo.Kind == "task_note" && memo.TaskID != "" {
 			if !parentLoaded {
@@ -75,7 +85,7 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 			parent.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			parentChanged = true
 		}
-		lines[index] = parsed.Prefix + parsed.statusMarker() + parsed.Suffix + "[[task:" + task.ID + "|" + task.Title + "]]"
+		lines[index] = parsed.Prefix + parsed.statusMarker() + parsed.Suffix + taskReferenceMarkdown(task)
 		changed = true
 	}
 
@@ -92,7 +102,7 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 }
 
 func memoTaskRefID(text string) string {
-	match := memoTaskRefPattern.FindStringSubmatch(text)
+	match := memoTaskRefPattern.FindStringSubmatch(maskMemoInlineCode(text))
 	if len(match) < 2 {
 		return ""
 	}

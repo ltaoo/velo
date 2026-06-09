@@ -7,6 +7,7 @@ import {
   compactText,
   extractTags,
   getTodoStats,
+  isMemoFenceLine,
   memoReferenceAlias,
   memoTitle,
   normalizeMemoPayload,
@@ -26,6 +27,17 @@ import {
   loadTasks,
   normalizeTaskSummary,
 } from "../../domain/tasks.js";
+import {
+  closeGTDItem,
+  createGTDItem,
+  createGTDMilestone,
+  loadGTDItems,
+  loadGTDMilestones,
+  normalizeGTDItem,
+  normalizeGTDMilestone,
+  updateGTDItem,
+  updateGTDMilestone,
+} from "../../domain/gtd.js";
 import {
   collectLinks,
   collectResources,
@@ -57,6 +69,10 @@ import {
   emptyFilesTemplate,
   emptyLinksTemplate,
   emptyTasksTemplate,
+  gtdItemGroupTemplate,
+  gtdItemWorkspaceTemplate,
+  gtdMilestoneGroupTemplate,
+  gtdMilestoneWorkspaceTemplate,
   linkTemplate,
   memoTemplate,
   projectFilterTemplate,
@@ -88,6 +104,23 @@ import {
 
 const DRAFT_STORAGE_KEY = "demo-desktop:memos:draft:v1";
 const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
+const SHORTCUTS_STORAGE_KEY = "demo-desktop:settings:shortcuts:v1";
+const TASK_FILTER_STORAGE_KEY = "demo-desktop:gtd:task-filter:v1";
+const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
+
+function normalizeTaskFilter(value) {
+  const filter = String(value || "").trim().toLowerCase();
+  return TASK_FILTERS.has(filter) ? filter : "today";
+}
+
+function loadTaskFilter() {
+  return normalizeTaskFilter(localStorage.getItem(TASK_FILTER_STORAGE_KEY));
+}
+
+function rememberTaskFilter(filter) {
+  localStorage.setItem(TASK_FILTER_STORAGE_KEY, normalizeTaskFilter(filter));
+}
+
 export function mountMemosHome(root) {
   const state = {
     activeFilter: "all",
@@ -101,10 +134,16 @@ export function mountMemosHome(root) {
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
+    gtdItems: [],
+    gtdLoading: false,
+    gtdMilestones: [],
     activeProjectFilter: "all",
     composerProjectId: localStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "",
     lastComposerProjectId: localStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "",
     memoRefIndex: null,
+    memoSearchActiveIndex: 0,
+    memoSearchOpen: false,
+    memoSearchQuery: "",
     memos: loadMemos(),
     projects: loadProjects(),
     query: "",
@@ -112,7 +151,7 @@ export function mountMemosHome(root) {
     sortDesc: true,
     saving: false,
     taskDetails: new Map(),
-    taskFilter: "today",
+    taskFilter: loadTaskFilter(),
     tasks: [],
     tasksLoading: false,
     toastTimer: null,
@@ -134,10 +173,15 @@ export function mountMemosHome(root) {
     createButton: root.querySelector('[data-action="createMemo"]'),
     feedCount: root.querySelector("[data-feed-count]"),
     fileNavCount: root.querySelector("[data-file-nav-count]"),
+    itemNavCount: root.querySelector("[data-item-nav-count]"),
     linkNavCount: root.querySelector("[data-link-nav-count]"),
     mainSubtitle: root.querySelector("[data-main-subtitle]"),
     mainTitle: root.querySelector("[data-main-title]"),
+    milestoneNavCount: root.querySelector("[data-milestone-nav-count]"),
     memoList: root.querySelector("[data-memo-list]"),
+    memoSearchInput: root.querySelector("[data-memo-search-input]"),
+    memoSearchPalette: root.querySelector("[data-memo-search-palette]"),
+    memoSearchResults: root.querySelector("[data-memo-search-results]"),
     pinnedList: root.querySelector("[data-pinned-list]"),
     projectList: root.querySelector("[data-project-list]"),
     projectSelect: root.querySelector("[data-project-select]"),
@@ -172,6 +216,7 @@ export function mountMemosHome(root) {
   refreshProjectsFromVault();
   refreshMemosFromVault();
   refreshTasksFromVault();
+  refreshGTDFromVault();
   refreshStorageForRender();
   window.addEventListener("focus", refreshStorageForRender);
 
@@ -180,6 +225,7 @@ export function mountMemosHome(root) {
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
   root.addEventListener("submit", handleSubmit);
+  window.addEventListener("keydown", handleKeydown);
 
   return {
     destroy() {
@@ -188,6 +234,7 @@ export function mountMemosHome(root) {
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
       root.removeEventListener("submit", handleSubmit);
+      window.removeEventListener("keydown", handleKeydown);
       window.removeEventListener("focus", refreshStorageForRender);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
@@ -217,6 +264,17 @@ export function mountMemosHome(root) {
   }
 
   function handleClick(event) {
+    const searchResult = closestElement(event.target, "[data-memo-search-result]");
+    if (searchResult && root.contains(searchResult)) {
+      openMemoSearchResult(searchResult.dataset.memoSearchResult || "");
+      return;
+    }
+
+    if (event.target === els.memoSearchPalette) {
+      closeMemoSearchPalette();
+      return;
+    }
+
     const command = closestElement(event.target, "[data-command]");
     if (command && root.contains(command)) {
       runComposerCommand(command.dataset.command);
@@ -248,7 +306,8 @@ export function mountMemosHome(root) {
 
     const taskFilter = closestElement(event.target, "[data-task-filter]");
     if (taskFilter && root.contains(taskFilter)) {
-      state.taskFilter = taskFilter.dataset.taskFilter || "today";
+      state.taskFilter = normalizeTaskFilter(taskFilter.dataset.taskFilter);
+      rememberTaskFilter(state.taskFilter);
       renderAll();
       return;
     }
@@ -302,6 +361,10 @@ export function mountMemosHome(root) {
     const memoId = memoNode ? memoNode.dataset.memoId : "";
     const taskNode = closestElement(action, "[data-task-id]");
     const taskId = taskNode ? taskNode.dataset.taskId : "";
+    const gtdItemNode = closestElement(action, "[data-gtd-item-id]");
+    const gtdItemId = gtdItemNode ? gtdItemNode.dataset.gtdItemId : "";
+    const gtdMilestoneNode = closestElement(action, "[data-gtd-milestone-id]");
+    const gtdMilestoneId = gtdMilestoneNode ? gtdMilestoneNode.dataset.gtdMilestoneId : "";
 
     switch (action.dataset.action) {
       case "addTaskNote":
@@ -331,6 +394,21 @@ export function mountMemosHome(root) {
         break;
       case "copyTaskRef":
         copyTaskRef(taskId);
+        break;
+      case "triageGTDItem":
+        updateExistingGTDItem(gtdItemId, { status: "triaged" }, "已标记为已澄清");
+        break;
+      case "waitGTDItem":
+        updateExistingGTDItem(gtdItemId, { status: "waiting" }, "已标记为等待");
+        break;
+      case "closeGTDItem":
+        closeExistingGTDItem(gtdItemId);
+        break;
+      case "activateGTDMilestone":
+        updateExistingGTDMilestone(gtdMilestoneId, { status: "active" }, "里程碑已开始");
+        break;
+      case "completeGTDMilestone":
+        updateExistingGTDMilestone(gtdMilestoneId, { status: "completed" }, "里程碑已完成");
         break;
       case "createMemo":
         createMemo();
@@ -382,6 +460,20 @@ export function mountMemosHome(root) {
     if (taskForm && root.contains(taskForm)) {
       event.preventDefault();
       createTaskFromForm(taskForm);
+      return;
+    }
+
+    const itemForm = event.target.closest("[data-gtd-item-create-form]");
+    if (itemForm && root.contains(itemForm)) {
+      event.preventDefault();
+      createGTDItemFromForm(itemForm);
+      return;
+    }
+
+    const milestoneForm = event.target.closest("[data-gtd-milestone-create-form]");
+    if (milestoneForm && root.contains(milestoneForm)) {
+      event.preventDefault();
+      createGTDMilestoneFromForm(milestoneForm);
     }
   }
 
@@ -524,6 +616,168 @@ export function mountMemosHome(root) {
     );
   }
 
+  function openMemoSearchPalette() {
+    state.memoSearchOpen = true;
+    state.memoSearchQuery = "";
+    state.memoSearchActiveIndex = 0;
+    renderMemoSearchPalette();
+    window.requestAnimationFrame(function () {
+      if (!els.memoSearchInput) return;
+      els.memoSearchInput.focus();
+      els.memoSearchInput.select();
+    });
+  }
+
+  function closeMemoSearchPalette() {
+    state.memoSearchOpen = false;
+    state.memoSearchQuery = "";
+    state.memoSearchActiveIndex = 0;
+    renderMemoSearchPalette();
+  }
+
+  function openMemoSearchResult(memoId) {
+    if (!memoId) return;
+    const memo = findMemo(memoId);
+    if (!memo) {
+      showToast("找不到 memo");
+      return;
+    }
+    closeMemoSearchPalette();
+    detachMemo(memo.id);
+  }
+
+  function renderMemoSearchPalette() {
+    if (!els.memoSearchPalette) return;
+    els.memoSearchPalette.hidden = !state.memoSearchOpen;
+    if (!state.memoSearchOpen) {
+      if (els.memoSearchInput) els.memoSearchInput.value = "";
+      if (els.memoSearchResults) els.memoSearchResults.innerHTML = "";
+      return;
+    }
+
+    if (els.memoSearchInput && els.memoSearchInput.value.trim() !== state.memoSearchQuery) {
+      els.memoSearchInput.value = state.memoSearchQuery;
+    }
+
+    const results = memoSearchResults();
+    if (!els.memoSearchResults) return;
+    if (!results.length) {
+      els.memoSearchResults.innerHTML = '<div class="memo-command-empty">没有匹配的 memo</div>';
+      return;
+    }
+
+    state.memoSearchActiveIndex = Math.max(0, Math.min(state.memoSearchActiveIndex, results.length - 1));
+    els.memoSearchResults.innerHTML = results.map(function (memo, index) {
+      const title = memoTitle(memo);
+      const summary = compactText(memo.content, 112);
+      const meta = [
+        memo.archived ? "归档" : "",
+        memo.pinned ? "置顶" : "",
+        projectLabel(memo.projectId),
+        formatRelativeDate(memo.createdAt),
+      ].filter(Boolean).join(" · ");
+      return [
+        '<button class="memo-command-result ' + (index === state.memoSearchActiveIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.memoSearchActiveIndex ? "true" : "false") + '" data-memo-search-result="' + escapeAttr(memo.id) + '">',
+        '<span class="memo-command-result-title">' + escapeHTML(title) + '</span>',
+        '<span class="memo-command-result-summary">' + escapeHTML(summary) + '</span>',
+        '<span class="memo-command-result-meta">' + escapeHTML(meta) + '</span>',
+        '</button>',
+      ].join("");
+    }).join("");
+
+    const active = els.memoSearchResults.querySelector(".memo-command-result.is-active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+
+  function memoSearchResults() {
+    const query = state.memoSearchQuery.toLowerCase();
+    return state.memos
+      .filter(function (memo) {
+        if (!query) return true;
+        return [
+          memo.id,
+          memoTitle(memo),
+          memo.content,
+          memo.visibility,
+          projectLabel(memo.projectId),
+        ].join(" ").toLowerCase().includes(query);
+      })
+      .sort(function (a, b) {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      })
+      .slice(0, 12);
+  }
+
+  function openMemoSearchShortcut() {
+    try {
+      const settings = JSON.parse(localStorage.getItem(SHORTCUTS_STORAGE_KEY) || "null") || {};
+      if (settings.enabled === false) return "";
+      return normalizeShortcut(settings.openMemoSearch) || "Ctrl+O";
+    } catch (_) {
+      return "Ctrl+O";
+    }
+  }
+
+  function matchesShortcut(event, shortcut) {
+    if (!shortcut) return false;
+    const parts = shortcut.split("+");
+    const key = parts.pop();
+    const wanted = {
+      alt: parts.includes("Alt"),
+      ctrl: parts.includes("Ctrl"),
+      meta: parts.includes("Meta"),
+      shift: parts.includes("Shift"),
+    };
+    if (Boolean(event.altKey) !== wanted.alt) return false;
+    if (Boolean(event.ctrlKey) !== wanted.ctrl) return false;
+    if (Boolean(event.metaKey) !== wanted.meta) return false;
+    if (Boolean(event.shiftKey) !== wanted.shift) return false;
+    return shortcutKeyName(event.key) === key;
+  }
+
+  function normalizeShortcut(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const parts = raw.split("+").map((part) => part.trim()).filter(Boolean);
+    if (!parts.length) return "";
+    const modifiers = [];
+    let key = "";
+    parts.forEach(function (part) {
+      const lower = part.toLowerCase();
+      if (lower === "ctrl" || lower === "control") {
+        if (!modifiers.includes("Ctrl")) modifiers.push("Ctrl");
+      } else if (lower === "alt" || lower === "option") {
+        if (!modifiers.includes("Alt")) modifiers.push("Alt");
+      } else if (lower === "shift") {
+        if (!modifiers.includes("Shift")) modifiers.push("Shift");
+      } else if (lower === "meta" || lower === "cmd" || lower === "command") {
+        if (!modifiers.includes("Meta")) modifiers.push("Meta");
+      } else {
+        key = shortcutKeyName(part);
+      }
+    });
+    if (!key) return "";
+    if (!modifiers.length && key.length === 1) return "";
+    return modifiers.concat(key).join("+");
+  }
+
+  function shortcutKeyName(key) {
+    const original = String(key || "");
+    if (original === " ") return "Space";
+    const value = original.trim();
+    if (!value) return "";
+    const lower = value.toLowerCase();
+    if (lower === "control" || lower === "shift" || lower === "alt" || lower === "meta") return "";
+    if (lower === "escape" || lower === "esc") return "Esc";
+    if (lower === "arrowup") return "Up";
+    if (lower === "arrowdown") return "Down";
+    if (lower === "arrowleft") return "Left";
+    if (lower === "arrowright") return "Right";
+    if (value.length === 1) return value.toUpperCase();
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
   function focusMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) {
@@ -580,9 +834,58 @@ export function mountMemosHome(root) {
   }
 
   function handleInput(event) {
+    if (event.target.matches("[data-memo-search-input]")) {
+      state.memoSearchQuery = event.target.value.trim();
+      state.memoSearchActiveIndex = 0;
+      renderMemoSearchPalette();
+      return;
+    }
+
     if (event.target.matches("[data-search-input]")) {
       state.query = event.target.value.trim();
       renderAll();
+    }
+  }
+
+  function handleKeydown(event) {
+    if (state.memoSearchOpen) {
+      handleMemoSearchKeydown(event);
+      return;
+    }
+
+    if (!matchesShortcut(event, openMemoSearchShortcut())) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openMemoSearchPalette();
+  }
+
+  function handleMemoSearchKeydown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMemoSearchPalette();
+      return;
+    }
+
+    const results = memoSearchResults();
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      state.memoSearchActiveIndex = results.length ? (state.memoSearchActiveIndex + 1) % results.length : 0;
+      renderMemoSearchPalette();
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      state.memoSearchActiveIndex = results.length ? (state.memoSearchActiveIndex - 1 + results.length) % results.length : 0;
+      renderMemoSearchPalette();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (!results.length) return;
+      const active = results[Math.min(state.memoSearchActiveIndex, results.length - 1)];
+      if (active) openMemoSearchResult(active.id);
     }
   }
 
@@ -742,6 +1045,110 @@ export function mountMemosHome(root) {
       },
       function (err) {
         showToast("创建任务失败: " + errorMessage(err));
+      },
+    );
+  }
+
+  function createGTDItemFromForm(form) {
+    const data = new FormData(form);
+    const title = String(data.get("title") || "").trim();
+    if (!title) {
+      showToast("事项标题不能为空");
+      return;
+    }
+    const projectId = state.activeProjectFilter && state.activeProjectFilter !== "all" && state.activeProjectFilter !== "unassigned"
+      ? state.activeProjectFilter
+      : "";
+    createGTDItem({
+      milestoneId: String(data.get("milestoneId") || "").trim(),
+      projectId,
+      title,
+      type: String(data.get("type") || "idea").trim(),
+    }).then(
+      function (item) {
+        state.gtdItems = [item].concat(state.gtdItems);
+        form.reset();
+        renderAll();
+        showToast("已添加开放事项");
+      },
+      function (err) {
+        showToast("添加事项失败: " + errorMessage(err));
+      },
+    );
+  }
+
+  function createGTDMilestoneFromForm(form) {
+    const data = new FormData(form);
+    const title = String(data.get("title") || "").trim();
+    if (!title) {
+      showToast("里程碑标题不能为空");
+      return;
+    }
+    const projectIds = state.activeProjectFilter && state.activeProjectFilter !== "all" && state.activeProjectFilter !== "unassigned"
+      ? [state.activeProjectFilter]
+      : [];
+    createGTDMilestone({
+      projectIds,
+      status: String(data.get("status") || "planned").trim(),
+      targetAt: String(data.get("targetAt") || "").trim(),
+      title,
+    }).then(
+      function (milestone) {
+        state.gtdMilestones = [milestone].concat(state.gtdMilestones);
+        form.reset();
+        renderAll();
+        showToast("已添加里程碑");
+      },
+      function (err) {
+        showToast("添加里程碑失败: " + errorMessage(err));
+      },
+    );
+  }
+
+  function updateExistingGTDItem(itemId, patch, message) {
+    const id = String(itemId || "").trim();
+    if (!id) return;
+    updateGTDItem(id, patch).then(
+      function (item) {
+        state.gtdItems = state.gtdItems.map((entry) => entry.id === id ? item : entry);
+        renderAll();
+        showToast(message || "已更新事项");
+      },
+      function (err) {
+        showToast("更新事项失败: " + errorMessage(err));
+        refreshGTDFromVault();
+      },
+    );
+  }
+
+  function closeExistingGTDItem(itemId) {
+    const id = String(itemId || "").trim();
+    if (!id) return;
+    closeGTDItem(id).then(
+      function (item) {
+        state.gtdItems = state.gtdItems.map((entry) => entry.id === id ? item : entry);
+        renderAll();
+        showToast("已关闭事项");
+      },
+      function (err) {
+        showToast("关闭事项失败: " + errorMessage(err));
+        refreshGTDFromVault();
+      },
+    );
+  }
+
+  function updateExistingGTDMilestone(milestoneId, patch, message) {
+    const id = String(milestoneId || "").trim();
+    if (!id) return;
+    updateGTDMilestone(id, patch).then(
+      function (milestone) {
+        state.gtdMilestones = state.gtdMilestones.map((entry) => entry.id === id ? milestone : entry);
+        renderAll();
+        showToast(message || "已更新里程碑");
+      },
+      function (err) {
+        showToast("更新里程碑失败: " + errorMessage(err));
+        refreshGTDFromVault();
       },
     );
   }
@@ -943,7 +1350,15 @@ export function mountMemosHome(root) {
 
   function createMemoFromTodoItems(memo) {
     const lines = String(memo.content || "").replace(/\r\n/g, "\n").split("\n");
-    const todoLines = lines.filter((line) => parseTaskLine(line));
+    let inCode = false;
+    const todoLines = lines.filter(function (line) {
+      if (isMemoFenceLine(line)) {
+        inCode = !inCode;
+        return false;
+      }
+      if (inCode) return false;
+      return parseTaskLine(line);
+    });
     const content = todoLines.join("\n").trim();
     if (!content) return Promise.resolve(null);
     return createMemoInVault(content, memo.visibility || DEFAULT_VISIBILITY, memo.projectId || "").then(function (created) {
@@ -1138,7 +1553,7 @@ export function mountMemosHome(root) {
     els.mainSubtitle.textContent = viewMeta.subtitle;
     els.composer.classList.toggle("hidden", viewMeta.hideComposer);
     els.searchInput.placeholder = viewMeta.searchPlaceholder;
-    els.memoList.classList.toggle("is-todo-list", state.activeView === "todos");
+    els.memoList.classList.toggle("is-todo-list", state.activeView === "todos" || state.activeView === "items" || state.activeView === "milestones");
     els.memoList.classList.toggle("is-resource-list", state.activeView === "links" || state.activeView === "files");
   }
 
@@ -1146,6 +1561,12 @@ export function mountMemosHome(root) {
     switch (state.activeView) {
       case "todos":
         renderTodos();
+        return;
+      case "items":
+        renderGTDItems();
+        return;
+      case "milestones":
+        renderGTDMilestones();
         return;
       case "links":
         renderLinks();
@@ -1186,7 +1607,11 @@ export function mountMemosHome(root) {
     const todoStats = getTaskStats(scopedTasks());
     const linkCount = collectLinks(memos).length;
     const resourceCount = collectResources(memos).length;
+    const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
+    const activeMilestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
     els.todoNavCount.textContent = todoStats.open ? String(todoStats.open) : "";
+    if (els.itemNavCount) els.itemNavCount.textContent = openItemCount ? String(openItemCount) : "";
+    if (els.milestoneNavCount) els.milestoneNavCount.textContent = activeMilestoneCount ? String(activeMilestoneCount) : "";
     els.linkNavCount.textContent = linkCount ? String(linkCount) : "";
     els.fileNavCount.textContent = resourceCount ? String(resourceCount) : "";
   }
@@ -1211,6 +1636,8 @@ export function mountMemosHome(root) {
     const publicCount = active.filter((memo) => memo.visibility === "PUBLIC").length;
     const tags = collectTags(active);
     const taskStats = getTaskStats(scopedTasks());
+    const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
+    const milestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
     const linkCount = collectLinks(memos).length;
     const resourceStats = getResourceStats(memos);
 
@@ -1220,6 +1647,8 @@ export function mountMemosHome(root) {
       statTemplate("标签", tags.length),
       statTemplate("任务", taskStats.total),
       statTemplate("未完成", taskStats.open),
+      statTemplate("事项", openItemCount),
+      statTemplate("里程碑", milestoneCount),
       statTemplate("链接", linkCount),
       statTemplate("文件", resourceStats.files),
       statTemplate("图片", resourceStats.images),
@@ -1345,6 +1774,54 @@ export function mountMemosHome(root) {
     els.memoList.innerHTML = workspace + taskContent;
   }
 
+  function renderGTDItems() {
+    if (editEditor) {
+      editEditor.destroy();
+      editEditor = null;
+    }
+
+    const items = visibleGTDItems();
+    const openItems = items.filter((item) => item.status !== "closed" && item.status !== "resolved");
+    els.feedCount.textContent = state.gtdLoading
+      ? "正在读取事项"
+      : items.length
+        ? `${openItems.length} open / ${items.length} 项`
+        : "0 项";
+    const groups = groupedVisibleGTDItems(items);
+    const workspace = gtdItemWorkspaceTemplate({ milestones: scopedGTDMilestones() });
+    const content = items.length
+      ? groups.map((group) => gtdItemGroupTemplate(group.label, group.items, {
+          milestones: state.gtdMilestones,
+          projects: state.projects,
+        })).join("")
+      : emptyTasksTemplate();
+    els.memoList.innerHTML = workspace + content;
+  }
+
+  function renderGTDMilestones() {
+    if (editEditor) {
+      editEditor.destroy();
+      editEditor = null;
+    }
+
+    const milestones = visibleGTDMilestones();
+    const activeCount = milestones.filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
+    els.feedCount.textContent = state.gtdLoading
+      ? "正在读取里程碑"
+      : milestones.length
+        ? `${activeCount} active / ${milestones.length} 个`
+        : "0 个";
+    const groups = groupedVisibleGTDMilestones(milestones);
+    const workspace = gtdMilestoneWorkspaceTemplate();
+    const content = milestones.length
+      ? groups.map((group) => gtdMilestoneGroupTemplate(group.label, group.milestones, {
+          items: state.gtdItems,
+          tasks: state.tasks,
+        })).join("")
+      : emptyTasksTemplate();
+    els.memoList.innerHTML = workspace + content;
+  }
+
   function renderLinks() {
     if (editEditor) {
       editEditor.destroy();
@@ -1455,6 +1932,25 @@ export function mountMemosHome(root) {
     });
   }
 
+  function refreshGTDFromVault() {
+    state.gtdLoading = true;
+    Promise.all([loadGTDItems(), loadGTDMilestones()]).then(
+      function (results) {
+        state.gtdItems = results[0].map(normalizeGTDItem).filter(Boolean);
+        state.gtdMilestones = results[1].map(normalizeGTDMilestone).filter(Boolean);
+        renderAll();
+      },
+      function (err) {
+        if (typeof globalThis.invoke === "function") {
+          showToast("读取 GTD 事项失败: " + errorMessage(err));
+        }
+      },
+    ).finally(function () {
+      state.gtdLoading = false;
+      renderAll();
+    });
+  }
+
   function visibleMemos() {
     const query = state.query.toLowerCase();
     return scopedMemos()
@@ -1517,6 +2013,9 @@ export function mountMemosHome(root) {
     if (state.taskFilter === "completed") {
       return [{ label: "已完成", tasks }];
     }
+    if (state.taskFilter === "overdue") {
+      return [{ label: "已过期", tasks }];
+    }
     if (state.taskFilter === "scheduled") {
       return [
         { label: "已过期", tasks: tasks.filter(isTaskOverdue) },
@@ -1540,6 +2039,106 @@ export function mountMemosHome(root) {
     return state.tasks;
   }
 
+  function scopedGTDItems() {
+    if (state.activeProjectFilter === "unassigned") {
+      return state.gtdItems.filter((item) => !item.projectId);
+    }
+    if (state.activeProjectFilter && state.activeProjectFilter !== "all") {
+      return state.gtdItems.filter((item) => item.projectId === state.activeProjectFilter);
+    }
+    return state.gtdItems;
+  }
+
+  function scopedGTDMilestones() {
+    if (state.activeProjectFilter === "unassigned") {
+      return state.gtdMilestones.filter((milestone) => !milestone.projectIds.length);
+    }
+    if (state.activeProjectFilter && state.activeProjectFilter !== "all") {
+      return state.gtdMilestones.filter((milestone) => milestone.projectIds.includes(state.activeProjectFilter));
+    }
+    return state.gtdMilestones;
+  }
+
+  function visibleGTDItems() {
+    const query = state.query.toLowerCase();
+    return scopedGTDItems()
+      .filter((item) => {
+        if (!query) return true;
+        const milestone = state.gtdMilestones.find((entry) => entry.id === item.milestoneId);
+        return [
+          item.title,
+          item.type,
+          item.status,
+          item.decision,
+          item.projectId,
+          milestone && milestone.title,
+          (item.labels || []).join(" "),
+        ].join(" ").toLowerCase().includes(query);
+      })
+      .sort(sortGTDItemsForView);
+  }
+
+  function visibleGTDMilestones() {
+    const query = state.query.toLowerCase();
+    return scopedGTDMilestones()
+      .filter((milestone) => {
+        if (!query) return true;
+        return [
+          milestone.title,
+          milestone.status,
+          milestone.targetAt,
+          milestone.reviewMemoId,
+        ].join(" ").toLowerCase().includes(query);
+      })
+      .sort(sortGTDMilestonesForView);
+  }
+
+  function groupedVisibleGTDItems(items) {
+    return [
+      { label: "Open", items: items.filter((item) => item.status === "open") },
+      { label: "已澄清", items: items.filter((item) => item.status === "triaged") },
+      { label: "等待", items: items.filter((item) => item.status === "waiting") },
+      { label: "已关闭", items: items.filter((item) => item.status === "closed" || item.status === "resolved") },
+    ].filter((group) => group.items.length);
+  }
+
+  function groupedVisibleGTDMilestones(milestones) {
+    return [
+      { label: "进行中", milestones: milestones.filter((milestone) => milestone.status === "active") },
+      { label: "计划中", milestones: milestones.filter((milestone) => milestone.status === "planned") },
+      { label: "已完成", milestones: milestones.filter((milestone) => milestone.status === "completed") },
+      { label: "已取消", milestones: milestones.filter((milestone) => milestone.status === "cancelled") },
+    ].filter((group) => group.milestones.length);
+  }
+
+  function sortGTDItemsForView(a, b) {
+    const status = gtdItemStatusWeight(a.status) - gtdItemStatusWeight(b.status);
+    if (status !== 0) return status;
+    return taskTimeValue(b.updatedAt || b.createdAt) - taskTimeValue(a.updatedAt || a.createdAt);
+  }
+
+  function sortGTDMilestonesForView(a, b) {
+    const status = gtdMilestoneStatusWeight(a.status) - gtdMilestoneStatusWeight(b.status);
+    if (status !== 0) return status;
+    const target = taskTimeValue(a.targetAt) - taskTimeValue(b.targetAt);
+    if (target !== 0) return target;
+    return taskTimeValue(b.updatedAt || b.createdAt) - taskTimeValue(a.updatedAt || a.createdAt);
+  }
+
+  function gtdItemStatusWeight(status) {
+    if (status === "open") return 0;
+    if (status === "triaged") return 1;
+    if (status === "waiting") return 2;
+    return 3;
+  }
+
+  function gtdMilestoneStatusWeight(status) {
+    if (status === "active") return 0;
+    if (status === "planned") return 1;
+    if (status === "completed") return 2;
+    return 3;
+  }
+
   function taskMatchesFilter(task, filter) {
     switch (filter) {
       case "all":
@@ -1548,6 +2147,8 @@ export function mountMemosHome(root) {
         return task.status === "completed";
       case "inbox":
         return task.status !== "completed" && (task.listId === "inbox" || !task.listId);
+      case "overdue":
+        return isTaskOverdue(task);
       case "scheduled":
         return task.status !== "completed" && Boolean(task.startAt || task.dueAt);
       case "next":
@@ -1564,6 +2165,7 @@ export function mountMemosHome(root) {
       completed: tasks.filter((task) => task.status === "completed").length,
       inbox: tasks.filter((task) => taskMatchesFilter(task, "inbox")).length,
       next: tasks.filter((task) => taskMatchesFilter(task, "next")).length,
+      overdue: tasks.filter((task) => taskMatchesFilter(task, "overdue")).length,
       scheduled: tasks.filter((task) => taskMatchesFilter(task, "scheduled")).length,
       today: tasks.filter((task) => taskMatchesFilter(task, "today")).length,
     };
@@ -1580,6 +2182,9 @@ export function mountMemosHome(root) {
   }
 
   function sortTasksForView(a, b) {
+    if (state.taskFilter === "completed") {
+      return taskTimeValue(b.completedAt || b.updatedAt || b.createdAt) - taskTimeValue(a.completedAt || a.updatedAt || a.createdAt);
+    }
     if (a.status !== b.status) {
       if (a.status === "completed") return 1;
       if (b.status === "completed") return -1;
@@ -1593,12 +2198,12 @@ export function mountMemosHome(root) {
 
   function isTaskToday(task) {
     const today = dateKey(new Date());
-    return [task.startAt, task.dueAt].some((value) => value && dateKey(new Date(value)) === today);
+    return [task.startAt, task.dueAt].some((value) => value && dateKey(taskDateValue(value)) === today);
   }
 
   function isTaskOverdue(task) {
     if (!task.dueAt || task.status === "completed") return false;
-    const due = new Date(task.dueAt);
+    const due = taskDateValue(task.dueAt);
     if (Number.isNaN(due.getTime())) return false;
     return dateKey(due) < dateKey(new Date());
   }
@@ -1612,8 +2217,17 @@ export function mountMemosHome(root) {
 
   function taskTimeValue(value) {
     if (!value) return Number.MAX_SAFE_INTEGER;
-    const date = new Date(value);
+    const date = taskDateValue(value);
     return Number.isNaN(date.getTime()) ? Number.MAX_SAFE_INTEGER : date.getTime();
+  }
+
+  function taskDateValue(value) {
+    const raw = String(value || "").trim();
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    }
+    return new Date(raw);
   }
 
   function taskPriorityWeight(priority) {

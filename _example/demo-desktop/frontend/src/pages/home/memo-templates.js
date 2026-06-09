@@ -4,7 +4,6 @@ import {
   buildMemoReferenceIndex,
   extractTags,
   memoBacklinkCount,
-  memoTitle,
 } from "../../domain/memos.js";
 import { fileDisplayName } from "../../domain/memo-resources.js";
 import { normalizeProjectColor, normalizeProjectFilter, normalizeProjectID } from "../../domain/projects.js";
@@ -114,6 +113,18 @@ function activeViewMeta(view) {
       subtitle: "Inbox、Today、Scheduled 与任务 notes",
       title: "GTD",
     },
+    items: {
+      hideComposer: true,
+      searchPlaceholder: "搜索开放事项、标签或决策",
+      subtitle: "像 Issue 一样管理 open loops",
+      title: "Open Loops",
+    },
+    milestones: {
+      hideComposer: true,
+      searchPlaceholder: "搜索阶段目标",
+      subtitle: "像 Milestone 一样管理阶段收敛",
+      title: "Milestones",
+    },
   };
   return metas[view] || metas.memos;
 }
@@ -160,6 +171,8 @@ function shellTemplate() {
           </div>
           <nav class="memo-nav memo-collection-nav" aria-label="Memo collections">
             ${viewNavButtonTemplate("todos", "代办", SVG.check, "data-todo-nav-count")}
+            ${viewNavButtonTemplate("items", "事项", SVG.hash, "data-item-nav-count")}
+            ${viewNavButtonTemplate("milestones", "里程碑", SVG.clock, "data-milestone-nav-count")}
             ${viewNavButtonTemplate("links", "超链接", SVG.link, "data-link-nav-count")}
             ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
           </nav>
@@ -261,6 +274,15 @@ function shellTemplate() {
           <div class="memo-pinned-list" data-pinned-list></div>
         </section>
       </aside>
+      <div class="memo-command-palette" data-memo-search-palette hidden>
+        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo">
+          <label class="memo-command-search">
+            ${SVG.search}
+            <input type="search" data-memo-search-input placeholder="搜索 memo" autocomplete="off" />
+          </label>
+          <div class="memo-command-results" data-memo-search-results role="listbox"></div>
+        </div>
+      </div>
       <div class="memo-toast" data-toast role="status"></div>
     </div>
   `;
@@ -474,10 +496,7 @@ function todoTemplate(todo, renderContext, projects = []) {
         <span>${inlineMarkdown(todo.text, renderContext)}</span>
       </label>
       <div class="memo-todo-source">
-        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
-          <span>来源 memo</span>
-          <strong>${escapeHTML(todo.sourceText)}</strong>
-        </button>
+        ${sourceMemoMarkerTemplate(todo.memoId)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(todo.memo.createdAt)}">${formatRelativeDate(todo.memo.createdAt)}</time>
           ${projectBadge}
@@ -494,6 +513,7 @@ function taskWorkspaceTemplate(options) {
   const filters = [
     ["inbox", "Inbox"],
     ["today", "Today"],
+    ["overdue", "已过期"],
     ["scheduled", "Scheduled"],
     ["next", "Next"],
     ["completed", "Completed"],
@@ -546,7 +566,8 @@ function taskCardTemplate(task, context) {
   const complete = task.status === "completed";
   const dueLabel = task.dueAt ? formatTaskDate(task.dueAt) : "";
   const startLabel = task.startAt ? formatTaskDate(task.startAt) : "";
-  const source = taskSourceMemo(task, context);
+  const completedLabel = complete && task.completedAt ? formatTaskDateTime(task.completedAt) : "";
+  const sourceMemoId = taskLinkedMemoId(task);
   return `
     <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-task-id="${escapeAttr(task.id)}">
       <label class="memo-task-check">
@@ -564,12 +585,13 @@ function taskCardTemplate(task, context) {
           ${task.parentId ? `<span>子任务</span>` : ""}
           ${dueLabel ? `<time datetime="${escapeAttr(task.dueAt)}">截止 ${escapeHTML(dueLabel)}</time>` : ""}
           ${startLabel ? `<time datetime="${escapeAttr(task.startAt)}">开始 ${escapeHTML(startLabel)}</time>` : ""}
+          ${completedLabel ? `<time datetime="${escapeAttr(task.completedAt)}">完成 ${escapeHTML(completedLabel)}</time>` : ""}
           ${task.noteCount ? `<span>${task.noteCount} notes</span>` : ""}
           ${task.subtaskCount ? `<span>${task.subtaskCount} subtasks</span>` : ""}
+          ${sourceMemoId ? sourceMemoMarkerTemplate(sourceMemoId) : ""}
           ${(task.contexts || []).slice(0, 3).map((item) => `<span>@${escapeHTML(item)}</span>`).join("")}
           ${(task.tags || []).slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
         </div>
-        ${source ? taskSourceTemplate(source) : ""}
       </div>
       <div class="memo-task-actions">
         <button class="memo-action-button" type="button" data-action="addTaskNote" title="添加 note">${SVG.edit}</button>
@@ -579,34 +601,17 @@ function taskCardTemplate(task, context) {
   `;
 }
 
-function taskSourceMemo(task, context) {
+function taskLinkedMemoId(task) {
   const source = task && task.source ? task.source : {};
   const memoId = String(source.memoId || "").trim();
-  if (!memoId) return null;
-  const memos = (context && context.memos) || [];
-  const memo = memos.find((item) => item.id === memoId) || null;
-  return {
-    line: Number.isFinite(Number(source.line)) ? Math.max(0, Number(source.line)) : 0,
-    memo,
-    memoId,
-    text: String(source.text || "").trim(),
-    title: memo ? memoTitle(memo) : memoId,
-  };
+  return memoId;
 }
 
-function taskSourceTemplate(source) {
-  const lineLabel = source.line ? `L${source.line}` : "";
+function sourceMemoMarkerTemplate(memoId) {
   return `
-    <div class="memo-task-source">
-      <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" data-memo-id="${escapeAttr(source.memoId)}" title="查看来源 memo">
-        ${SVG.link}
-        <span>
-          <small>来源 memo ${lineLabel ? escapeHTML(lineLabel) : ""}</small>
-          <strong>${escapeHTML(source.title)}</strong>
-          ${source.text ? `<em>${escapeHTML(source.text)}</em>` : ""}
-        </span>
-      </button>
-    </div>
+    <button class="memo-source-marker" type="button" data-action="openSourceMemo" data-memo-id="${escapeAttr(memoId)}" title="有关联 memo" aria-label="有关联 memo">
+      ${SVG.link}
+    </button>
   `;
 }
 
@@ -621,9 +626,29 @@ function emptyTasksTemplate() {
 }
 
 function formatTaskDate(value) {
-  const date = new Date(value);
+  const date = taskDateValue(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function formatTaskDateTime(value) {
+  const date = taskDateValue(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "numeric",
+  });
+}
+
+function taskDateValue(value) {
+  const raw = String(value || "").trim();
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+  }
+  return new Date(raw);
 }
 
 function taskPriorityLabel(priority) {
@@ -637,6 +662,165 @@ function taskPriorityLabel(priority) {
     default:
       return "无";
   }
+}
+
+function gtdItemWorkspaceTemplate(options) {
+  const milestones = (options && options.milestones) || [];
+  return `
+    <section class="memo-task-workspace">
+      <form class="memo-task-create" data-gtd-item-create-form>
+        <input name="title" type="text" placeholder="捕捉开放事项、bug、想法或问题" autocomplete="off" />
+        <select name="type" aria-label="事项类型">
+          <option value="idea">想法</option>
+          <option value="feature">功能</option>
+          <option value="bug">Bug</option>
+          <option value="question">问题</option>
+          <option value="chore">杂项</option>
+        </select>
+        <select name="milestoneId" aria-label="里程碑">
+          <option value="">无里程碑</option>
+          ${milestones.filter((item) => item.status !== "completed" && item.status !== "cancelled").map((item) => `<option value="${escapeAttr(item.id)}">${escapeHTML(item.title)}</option>`).join("")}
+        </select>
+        <button class="memo-primary-button" type="submit">${SVG.plus}<span>添加</span></button>
+      </form>
+    </section>
+  `;
+}
+
+function gtdItemGroupTemplate(label, items, context) {
+  if (!items.length) return "";
+  return `
+    <section class="memo-todo-group memo-task-group" aria-label="${escapeAttr(label)}">
+      <div class="memo-todo-group-head">
+        <span>${escapeHTML(label)}</span>
+        <strong>${items.length}</strong>
+      </div>
+      ${items.map((item) => gtdItemCardTemplate(item, context || {})).join("")}
+    </section>
+  `;
+}
+
+function gtdItemCardTemplate(item, context) {
+  const milestone = ((context && context.milestones) || []).find((entry) => entry.id === item.milestoneId);
+  const projectBadge = projectBadgeTemplate(item.projectId, (context && context.projects) || []);
+  const closed = item.status === "closed" || item.status === "resolved";
+  return `
+    <article class="memo-task-card ${closed ? "is-complete" : ""} is-priority-none" data-gtd-item-id="${escapeAttr(item.id)}">
+      <span class="memo-task-check" aria-hidden="true"></span>
+      <div class="memo-task-body">
+        <div class="memo-task-title-row">
+          <strong>${escapeHTML(item.title)}</strong>
+          <span class="memo-task-priority">${gtdItemTypeLabel(item.type)}</span>
+        </div>
+        <div class="memo-task-meta">
+          ${projectBadge}
+          <span>${gtdItemStatusLabel(item.status)}</span>
+          ${milestone ? `<span>${escapeHTML(milestone.title)}</span>` : ""}
+          ${item.linkedTaskIds.length ? `<span>${item.linkedTaskIds.length} tasks</span>` : ""}
+          ${item.linkedMemoIds.length ? `<span>${item.linkedMemoIds.length} memos</span>` : ""}
+          ${(item.labels || []).slice(0, 4).map((label) => `<span>#${escapeHTML(label)}</span>`).join("")}
+        </div>
+        ${item.decision ? `<p class="memo-task-note">${escapeHTML(item.decision)}</p>` : ""}
+      </div>
+      <div class="memo-task-actions">
+        ${item.status === "open" ? `<button class="memo-action-button" type="button" data-action="triageGTDItem" title="标记已澄清">${SVG.check}</button>` : ""}
+        ${!closed ? `<button class="memo-action-button" type="button" data-action="waitGTDItem" title="标记等待">${SVG.clock}</button>` : ""}
+        ${!closed ? `<button class="memo-action-button" type="button" data-action="closeGTDItem" title="关闭">${SVG.archive}</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function gtdMilestoneWorkspaceTemplate() {
+  return `
+    <section class="memo-task-workspace">
+      <form class="memo-task-create" data-gtd-milestone-create-form>
+        <input name="title" type="text" placeholder="新增阶段目标，例如 v0.2 GTD Inbox" autocomplete="off" />
+        <select name="status" aria-label="状态">
+          <option value="planned">计划中</option>
+          <option value="active">进行中</option>
+        </select>
+        <input name="targetAt" type="date" aria-label="目标日期" />
+        <button class="memo-primary-button" type="submit">${SVG.plus}<span>添加</span></button>
+      </form>
+    </section>
+  `;
+}
+
+function gtdMilestoneGroupTemplate(label, milestones, context) {
+  if (!milestones.length) return "";
+  return `
+    <section class="memo-todo-group memo-task-group" aria-label="${escapeAttr(label)}">
+      <div class="memo-todo-group-head">
+        <span>${escapeHTML(label)}</span>
+        <strong>${milestones.length}</strong>
+      </div>
+      ${milestones.map((milestone) => gtdMilestoneCardTemplate(milestone, context || {})).join("")}
+    </section>
+  `;
+}
+
+function gtdMilestoneCardTemplate(milestone, context) {
+  const items = (context.items || []).filter((item) => item.milestoneId === milestone.id || milestone.itemIds.includes(item.id));
+  const tasks = (context.tasks || []).filter((task) => milestone.taskIds.includes(task.id));
+  const openItems = items.filter((item) => item.status !== "closed" && item.status !== "resolved").length;
+  const openTasks = tasks.filter((task) => task.status !== "completed" && task.status !== "cancelled" && task.status !== "archived").length;
+  const target = milestone.targetAt ? formatTaskDate(milestone.targetAt) : "";
+  const complete = milestone.status === "completed";
+  return `
+    <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-none" data-gtd-milestone-id="${escapeAttr(milestone.id)}">
+      <span class="memo-task-check" aria-hidden="true"></span>
+      <div class="memo-task-body">
+        <div class="memo-task-title-row">
+          <strong>${escapeHTML(milestone.title)}</strong>
+          <span class="memo-task-priority">${gtdMilestoneStatusLabel(milestone.status)}</span>
+        </div>
+        <div class="memo-task-meta">
+          ${target ? `<time datetime="${escapeAttr(milestone.targetAt)}">目标 ${escapeHTML(target)}</time>` : ""}
+          <span>${openItems} open items</span>
+          <span>${openTasks} open tasks</span>
+          <span>${items.length} items</span>
+          <span>${tasks.length} tasks</span>
+        </div>
+      </div>
+      <div class="memo-task-actions">
+        ${milestone.status === "planned" ? `<button class="memo-action-button" type="button" data-action="activateGTDMilestone" title="开始">${SVG.check}</button>` : ""}
+        ${!complete ? `<button class="memo-action-button" type="button" data-action="completeGTDMilestone" title="完成">${SVG.archive}</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function gtdItemTypeLabel(type) {
+  const labels = {
+    bug: "Bug",
+    chore: "杂项",
+    feature: "功能",
+    idea: "想法",
+    question: "问题",
+  };
+  return labels[type] || labels.idea;
+}
+
+function gtdItemStatusLabel(status) {
+  const labels = {
+    closed: "已关闭",
+    open: "Open",
+    resolved: "已解决",
+    triaged: "已澄清",
+    waiting: "等待",
+  };
+  return labels[status] || labels.open;
+}
+
+function gtdMilestoneStatusLabel(status) {
+  const labels = {
+    active: "进行中",
+    cancelled: "已取消",
+    completed: "已完成",
+    planned: "计划中",
+  };
+  return labels[status] || labels.planned;
 }
 
 function linkTemplate(link) {
@@ -653,10 +837,7 @@ function linkTemplate(link) {
         </span>
       </a>
       <div class="memo-resource-source">
-        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
-          <span>来源 memo</span>
-          <strong>${escapeHTML(link.sourceText)}</strong>
-        </button>
+        ${sourceMemoMarkerTemplate(link.memoId)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(link.memo.createdAt)}">${formatRelativeDate(link.memo.createdAt)}</time>
           <span>${SVG[visibility.icon]} ${visibility.label}</span>
@@ -702,10 +883,7 @@ function resourceTemplate(resource) {
     <article class="memo-resource-card is-${resource.type}" data-memo-id="${escapeAttr(resource.memoId)}">
       ${target}
       <div class="memo-resource-source">
-        <button class="memo-todo-source-button" type="button" data-action="openSourceMemo" title="查看来源 memo">
-          <span>来源 memo</span>
-          <strong>${escapeHTML(resource.sourceText)}</strong>
-        </button>
+        ${sourceMemoMarkerTemplate(resource.memoId)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(resource.memo.createdAt)}">${formatRelativeDate(resource.memo.createdAt)}</time>
           <span>${SVG[visibility.icon]} ${visibility.label}</span>
@@ -808,6 +986,10 @@ export {
   emptyLinksTemplate,
   emptyTasksTemplate,
   emptyTodosTemplate,
+  gtdItemGroupTemplate,
+  gtdItemWorkspaceTemplate,
+  gtdMilestoneGroupTemplate,
+  gtdMilestoneWorkspaceTemplate,
   linkTemplate,
   memoTemplate,
   projectFilterTemplate,
