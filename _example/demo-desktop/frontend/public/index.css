@@ -1689,10 +1689,25 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-command-result-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.memo-command-result-kind {
+  background: var(--BG-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--FG-1);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 3px 5px;
 }
 
 .memo-command-result-summary,
@@ -2691,6 +2706,10 @@ body.is-fixed-window .memo-window-shell {
   padding: 12px;
 }
 
+.memo-resource-card.is-code.is-snippet {
+  border-color: var(--memo-accent-border);
+}
+
 .memo-resource-target {
   align-items: center;
   background: var(--BG-1);
@@ -2714,6 +2733,20 @@ body.is-fixed-window .memo-window-shell {
 .memo-resource-target:hover {
   border-color: var(--memo-accent-border);
   text-decoration: none;
+}
+
+.memo-code-block-head {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--FG-0);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 58px;
+  min-width: 0;
+  padding: 10px 12px;
 }
 
 .memo-resource-icon {
@@ -2764,6 +2797,20 @@ body.is-fixed-window .memo-window-shell {
   white-space: nowrap;
 }
 
+.memo-code-block-badge {
+  background: var(--BG-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--FG-1);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: 6px;
+  padding: 3px 5px;
+  vertical-align: middle;
+}
+
 .memo-resource-url {
   color: var(--FG-1);
   font-size: var(--font-sm);
@@ -2771,6 +2818,26 @@ body.is-fixed-window .memo-window-shell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.memo-code-block-preview {
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--FG-0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-sm);
+  line-height: 1.55;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.memo-code-block-preview code {
+  display: block;
+  min-width: max-content;
+  white-space: pre;
 }
 
 .memo-todo-card.is-complete {
