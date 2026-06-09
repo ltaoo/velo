@@ -42,7 +42,14 @@ export function collectTodos(memos) {
   const todos = [];
   memos.forEach((memo) => {
     const lines = memoLines(memo.content);
+    let inCode = false;
     lines.forEach((line, lineIndex) => {
+      if (isMemoFenceLine(line)) {
+        inCode = !inCode;
+        return;
+      }
+      if (inCode) return;
+
       const task = parseTaskLine(line);
       if (!task) return;
       todos.push({
@@ -113,7 +120,7 @@ export function cleanMemoLine(line) {
 
 export function extractTags(text) {
   const tags = new Set();
-  const matches = String(text || "").match(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g) || [];
+  const matches = memoSearchableText(text).match(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g) || [];
   matches.forEach((match) => tags.add(match.trim().slice(1)));
   return Array.from(tags);
 }
@@ -178,8 +185,9 @@ export function parseMemoReferences(content) {
     }
     if (inCode) return;
 
+    const searchableLine = maskMemoInlineCode(line);
     const pattern = /(!?)\[\[([^\]\n]+)\]\]/g;
-    let match = pattern.exec(line);
+    let match = pattern.exec(searchableLine);
     while (match) {
       const ref = parseMemoReferenceInner(match[2], match[1] === "!");
       if (ref) {
@@ -189,7 +197,7 @@ export function parseMemoReferences(content) {
           raw: match[0],
         });
       }
-      match = pattern.exec(line);
+      match = pattern.exec(searchableLine);
     }
   });
 
@@ -263,7 +271,42 @@ export function memoLines(content) {
 }
 
 export function isMemoFenceLine(line) {
-  return String(line || "").trim().startsWith("```");
+  const trimmed = String(line || "").trim();
+  return trimmed.startsWith("```") || trimmed.startsWith("~~~");
+}
+
+export function memoSearchableText(content) {
+  const lines = memoLines(content);
+  let inCode = false;
+  return lines
+    .map(function (line) {
+      if (isMemoFenceLine(line)) {
+        inCode = !inCode;
+        return " ".repeat(line.length);
+      }
+      if (inCode) return " ".repeat(line.length);
+      return maskMemoInlineCode(line);
+    })
+    .join("\n");
+}
+
+export function maskMemoInlineCode(value) {
+  const chars = String(value || "").split("");
+  let index = 0;
+  while (index < chars.length) {
+    if (chars[index] !== "`") {
+      index += 1;
+      continue;
+    }
+    const runStart = index;
+    while (index < chars.length && chars[index] === "`") index += 1;
+    const delimiter = chars.slice(runStart, index).join("");
+    const closeIndex = chars.slice(index).join("").indexOf(delimiter);
+    const end = closeIndex >= 0 ? index + closeIndex + delimiter.length : chars.length;
+    for (let i = runStart; i < end; i += 1) chars[i] = " ";
+    index = end;
+  }
+  return chars.join("");
 }
 
 export function parseMemoHeadingLine(line) {

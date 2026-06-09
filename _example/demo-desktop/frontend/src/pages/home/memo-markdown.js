@@ -16,111 +16,137 @@ import { cloudStorageById, resolveAssetUrl } from "./memo-editor.js";
 import { SVG } from "./memo-icons.js";
 import { escapeAttr, escapeHTML } from "./memo-utils.js";
 
-function renderMemoMarkdown(content, context = {}) {
+function renderMemoMarkdown(content, context = {}, lineNumberOffset = 0) {
   const lines = memoLines(content);
+  return `<div class="memo-line-list">${renderMemoMarkdownLines(lines, context, lineNumberOffset)}</div>`;
+}
+
+function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
   let html = "";
   let inCode = false;
 
-  lines.forEach((line, index) => {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     const lineNumber = index + 1;
-    if (line.trim().startsWith("```")) {
+
+    if (!inCode && isQuoteLine(line)) {
+      const quoteStart = index;
+      const quoteLines = [];
+      while (index < lines.length && isQuoteLine(lines[index])) {
+        quoteLines.push(stripQuoteMarker(lines[index]));
+        index++;
+      }
+      index--;
+      html += memoLineTemplate(
+        quoteStart + 1 + lineNumberOffset,
+        `<blockquote>${renderMemoMarkdown(quoteLines.join("\n"), context, quoteStart + lineNumberOffset)}</blockquote>`,
+        "is-quote",
+      );
+      continue;
+    }
+
+    if (isMemoFenceLine(line)) {
       const fenceClass = inCode ? "is-code-end" : "is-code-start";
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `<pre class="memo-code-line is-fence"><code>${escapeHTML(line)}</code></pre>`,
         `is-code is-code-fence ${fenceClass}`,
       );
       inCode = !inCode;
-      return;
+      continue;
     }
 
     if (inCode) {
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `<pre class="memo-code-line"><code>${escapeHTML(line)}</code></pre>`,
         "is-code is-code-body",
       );
-      return;
+      continue;
     }
 
     if (!line.trim()) {
-      html += memoLineTemplate(lineNumber, '<div class="memo-markdown-gap"></div>', "is-empty");
-      return;
+      html += memoLineTemplate(lineNumber + lineNumberOffset, '<div class="memo-markdown-gap"></div>', "is-empty");
+      continue;
     }
 
     const memoEmbed = parseStandaloneMemoEmbed(line);
     if (memoEmbed) {
-      html += memoLineTemplate(lineNumber, renderMemoEmbedCard(memoEmbed, context), "is-embed");
-      return;
+      html += memoLineTemplate(lineNumber + lineNumberOffset, renderMemoEmbedCard(memoEmbed, context), "is-embed");
+      continue;
     }
 
     const standaloneResource = parseStandaloneMarkdownResource(line);
     if (standaloneResource) {
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         standaloneResource.type === "image"
           ? renderMemoImageBlock(standaloneResource)
           : renderMemoFileBlock(standaloneResource),
         "is-resource",
       );
-      return;
+      continue;
     }
 
     const task = parseTaskLine(line);
     if (task) {
+      const sourceLineIndex = index + lineNumberOffset;
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `
         <label class="memo-task-line">
-          <input type="checkbox" ${context.readonly ? "disabled" : `data-task-line="${index}"`} ${task.checked ? "checked" : ""} />
+          <input type="checkbox" ${context.readonly ? "disabled" : `data-task-line="${sourceLineIndex}"`} ${task.checked ? "checked" : ""} />
           <span>${inlineMarkdown(task.text, context)}</span>
         </label>
       `,
         "is-task",
       );
-      return;
+      continue;
     }
 
     const unorderedMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
     if (unorderedMatch) {
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `<div class="memo-line-list-item is-ul" style="--memo-list-indent: ${listIndentWidth(unorderedMatch[1])}px"><span class="memo-line-list-content">${inlineMarkdown(unorderedMatch[2], context)}</span></div>`,
         "is-list",
       );
-      return;
+      continue;
     }
 
     const orderedMatch = line.match(/^(\s*)(\d+\.)\s+(.*)$/);
     if (orderedMatch) {
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `<div class="memo-line-list-item is-ol" style="--memo-list-indent: ${listIndentWidth(orderedMatch[1])}px"><span class="memo-line-list-marker">${escapeHTML(orderedMatch[2])}</span><span class="memo-line-list-content">${inlineMarkdown(orderedMatch[3], context)}</span></div>`,
         "is-list",
       );
-      return;
+      continue;
     }
 
     const heading = parseMemoHeadingLine(line);
     if (heading) {
       html += memoLineTemplate(
-        lineNumber,
+        lineNumber + lineNumberOffset,
         `<h${heading.level} class="memo-heading memo-heading-${heading.level}">${inlineMarkdown(heading.text, context)}</h${heading.level}>`,
         `is-heading is-heading-${heading.level}`,
       );
-      return;
+      continue;
     }
 
-    const quote = line.match(/^>\s?(.*)$/);
-    if (quote) {
-      html += memoLineTemplate(lineNumber, `<blockquote>${inlineMarkdown(quote[1], context)}</blockquote>`, "is-quote");
-      return;
-    }
+    html += memoLineTemplate(lineNumber + lineNumberOffset, `<p>${inlineMarkdown(line, context)}</p>`);
+  }
 
-    html += memoLineTemplate(lineNumber, `<p>${inlineMarkdown(line, context)}</p>`);
-  });
+  return html;
+}
 
-  return `<div class="memo-line-list">${html}</div>`;
+function isQuoteLine(line) {
+  return /^>\s?/.test(String(line || ""));
+}
+
+function stripQuoteMarker(line) {
+  const match = String(line || "").match(/^>\s?(.*)$/);
+  return match ? match[1] : line;
 }
 
 function memoLineTemplate(lineNumber, body, className = "") {
@@ -182,7 +208,7 @@ function replaceMemoTimeSyntax(html) {
     .map(function (part) {
       if (!part || part.charAt(0) === "<") return part;
       return part.replace(
-        /(^|[\s([{（【「『])(::|：：)((?:\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))/g,
+        /(^|[\s([{（【「『])(::)((?:\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))/g,
         function (_, prefix, trigger, value) {
           return prefix + renderMemoTimeToken(trigger, value);
         },

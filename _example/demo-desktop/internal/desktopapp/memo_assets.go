@@ -23,7 +23,8 @@ type memoAssetReference struct {
 }
 
 func extractMemoTags(content string) []string {
-	matches := memoTagPattern.FindAllStringSubmatch(content, -1)
+	searchText := memoSearchableMarkdown(content)
+	matches := memoTagPattern.FindAllStringSubmatch(searchText, -1)
 	tags := make([]string, 0, len(matches))
 	for _, match := range matches {
 		if len(match) > 1 {
@@ -34,7 +35,8 @@ func extractMemoTags(content string) []string {
 }
 
 func extractMemoReferences(content string) []string {
-	matches := memoReferencePattern.FindAllStringSubmatch(content, -1)
+	searchText := memoSearchableMarkdown(content)
+	matches := memoReferencePattern.FindAllStringSubmatch(searchText, -1)
 	refs := make([]string, 0, len(matches))
 	for _, match := range matches {
 		if len(match) > 1 {
@@ -48,6 +50,7 @@ func extractMemoReferences(content string) []string {
 }
 
 func extractMemoAssetReferences(content string) []memoAssetReference {
+	searchText := memoSearchableMarkdown(content)
 	seen := map[string]bool{}
 	refs := []memoAssetReference{}
 	markdownRanges := [][2]int{}
@@ -64,19 +67,81 @@ func extractMemoAssetReferences(content string) []memoAssetReference {
 		refs = append(refs, ref)
 	}
 
-	for _, match := range memoMarkdownURLPattern.FindAllStringSubmatchIndex(content, -1) {
+	for _, match := range memoMarkdownURLPattern.FindAllStringSubmatchIndex(searchText, -1) {
 		if len(match) >= 4 {
 			markdownRanges = append(markdownRanges, [2]int{match[0], match[1]})
-			add(content[match[2]:match[3]])
+			add(searchText[match[2]:match[3]])
 		}
 	}
-	for _, match := range memoAssetTokenPattern.FindAllStringIndex(content, -1) {
+	for _, match := range memoAssetTokenPattern.FindAllStringIndex(searchText, -1) {
 		if len(match) != 2 || memoByteRangeContains(markdownRanges, match[0]) {
 			continue
 		}
-		add(content[match[0]:match[1]])
+		add(searchText[match[0]:match[1]])
 	}
 	return refs
+}
+
+func memoSearchableMarkdown(content string) string {
+	lines := strings.Split(normalizeMemoContent(content), "\n")
+	output := make([]string, 0, len(lines))
+	inCode := false
+	for _, line := range lines {
+		if isMemoCodeFenceLine(line) {
+			output = append(output, strings.Repeat(" ", len(line)))
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			output = append(output, strings.Repeat(" ", len(line)))
+			continue
+		}
+		output = append(output, maskMemoInlineCode(line))
+	}
+	return strings.Join(output, "\n")
+}
+
+func memoLineIndexInCodeBlock(lines []string, targetIndex int) bool {
+	inCode := false
+	for index, line := range lines {
+		if index == targetIndex {
+			return inCode || isMemoCodeFenceLine(line)
+		}
+		if isMemoCodeFenceLine(line) {
+			inCode = !inCode
+		}
+	}
+	return false
+}
+
+func isMemoCodeFenceLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+}
+
+func maskMemoInlineCode(line string) string {
+	text := []byte(line)
+	for index := 0; index < len(text); {
+		if text[index] != '`' {
+			index++
+			continue
+		}
+		runStart := index
+		for index < len(text) && text[index] == '`' {
+			index++
+		}
+		delimiter := string(text[runStart:index])
+		closeIndex := strings.Index(string(text[index:]), delimiter)
+		end := len(text)
+		if closeIndex >= 0 {
+			end = index + closeIndex + len(delimiter)
+		}
+		for i := runStart; i < end; i++ {
+			text[i] = ' '
+		}
+		index = end
+	}
+	return string(text)
 }
 
 func memoByteRangeContains(ranges [][2]int, index int) bool {

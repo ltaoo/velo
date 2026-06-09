@@ -1,4 +1,4 @@
-import { cleanMemoLine, compactText, memoLines } from "./memos.js";
+import { cleanMemoLine, compactText, isMemoFenceLine, maskMemoInlineCode, memoLines } from "./memos.js";
 import { parseAssetReference } from "./storage.js";
 
 export function collectLinks(memos) {
@@ -22,7 +22,13 @@ export function collectMemoReferences(memos) {
   const references = [];
   memos.forEach((memo) => {
     const lines = memoLines(memo.content);
+    let inCode = false;
     lines.forEach((line, lineIndex) => {
+      if (isMemoFenceLine(line)) {
+        inCode = !inCode;
+        return;
+      }
+      if (inCode) return;
       references.push(...collectLineReferences(memo, lines, line, lineIndex));
     });
   });
@@ -30,12 +36,13 @@ export function collectMemoReferences(memos) {
 }
 
 export function collectLineReferences(memo, lines, line, lineIndex) {
+  const searchableLine = maskMemoInlineCode(line);
   const references = [];
   const markdownRanges = [];
   const markdownLinkRegex = /(!?)\[([^\]]*)\]\(([^)]+)\)/g;
   let match;
 
-  while ((match = markdownLinkRegex.exec(line))) {
+  while ((match = markdownLinkRegex.exec(searchableLine))) {
     markdownRanges.push([match.index, match.index + match[0].length]);
 
     const url = markdownReferenceURL(match[3]);
@@ -56,7 +63,7 @@ export function collectLineReferences(memo, lines, line, lineIndex) {
   }
 
   const rawURLRegex = /\bhttps?:\/\/[^\s<>"`]+/gi;
-  while ((match = rawURLRegex.exec(line))) {
+  while ((match = rawURLRegex.exec(searchableLine))) {
     if (rangeIncludes(markdownRanges, match.index)) continue;
 
     const url = cleanRawURL(match[0]);

@@ -47,6 +47,15 @@ func TestNormalizeExternalBrowserURL(t *testing.T) {
 	}
 }
 
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCreateVaultMemoWritesMarkdownFile(t *testing.T) {
 	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
 	if err != nil {
@@ -98,6 +107,51 @@ func TestCreateVaultMemoWritesMarkdownFile(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].ID != memo.ID {
 		t.Fatalf("listed memos = %#v, want created memo", listed)
+	}
+}
+
+func TestCreateVaultMemoIgnoresCodeWhenExtractingMetadata(t *testing.T) {
+	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if existing {
+		t.Fatalf("new temp vault should not be existing")
+	}
+
+	content := strings.Join([]string{
+		"#real outside [[memo:real]]",
+		"`#inline [[memo:inline]]`",
+		"```",
+		"#code [[memo:code]]",
+		"- [ ] code task #todo",
+		"```",
+		"- [ ] outside task #work",
+	}, "\n")
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    content,
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	if strings.Contains(strings.Join(memo.Tags, ","), "inline") || strings.Contains(strings.Join(memo.Tags, ","), "code") {
+		t.Fatalf("tags = %#v, want inline/code ignored", memo.Tags)
+	}
+	if !stringSliceContains(memo.Tags, "real") || !stringSliceContains(memo.Tags, "work") {
+		t.Fatalf("tags = %#v, want real and work", memo.Tags)
+	}
+	if !stringSliceContains(memo.References, "memo:real") {
+		t.Fatalf("references = %#v, want memo:real", memo.References)
+	}
+	if stringSliceContains(memo.References, "memo:inline") || stringSliceContains(memo.References, "memo:code") {
+		t.Fatalf("references = %#v, want inline/code references ignored", memo.References)
+	}
+	if strings.Contains(memo.Content, "code task [[task:") {
+		t.Fatalf("memo content = %q, code block task should not be synced", memo.Content)
+	}
+	if !strings.Contains(memo.Content, "- [ ] [[task:") {
+		t.Fatalf("memo content = %q, outside task should be synced", memo.Content)
 	}
 }
 
@@ -338,7 +392,7 @@ func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
 	}
 
 	memo, err := createVaultMemo(ctx, MemoCreateRequest{
-		Content:    "计划\n- [ ] 跟进发布 #release\n",
+		Content:    "计划\n- [ ] 跟进发布 Hello content `inline code` ::2026-06-09 #release #urgent\n",
 		Visibility: "PRIVATE",
 	})
 	if err != nil {
@@ -355,8 +409,17 @@ func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
 		t.Fatalf("tasks = %#v, want one task", tasks)
 	}
 	task := tasks[0]
-	if task.Title != "跟进发布 #release" || task.Source.MemoID != memo.ID || task.Source.Line != 2 {
+	if task.Title != "跟进发布 Hello content inline code" || task.Source.MemoID != memo.ID || task.Source.Line != 2 {
 		t.Fatalf("task = %#v, want task from memo line", task)
+	}
+	if task.DueAt != "2026-06-09" {
+		t.Fatalf("task dueAt = %q, want date from todo text", task.DueAt)
+	}
+	if !stringSliceContains(task.Tags, "release") || !stringSliceContains(task.Tags, "urgent") {
+		t.Fatalf("task tags = %#v, want tags from todo text", task.Tags)
+	}
+	if !strings.Contains(memo.Content, "[[task:"+task.ID+"|跟进发布 Hello content inline code]]") {
+		t.Fatalf("memo content = %q, want full task title alias", memo.Content)
 	}
 
 	updatedContent := strings.Replace(memo.Content, "- [ ]", "- [x]", 1)
@@ -373,6 +436,32 @@ func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
 	}
 	if completed.Status != taskStatusCompleted {
 		t.Fatalf("task status = %q, want completed", completed.Status)
+	}
+}
+
+func TestTaskTitleFromTodoTextUsesFullCleanedText(t *testing.T) {
+	metadata := parseTaskMetadataFromTodoText("Hello content `inline code` ::2026-06-09 #work")
+	if metadata.Title != "Hello content inline code" {
+		t.Fatalf("title = %q, want full cleaned text", metadata.Title)
+	}
+	if metadata.DueAt != "2026-06-09" {
+		t.Fatalf("dueAt = %q, want parsed date", metadata.DueAt)
+	}
+	if !stringSliceContains(metadata.Tags, "work") {
+		t.Fatalf("tags = %#v, want work", metadata.Tags)
+	}
+}
+
+func TestTaskTitleFromTodoTextIgnoresFullwidthTimeTrigger(t *testing.T) {
+	metadata := parseTaskMetadataFromTodoText("Hello content ：：2026-06-09 #work")
+	if metadata.Title != "Hello content ：：2026-06-09" {
+		t.Fatalf("title = %q, want fullwidth trigger kept as text", metadata.Title)
+	}
+	if metadata.DueAt != "" {
+		t.Fatalf("dueAt = %q, want no date from fullwidth trigger", metadata.DueAt)
+	}
+	if !stringSliceContains(metadata.Tags, "work") {
+		t.Fatalf("tags = %#v, want work", metadata.Tags)
 	}
 }
 
@@ -478,8 +567,11 @@ func TestTaskNoteAutoCreatesSubtaskFromTodoLine(t *testing.T) {
 	if child.ParentID != parent.ID {
 		t.Fatalf("child parent id = %q, want %q", child.ParentID, parent.ID)
 	}
-	if child.Title != "检查更新包 #qa" {
+	if child.Title != "检查更新包" {
 		t.Fatalf("child title = %q, want todo text", child.Title)
+	}
+	if !stringSliceContains(child.Tags, "qa") {
+		t.Fatalf("child tags = %#v, want qa", child.Tags)
 	}
 	if !strings.Contains(note.Content, "[[task:"+child.ID+"|"+child.Title+"]]") {
 		t.Fatalf("note content = %q, want child task ref", note.Content)
@@ -501,6 +593,37 @@ func TestExtractMemoAssetReferences(t *testing.T) {
 		"memo-local/docs/my file.pdf": true,
 		"other/docs/report.pdf":       true,
 		"memo-local/raw.txt":          true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("asset refs length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for _, ref := range got {
+		id := memoAssetReferenceID(ref)
+		if !want[id] {
+			t.Fatalf("unexpected asset ref %q from %#v", id, got)
+		}
+		delete(want, id)
+	}
+	if len(want) > 0 {
+		t.Fatalf("missing asset refs: %#v", want)
+	}
+}
+
+func TestExtractMemoAssetReferencesIgnoresCode(t *testing.T) {
+	content := strings.Join([]string{
+		"[real](@assets/memo-local/docs/real.pdf)",
+		"`[inline](@assets/memo-local/docs/inline.pdf)`",
+		"```",
+		"[code](@assets/memo-local/docs/code.pdf)",
+		"raw @assets/memo-local/raw-code.txt reference",
+		"```",
+		"raw @assets/memo-local/raw-real.txt reference",
+	}, "\n")
+
+	got := extractMemoAssetReferences(content)
+	want := map[string]bool{
+		"memo-local/docs/real.pdf": true,
+		"memo-local/raw-real.txt":  true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("asset refs length = %d, want %d: %#v", len(got), len(want), got)

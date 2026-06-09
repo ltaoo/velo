@@ -1,4 +1,4 @@
-import { DEFAULT_VISIBILITY, VISIBILITY, memoReferenceAlias, memoTitle } from "../../domain/memos.js";
+import { DEFAULT_VISIBILITY, VISIBILITY, isMemoFenceLine, memoReferenceAlias, memoTitle } from "../../domain/memos.js";
 import {
   CLOUD_STORAGE_KEY,
   activeCloudStorageConfig,
@@ -289,6 +289,7 @@ function installMemoEditorPlugins(editor, options) {
   const plugins = [
     createMemoReferencePlugin(editor, options || {}),
     createMemoSlashCommandPlugin(editor, options || {}),
+    createMemoTimeSyntaxHighlightPlugin(editor),
     createMemoTimePickerPlugin(editor),
   ];
   editor.view.updateState(
@@ -298,6 +299,38 @@ function installMemoEditorPlugins(editor, options) {
   );
 
   return function () {};
+}
+
+function createMemoTimeSyntaxHighlightPlugin(editor) {
+  const PM = window.ProsemirrorMod;
+  const key = new PM.PluginKey(editor.id + "-memoTimeSyntaxHighlight");
+  const timePattern = /(^|[\s([{（【「『])(::(?:\d{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32})))/g;
+
+  return new PM.Plugin({
+    key,
+    props: {
+      decorations(state) {
+        const decorations = [];
+        state.doc.descendants(function (node, pos) {
+          if (!node.isText || !node.text) return;
+          timePattern.lastIndex = 0;
+          let match = null;
+          while ((match = timePattern.exec(node.text))) {
+            const from = pos + match.index + match[1].length;
+            const to = from + match[2].length;
+            decorations.push(
+              PM.Decoration.inline(from, to, {
+                class: "mini-time-token",
+              }),
+            );
+          }
+        });
+        return decorations.length
+          ? PM.DecorationSet.create(state.doc, decorations)
+          : PM.DecorationSet.empty;
+      },
+    },
+  });
 }
 
 function defaultEditorFileItems() {
@@ -517,6 +550,7 @@ function createMemoSlashCommandPlugin(editor, options) {
 
     const $from = selection.$from;
     if (!$from.parent.isTextblock) return null;
+    if (isSelectionInsideMemoFence(state)) return null;
 
     const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
     const match = /(^|\s)\/([^\s/]*)$/u.exec(before);
@@ -662,6 +696,28 @@ function createMemoSlashCommandPlugin(editor, options) {
   });
 }
 
+function isSelectionInsideMemoFence(state) {
+  const selection = state && state.selection;
+  if (!selection || !selection.empty) return false;
+
+  const textBeforeCursor = state.doc.textBetween(0, selection.from, "\n", "\n");
+  const previousLines = textBeforeCursor.replace(/\r\n/g, "\n").split("\n").slice(0, -1);
+  let inFence = false;
+
+  previousLines.forEach(function (line) {
+    if (isMemoFenceLine(unquoteMemoFenceLine(line))) inFence = !inFence;
+  });
+  return inFence;
+}
+
+function unquoteMemoFenceLine(line) {
+  let value = String(line || "");
+  while (/^\s{0,3}>\s?/.test(value)) {
+    value = value.replace(/^\s{0,3}>\s?/, "");
+  }
+  return value;
+}
+
 function createMemoTimePickerPlugin(editor) {
   const PM = window.ProsemirrorMod;
   const key = new PM.PluginKey(editor.id + "-memoTimePicker");
@@ -670,6 +726,7 @@ function createMemoTimePickerPlugin(editor) {
     return {
       active: false,
       dismissedKey: dismissedKey || null,
+      dismissedFrom: null,
       from: null,
       items: [],
       query: "",
@@ -689,7 +746,6 @@ function createMemoTimePickerPlugin(editor) {
     const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
     const indexes = [
       { trigger: "::", index: before.lastIndexOf("::") },
-      { trigger: "：：", index: before.lastIndexOf("：：") },
     ].filter(function (item) {
       return item.index >= 0;
     });
@@ -703,6 +759,8 @@ function createMemoTimePickerPlugin(editor) {
     if (prev && !/\s/.test(prev)) return null;
 
     const query = before.slice(found.index + found.trigger.length);
+    if (!isActiveMemoTimeQuery(query)) return null;
+
     const from = selection.from - query.length - found.trigger.length;
     return {
       from,
@@ -721,7 +779,7 @@ function createMemoTimePickerPlugin(editor) {
     view.dispatch(
       view.state.tr
         .insertText(text, state.from, state.to)
-        .setMeta(key, { type: "close" })
+        .setMeta(key, { dismissTriggerFrom: true, type: "close" })
         .scrollIntoView(),
     );
     view.focus();
@@ -736,14 +794,29 @@ function createMemoTimePickerPlugin(editor) {
         const meta = transaction.getMeta(key);
         if (meta && meta.type === "close") {
           const trigger = findTrigger(newState);
-          return empty(trigger ? trigger.key : null);
+          if (!trigger) return empty();
+          return {
+            ...empty(trigger.key),
+            dismissedFrom: meta.dismissTriggerFrom ? trigger.from : null,
+          };
         }
 
         const trigger = findTrigger(newState);
         if (!trigger) return empty();
+        if (trigger.from === value.dismissedFrom) {
+          return {
+            ...empty(value.dismissedKey),
+            dismissedFrom: value.dismissedFrom,
+            from: trigger.from,
+            query: trigger.query,
+            to: trigger.to,
+            trigger: trigger.trigger,
+          };
+        }
         if (trigger.key === value.dismissedKey && !transaction.docChanged) {
           return {
             ...empty(value.dismissedKey),
+            dismissedFrom: value.dismissedFrom,
             from: trigger.from,
             query: trigger.query,
             to: trigger.to,
@@ -759,6 +832,7 @@ function createMemoTimePickerPlugin(editor) {
         return {
           active: true,
           dismissedKey: null,
+          dismissedFrom: null,
           from: trigger.from,
           items,
           query: trigger.query,
@@ -830,6 +904,17 @@ function createMemoTimePickerPlugin(editor) {
       });
     },
   });
+}
+
+function isActiveMemoTimeQuery(query) {
+  const value = String(query || "");
+  if (!value) return true;
+  if (/[\r\n]/.test(value)) return false;
+  if (/[<>()\[\]{}，。！？、；;,.]/u.test(value)) return false;
+  if (!/\s/u.test(value)) return true;
+
+  const dateTime = /^(\d{4}[-/]\d{1,2}[-/]\d{1,2})[ T](\d{0,2}(?::\d{0,2}(?::\d{0,2})?)?)$/u.exec(value);
+  return Boolean(dateTime);
 }
 
 function createFloatingMenuView(config) {
@@ -905,7 +990,7 @@ function memoSlashCommands() {
     { icon: "TODO", label: "任务", detail: "插入待办项", keywords: "todo task", text: "- [ ] " },
     { icon: "UL", label: "无序列表", detail: "插入 - 列表", keywords: "list bullet", text: "- " },
     { icon: "OL", label: "有序列表", detail: "插入 1. 列表", keywords: "list ordered", text: "1. " },
-    { icon: ">", label: "引用", detail: "插入引用块", keywords: "quote", text: "> " },
+    { icon: ">", label: "引用", detail: "插入引用块", keywords: "quote", text: "> \n> " },
     { icon: "<>", label: "代码块", detail: "插入 fenced code", keywords: "code pre", text: "```\n\n```" },
     {
       icon: "TBL",
@@ -1049,17 +1134,33 @@ function memoTimeItems(query) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
+  const in30Minutes = addMemoTime(now, { minutes: 30 });
+  const in1Hour = addMemoTime(now, { hours: 1 });
+  const in1Day = addMemoTime(now, { days: 1 });
+  const in1Week = addMemoTime(now, { days: 7 });
   const value = String(query || "").trim();
   const items = [
     { label: "当前时间", detail: formatMemoDateTime(now, true), value: formatMemoDateTime(now, true) },
-    { label: "今天", detail: formatMemoDate(today), value: formatMemoDate(today) },
     { label: "当前时分", detail: formatMemoTime(now, false), value: formatMemoTime(now, false) },
+    { label: "30分钟后", detail: formatMemoDateTime(in30Minutes, false), value: formatMemoDateTime(in30Minutes, false) },
+    { label: "1小时后", detail: formatMemoDateTime(in1Hour, false), value: formatMemoDateTime(in1Hour, false) },
+    { label: "1天后", detail: formatMemoDateTime(in1Day, false), value: formatMemoDateTime(in1Day, false) },
+    { label: "今天", detail: formatMemoDate(today), value: formatMemoDate(today) },
     { label: "明天", detail: formatMemoDate(tomorrow), value: formatMemoDate(tomorrow) },
+    { label: "1周后", detail: formatMemoDateTime(in1Week, false), value: formatMemoDateTime(in1Week, false) },
   ];
   if (value) {
     items.unshift({ label: value, detail: "使用输入值", value });
   }
   return items;
+}
+
+function addMemoTime(date, delta) {
+  const value = new Date(date);
+  if (delta.days) value.setDate(value.getDate() + delta.days);
+  if (delta.hours) value.setHours(value.getHours() + delta.hours);
+  if (delta.minutes) value.setMinutes(value.getMinutes() + delta.minutes);
+  return value;
 }
 
 function renderTimePickerMenu(menu, pluginState) {

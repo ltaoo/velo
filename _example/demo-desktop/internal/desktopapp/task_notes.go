@@ -30,6 +30,12 @@ type ParsedTaskLine struct {
 	Text    string
 }
 
+type ParsedTaskText struct {
+	DueAt string
+	Tags  []string
+	Title string
+}
+
 func createVaultTaskNote(ctx *VaultContext, req TaskNoteCreateRequest) (TaskRecord, MemoRecord, error) {
 	taskID := sanitizeTaskID(req.TaskID)
 	if taskID == "" {
@@ -57,10 +63,11 @@ func createVaultTaskNote(ctx *VaultContext, req TaskNoteCreateRequest) (TaskReco
 		Visibility: normalizeMemoVisibility(req.Visibility),
 	}
 	memo.Path = memoRelativePath(memo)
+	originalTags := extractMemoTags(memo.Content)
 	if err := syncMemoTaskLines(ctx, &memo); err != nil {
 		return TaskRecord{}, MemoRecord{}, err
 	}
-	memo.Tags = extractMemoTags(memo.Content)
+	memo.Tags = uniqueStrings(append(extractMemoTags(memo.Content), originalTags...))
 	memo.References = extractMemoReferences(memo.Content)
 	if err := writeMemoRecord(ctx, memo); err != nil {
 		return TaskRecord{}, MemoRecord{}, err
@@ -106,6 +113,9 @@ func extractSubtaskFromMemoLine(ctx *VaultContext, req TaskExtractRequest) (Task
 	if req.LineIndex < 0 || req.LineIndex >= len(lines) {
 		return TaskRecord{}, TaskRecord{}, MemoRecord{}, fmt.Errorf("line index is out of range")
 	}
+	if memoLineIndexInCodeBlock(lines, req.LineIndex) {
+		return TaskRecord{}, TaskRecord{}, MemoRecord{}, fmt.Errorf("line is inside a code block")
+	}
 	parsed, ok := parseTaskLineText(lines[req.LineIndex])
 	if !ok || strings.TrimSpace(parsed.Text) == "" {
 		return TaskRecord{}, TaskRecord{}, MemoRecord{}, fmt.Errorf("line is not a todo item")
@@ -117,8 +127,10 @@ func extractSubtaskFromMemoLine(ctx *VaultContext, req TaskExtractRequest) (Task
 		}
 		return parent, child, memo, nil
 	}
+	metadata := parseTaskMetadataFromTodoText(parsed.Text)
 	child, err := createVaultTask(ctx, TaskCreateRequest{
 		Contexts:  parent.Contexts,
+		DueAt:     metadata.DueAt,
 		ListID:    parent.ListID,
 		ParentID:  parent.ID,
 		Priority:  parent.Priority,
@@ -130,8 +142,8 @@ func extractSubtaskFromMemoLine(ctx *VaultContext, req TaskExtractRequest) (Task
 			Text:     lines[req.LineIndex],
 			Type:     "memo",
 		},
-		Tags:  uniqueStrings(append(parent.Tags, extractMemoTags(parsed.Text)...)),
-		Title: taskTitleFromTodoText(parsed.Text),
+		Tags:  uniqueStrings(append(parent.Tags, metadata.Tags...)),
+		Title: metadata.Title,
 	})
 	if err != nil {
 		return TaskRecord{}, TaskRecord{}, MemoRecord{}, err
@@ -148,9 +160,9 @@ func extractSubtaskFromMemoLine(ctx *VaultContext, req TaskExtractRequest) (Task
 		return TaskRecord{}, TaskRecord{}, MemoRecord{}, err
 	}
 	if req.ReplaceWithRef {
-		lines[req.LineIndex] = parsed.Prefix + parsed.statusMarker() + parsed.Suffix + "[[task:" + child.ID + "|" + child.Title + "]]"
+		lines[req.LineIndex] = parsed.Prefix + parsed.statusMarker() + parsed.Suffix + taskReferenceMarkdown(child)
 		memo.Content = strings.Join(lines, "\n")
-		memo.Tags = extractMemoTags(memo.Content)
+		memo.Tags = uniqueStrings(append(extractMemoTags(memo.Content), metadata.Tags...))
 		memo.References = extractMemoReferences(memo.Content)
 		memo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		memo.Path = relativeVaultPath(ctx, memoPath)
@@ -188,7 +200,7 @@ func (line ParsedTaskLine) statusMarker() string {
 }
 
 func taskTitleFromTodoText(text string) string {
-	title := cleanTaskTitleText(text)
+	title := parseTaskMetadataFromTodoText(text).Title
 	if title == "" {
 		title = strings.TrimSpace(text)
 	}
@@ -196,6 +208,30 @@ func taskTitleFromTodoText(text string) string {
 		return "Untitled task"
 	}
 	return title
+}
+
+func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
+	tags := extractMemoTags(text)
+	dueAt := ""
+	titleSource := rewriteTaskTextOutsideInlineCode(text, func(segment string) string {
+		withoutDates, foundDueAt := removeTaskDateSyntax(segment)
+		if dueAt == "" {
+			dueAt = foundDueAt
+		}
+		return removeTaskTagSyntax(withoutDates)
+	})
+	title := cleanTaskTitleText(titleSource)
+	if title == "" {
+		title = cleanTaskTitleText(text)
+	}
+	if title == "" {
+		title = "Untitled task"
+	}
+	return ParsedTaskText{
+		DueAt: dueAt,
+		Tags:  tags,
+		Title: title,
+	}
 }
 
 func cleanTaskTitleText(text string) string {
@@ -215,4 +251,113 @@ func cleanTaskTitleText(text string) string {
 		value = item.pattern.ReplaceAllString(value, item.replace)
 	}
 	return strings.TrimSpace(value)
+}
+
+func taskReferenceMarkdown(task TaskRecord) string {
+	return "[[task:" + task.ID + "|" + taskReferenceAlias(task.Title) + "]]"
+}
+
+func taskReferenceAlias(value string) string {
+	return strings.TrimSpace(strings.NewReplacer(
+		"\r", " ",
+		"\n", " ",
+		"|", " ",
+		"]", " ",
+		"[", " ",
+	).Replace(value))
+}
+
+func rewriteTaskTextOutsideInlineCode(text string, rewrite func(string) string) string {
+	value := strings.TrimSpace(text)
+	if value == "" {
+		return ""
+	}
+	var output strings.Builder
+	for index := 0; index < len(value); {
+		if value[index] != '`' {
+			next := strings.IndexByte(value[index:], '`')
+			if next < 0 {
+				output.WriteString(rewrite(value[index:]))
+				break
+			}
+			output.WriteString(rewrite(value[index : index+next]))
+			index += next
+			continue
+		}
+		runStart := index
+		for index < len(value) && value[index] == '`' {
+			index++
+		}
+		delimiter := value[runStart:index]
+		closeIndex := strings.Index(value[index:], delimiter)
+		if closeIndex < 0 {
+			output.WriteString(value[index:])
+			break
+		}
+		codeStart := index
+		codeEnd := index + closeIndex
+		output.WriteString(value[codeStart:codeEnd])
+		index = codeEnd + len(delimiter)
+	}
+	return output.String()
+}
+
+func removeTaskTagSyntax(text string) string {
+	return memoTagPattern.ReplaceAllString(text, " ")
+}
+
+func removeTaskDateSyntax(text string) (string, string) {
+	dueAt := ""
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(^|[\s([{（【「『])(::)((?:\d{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))`),
+		regexp.MustCompile(`(^|[\s([{（【「『])(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)`),
+	}
+	value := text
+	for _, pattern := range patterns {
+		value = pattern.ReplaceAllStringFunc(value, func(match string) string {
+			parts := pattern.FindStringSubmatch(match)
+			if len(parts) == 0 {
+				return match
+			}
+			raw := parts[len(parts)-1]
+			if dueAt == "" {
+				dueAt = normalizeTaskInlineDate(raw)
+			}
+			return parts[1]
+		})
+	}
+	return value, dueAt
+}
+
+func normalizeTaskInlineDate(value string) string {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return ""
+	}
+	if t := parseMemoTime(raw); !t.IsZero() {
+		return t.Format(time.RFC3339Nano)
+	}
+	normalized := strings.ReplaceAll(raw, "/", "-")
+	for _, layout := range []string{
+		"2006-1-2 15:04:05",
+		"2006-1-2 15:04",
+		"2006-1-2T15:04:05",
+		"2006-1-2T15:04",
+	} {
+		if t, err := time.ParseInLocation(layout, normalized, time.Local); err == nil {
+			return t.Format(time.RFC3339Nano)
+		}
+	}
+	if dateOnlyPattern := regexp.MustCompile(`^(\d{4})-(\d{1,2})-(\d{1,2})$`); dateOnlyPattern.MatchString(normalized) {
+		parts := dateOnlyPattern.FindStringSubmatch(normalized)
+		return parts[1] + "-" + leftPadTaskDatePart(parts[2]) + "-" + leftPadTaskDatePart(parts[3])
+	}
+	return raw
+}
+
+func leftPadTaskDatePart(value string) string {
+	if len(value) >= 2 {
+		return value
+	}
+	return "0" + value
 }

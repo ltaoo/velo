@@ -116,10 +116,11 @@ func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, erro
 		Visibility: normalizeMemoVisibility(req.Visibility),
 	}
 	memo.Path = memoRelativePath(memo)
+	originalTags := extractMemoTags(memo.Content)
 	if err := syncMemoTaskLines(ctx, &memo); err != nil {
 		return MemoRecord{}, err
 	}
-	memo.Tags = extractMemoTags(memo.Content)
+	memo.Tags = uniqueStrings(append(extractMemoTags(memo.Content), originalTags...))
 	memo.References = extractMemoReferences(memo.Content)
 	if err := writeMemoRecord(ctx, memo); err != nil {
 		return MemoRecord{}, err
@@ -165,10 +166,11 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 	}
 	memo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	memo.Path = relativeVaultPath(ctx, path)
+	originalTags := extractMemoTags(memo.Content)
 	if err := syncMemoTaskLines(ctx, &memo); err != nil {
 		return MemoRecord{}, err
 	}
-	memo.Tags = extractMemoTags(memo.Content)
+	memo.Tags = uniqueStrings(append(extractMemoTags(memo.Content), originalTags...))
 	memo.References = extractMemoReferences(memo.Content)
 	if err := writeMemoRecord(ctx, memo); err != nil {
 		return MemoRecord{}, err

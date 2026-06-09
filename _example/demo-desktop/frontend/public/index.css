@@ -434,9 +434,12 @@ ol {
   font-style: italic;
 }
 
-.mini-editor .mini-hashtag-token,
-.mini-editor .mini-time-token {
+.mini-editor .mini-hashtag-token {
   background: var(--memo-accent-soft);
+  color: var(--memo-accent-strong);
+}
+
+.mini-editor .mini-time-token {
   color: var(--memo-accent-strong);
 }
 
@@ -450,7 +453,6 @@ ol {
 .mini-editor .mini-link-token.vim-cursor-char,
 .mini-editor .mini-markdown-syntax.vim-cursor-char,
 .mini-editor .mini-inline-code.vim-cursor-char,
-.mini-editor .mini-time-token.vim-cursor-char,
 .mini-editor .mini-markdown-emphasis-token.vim-cursor-char,
 .mini-editor .mini-markdown-strike-token.vim-cursor-char,
 .mini-editor .mini-hashtag-token.vim-cursor-char,
@@ -819,6 +821,7 @@ body.is-fixed-window .memo-window-shell {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .memo-inspector {
@@ -829,6 +832,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-brand {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
   gap: 10px;
   margin-bottom: 22px;
 }
@@ -956,9 +960,14 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-sidebar-footer {
+  background: var(--BG-1);
   border-top: 1px solid var(--border);
+  bottom: 0;
+  flex: 0 0 auto;
   margin-top: auto;
-  padding-top: 12px;
+  padding: 12px 0 2px;
+  position: sticky;
+  z-index: 2;
 }
 
 .memo-settings-button {
@@ -1566,6 +1575,109 @@ body.is-fixed-window .memo-window-shell {
   width: 100%;
 }
 
+.memo-command-palette {
+  align-items: flex-start;
+  background: rgba(0, 0, 0, 0.32);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 72px 18px 18px;
+  position: fixed;
+  z-index: 30;
+}
+
+.memo-command-palette[hidden] {
+  display: none;
+}
+
+.memo-command-panel {
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.22);
+  display: grid;
+  gap: 8px;
+  max-height: min(620px, calc(100vh - 96px));
+  max-width: 640px;
+  overflow: hidden;
+  padding: 10px;
+  width: 100%;
+}
+
+.memo-command-search {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--FG-1);
+  display: flex;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+}
+
+.memo-command-search input {
+  background: transparent;
+  border: 0;
+  color: var(--FG-0);
+  font: inherit;
+  min-width: 0;
+  outline: 0;
+  width: 100%;
+}
+
+.memo-command-results {
+  display: grid;
+  gap: 4px;
+  max-height: 478px;
+  min-height: 88px;
+  overflow: auto;
+}
+
+.memo-command-result {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--FG-0);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.memo-command-result:hover,
+.memo-command-result.is-active {
+  background: var(--memo-accent-soft);
+}
+
+.memo-command-result-title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-command-result-summary,
+.memo-command-result-meta {
+  color: var(--FG-1);
+  font-size: var(--font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-command-empty {
+  align-items: center;
+  color: var(--FG-1);
+  display: flex;
+  justify-content: center;
+  min-height: 88px;
+  padding: 18px;
+}
+
 .memo-list {
   display: grid;
   gap: 12px;
@@ -1852,6 +1964,18 @@ body.is-fixed-window .memo-window-shell {
   border-left: 3px solid var(--memo-accent);
   color: var(--FG-1);
   padding-left: 10px;
+}
+
+.memo-content blockquote .memo-line-list {
+  gap: 3px;
+}
+
+.memo-content blockquote .memo-source-line {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.memo-content blockquote .memo-line-number {
+  display: none;
 }
 
 .memo-content pre {
@@ -2477,6 +2601,39 @@ body.is-fixed-window .memo-window-shell {
   display: inline-flex;
   min-height: 24px;
   padding: 0 8px;
+}
+
+.memo-task-note {
+  color: var(--FG-1);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.memo-source-marker {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.memo-source-marker:hover {
+  background: var(--memo-blue-soft);
+  border-color: var(--memo-blue);
+  color: var(--memo-blue);
+}
+
+.memo-source-marker svg {
+  height: 14px;
+  width: 14px;
 }
 
 .memo-task-actions {
