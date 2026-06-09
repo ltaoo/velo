@@ -9,6 +9,31 @@ import (
 )
 
 func registerStorageRoutes(b *velo.Box) {
+	b.Get("/api/settings/editor", func(c *velo.BoxContext) interface{} {
+		raw := b.Store.Get(editorSettingsKey)
+		settings, err := loadStoredEditorSettings(raw)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"found": raw != nil, "config": settings})
+	})
+
+	b.Post("/api/settings/editor/save", func(c *velo.BoxContext) interface{} {
+		var settings EditorSettings
+		if err := c.BindJSON(&settings); err != nil {
+			return c.Error(err.Error())
+		}
+
+		raw, err := marshalEditorSettingsForStore(settings)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		if err := b.Store.Set(editorSettingsKey, json.RawMessage(raw)); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true, "config": normalizeEditorSettings(settings)})
+	})
+
 	b.Get("/api/settings/cloud-storage", func(c *velo.BoxContext) interface{} {
 		raw := b.Store.Get(cloudStorageSettingsKey)
 		settings, err := loadStoredCloudStorageSettings(raw)

@@ -11,11 +11,85 @@ import {
 import { formatShortDate } from "./memo-date.js";
 import { closestElement, escapeHTML } from "./memo-utils.js";
 
+const EDITOR_SETTINGS_STORAGE_KEY = "demo-desktop:settings:editor:v1";
+const EDITOR_SETTINGS_API = "/api/settings/editor";
+const EDITOR_SETTINGS_SAVE_API = "/api/settings/editor/save";
+
 let cloudStorageSettingsCache = null;
+
+function defaultEditorSettings() {
+  return {
+    vimMode: false,
+  };
+}
+
+function normalizeEditorSettings(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    vimMode: raw.vimMode === true,
+  };
+}
+
+function loadEditorSettings() {
+  return loadLocalEditorSettings();
+}
+
+function loadLocalEditorSettings() {
+  try {
+    return normalizeEditorSettings(JSON.parse(localStorage.getItem(EDITOR_SETTINGS_STORAGE_KEY) || "null"));
+  } catch (_) {
+    return defaultEditorSettings();
+  }
+}
+
+function saveLocalEditorSettings(value) {
+  const settings = normalizeEditorSettings(value);
+  localStorage.setItem(EDITOR_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  return settings;
+}
+
+function loadEditorSettingsFromVault() {
+  if (typeof invoke !== "function") {
+    return Promise.resolve(loadLocalEditorSettings());
+  }
+  return invoke(EDITOR_SETTINGS_API, { method: "GET" }).then(
+    function (resp) {
+      if (resp && resp.code === 0 && resp.data && resp.data.config) {
+        return saveLocalEditorSettings(resp.data.config);
+      }
+      if (resp && resp.code === 0) return loadLocalEditorSettings();
+      throw new Error((resp && resp.msg) || "读取编辑器设置失败");
+    },
+    function (err) {
+      const localSettings = loadLocalEditorSettings();
+      if (localSettings) return localSettings;
+      throw err || new Error("读取编辑器设置失败");
+    },
+  );
+}
+
+function saveEditorSettingsToVault(value) {
+  const settings = normalizeEditorSettings(value);
+  if (typeof invoke !== "function") {
+    return Promise.resolve(saveLocalEditorSettings(settings));
+  }
+  return invoke(EDITOR_SETTINGS_SAVE_API, {
+    method: "POST",
+    args: settings,
+  }).then(function (resp) {
+    if (!resp || resp.code !== 0) {
+      throw new Error((resp && resp.msg) || "保存编辑器设置失败");
+    }
+    const saved = normalizeEditorSettings(resp.data && resp.data.config ? resp.data.config : settings);
+    saveLocalEditorSettings(saved);
+    return saved;
+  });
+}
 
 function createMiniEditor(host, options) {
   const editorOptions = options || {};
   if (!window.ProsemirrorEditor) return createFallbackEditor(host, editorOptions);
+  const vimEnabled = editorOptions.vim === true;
 
   host.dataset.placeholder = editorOptions.placeholder || "";
 
@@ -25,7 +99,7 @@ function createMiniEditor(host, options) {
     $el: host,
     mode: "mini",
     value: editorOptions.value || "",
-    vim: editorOptions.vim !== false,
+    vim: vimEnabled,
     fileItems: editorOptions.fileItems || defaultEditorFileItems(),
     onChange(instance) {
       syncEmptyState();
@@ -71,12 +145,12 @@ function createMiniEditor(host, options) {
   });
 
   const removePlugins = installMemoEditorPlugins(editor, editorOptions);
-  const removeStatus = installVimStatus(host, editor, editorOptions.vimStatusHost);
-  const removeVimFocus = installVimEditingMode(host, editor);
+  const removeStatus = vimEnabled ? installVimStatus(host, editor, editorOptions.vimStatusHost) : function () {};
+  const removeVimFocus = vimEnabled ? installVimEditingMode(host, editor) : function () {};
   const removeSubmit = installSubmitShortcut(host, editorOptions);
   const removeDrop = installFileDropHandler(host, editor);
 
-  setEditorVimMode(editor, "insert");
+  if (vimEnabled) setEditorVimMode(editor, "insert");
   syncEmptyState();
 
   api = {
@@ -93,7 +167,7 @@ function createMiniEditor(host, options) {
     },
     focus() {
       editor.focus();
-      setEditorVimMode(editor, "insert");
+      if (vimEnabled) setEditorVimMode(editor, "insert");
     },
     getText() {
       return editor.getText();
@@ -1011,6 +1085,7 @@ function memoSlashCommands() {
     { icon: "OL", label: "有序列表", detail: "插入 1. 列表", keywords: "list ordered", text: "1. " },
     { icon: ">", label: "引用", detail: "插入引用块", keywords: "quote", text: "> \n> " },
     { icon: "<>", label: "代码块", detail: "插入 fenced code", keywords: "code pre", text: "```\n\n```" },
+    { icon: "SNIP", label: "代码片段", detail: "插入可搜索 snippet", keywords: "snippet snip code alias 代码片段", text: "```sh snippet 标题 | alias\n\n```" },
     {
       icon: "TBL",
       label: "表格",
@@ -1605,11 +1680,17 @@ function insertMarkdownLinkIntoTextarea(textarea, url, onChange) {
 }
 
 export {
+  EDITOR_SETTINGS_STORAGE_KEY,
   cloudStorageById,
   createMiniEditor,
+  defaultEditorSettings,
   filesToMarkdown,
   insertPlainTextIntoEditor,
+  loadEditorSettingsFromVault,
+  loadEditorSettings,
+  normalizeEditorSettings,
   refreshCloudStorageSettings,
   resolveAssetUrl,
+  saveEditorSettingsToVault,
   uploadErrorMessage,
 };

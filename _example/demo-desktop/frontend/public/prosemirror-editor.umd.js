@@ -2184,7 +2184,7 @@
           const lineFrom = offset;
           const lineTo = offset + node.nodeSize;
           const textFrom = offset + 1;
-          const fence = /^```\S*\s*$/.test(text);
+          const fence = /^\s*(?:```+|~~~+).*?$/.test(text);
 
           if (fence) {
             pushMiniLineDecoration(decorations, lineFrom, lineTo, "mini-code-fence-line");
@@ -2557,7 +2557,7 @@
       }
 
       vimPluginsFor() {
-        if (this.options.vim === false || typeof root.createVimPlugin !== "function") return [];
+        if (this.options.vim !== true || typeof root.createVimPlugin !== "function") return [];
 
         return root.createVimPlugin({
           onWriteDraft: (detail) => {

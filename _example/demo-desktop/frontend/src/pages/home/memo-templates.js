@@ -95,6 +95,12 @@ function activeViewMeta(view) {
       subtitle: "从所有 memo 中汇总文件和图片",
       title: "文件",
     },
+    codeblocks: {
+      hideComposer: true,
+      searchPlaceholder: "搜索代码片段、别名、命令或来源 memo",
+      subtitle: "标记片段优先，未标记代码块沉底",
+      title: "代码片段",
+    },
     links: {
       hideComposer: true,
       searchPlaceholder: "搜索链接或来源 memo",
@@ -174,6 +180,7 @@ function shellTemplate() {
             ${viewNavButtonTemplate("items", "事项", SVG.hash, "data-item-nav-count")}
             ${viewNavButtonTemplate("milestones", "里程碑", SVG.clock, "data-milestone-nav-count")}
             ${viewNavButtonTemplate("links", "超链接", SVG.link, "data-link-nav-count")}
+            ${viewNavButtonTemplate("codeblocks", "代码片段", SVG.code, "data-code-nav-count")}
             ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
           </nav>
         </div>
@@ -275,10 +282,10 @@ function shellTemplate() {
         </section>
       </aside>
       <div class="memo-command-palette" data-memo-search-palette hidden>
-        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo">
+        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo 和代码片段">
           <label class="memo-command-search">
             ${SVG.search}
-            <input type="search" data-memo-search-input placeholder="搜索 memo" autocomplete="off" />
+            <input type="search" data-memo-search-input placeholder="搜索 memo / 代码片段" autocomplete="off" />
           </label>
           <div class="memo-command-results" data-memo-search-results role="listbox"></div>
         </div>
@@ -848,6 +855,45 @@ function linkTemplate(link) {
   `;
 }
 
+function codeBlockTemplate(block) {
+  const visibility = VISIBILITY[block.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const tags = extractTags(block.memo.content);
+  const code = block.code || "";
+  const preview = code.trim() || "空代码块";
+  const markerLabel = block.marked ? "已标记" : "未标记";
+  const aliases = Array.isArray(block.aliases) ? block.aliases : [];
+  const lineRange = block.endLineIndex > block.lineIndex
+    ? `${block.lineIndex + 1}-${block.endLineIndex + 1}`
+    : String(block.lineIndex + 1);
+  return `
+    <article class="memo-resource-card is-code ${block.marked ? "is-snippet" : "is-unmarked"}" data-memo-id="${escapeAttr(block.memoId)}" data-code-block-id="${escapeAttr(block.id)}">
+      <div class="memo-code-block-head">
+        <span class="memo-resource-icon">${SVG.code}</span>
+        <span class="memo-resource-body">
+          <span class="memo-resource-title">
+            ${escapeHTML(block.label || "代码片段")}
+            <span class="memo-code-block-badge">${escapeHTML(markerLabel)}</span>
+          </span>
+          <span class="memo-resource-url">
+            第 ${escapeHTML(lineRange)} 行${block.language ? ` / ${escapeHTML(block.language)}` : ""}
+            ${aliases.length ? ` / ${aliases.map((alias) => escapeHTML(alias)).join(" ")}` : ""}
+          </span>
+        </span>
+        <button class="memo-action-button" type="button" data-action="copyCodeBlock" title="复制代码">${SVG.copy}</button>
+      </div>
+      <pre class="memo-code-block-preview"><code>${escapeHTML(preview)}</code></pre>
+      <div class="memo-resource-source">
+        ${sourceMemoMarkerTemplate(block.memoId)}
+        <div class="memo-todo-meta">
+          <time datetime="${escapeAttr(block.memo.createdAt)}">${formatRelativeDate(block.memo.createdAt)}</time>
+          <span>${SVG[visibility.icon]} ${visibility.label}</span>
+          ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 function resourceGroupTemplate(label, resources) {
   if (!resources.length) return "";
   return `
@@ -959,6 +1005,16 @@ function emptyLinksTemplate() {
   `;
 }
 
+function emptyCodeBlocksTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.code}</div>
+      <h2>没有匹配的代码片段</h2>
+      <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
 function emptyFilesTemplate() {
   return `
     <div class="memo-empty-state">
@@ -978,9 +1034,11 @@ function visibilityOptionsTemplate(selected) {
 export {
   activeViewMeta,
   calendarTemplate,
+  codeBlockTemplate,
   detachedMemoCardTemplate,
   detachedMemoRenderContext,
   detachedMemoWindowTemplate,
+  emptyCodeBlocksTemplate,
   emptyFeedTemplate,
   emptyFilesTemplate,
   emptyLinksTemplate,

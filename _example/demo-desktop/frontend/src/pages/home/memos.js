@@ -39,6 +39,7 @@ import {
   updateGTDMilestone,
 } from "../../domain/gtd.js";
 import {
+  collectCodeBlocks,
   collectLinks,
   collectResources,
   getResourceStats,
@@ -70,9 +71,11 @@ import { SVG } from "./memo-icons.js";
 import {
   activeViewMeta,
   calendarTemplate,
+  codeBlockTemplate,
   detachedMemoCardTemplate,
   detachedMemoRenderContext,
   detachedMemoWindowTemplate,
+  emptyCodeBlocksTemplate,
   emptyFeedTemplate,
   emptyFilesTemplate,
   emptyLinksTemplate,
@@ -92,9 +95,12 @@ import {
   taskWorkspaceTemplate,
 } from "./memo-templates.js";
 import {
+  EDITOR_SETTINGS_STORAGE_KEY,
   createMiniEditor,
   filesToMarkdown,
   insertPlainTextIntoEditor,
+  loadEditorSettings,
+  loadEditorSettingsFromVault,
   refreshCloudStorageSettings,
   uploadErrorMessage,
 } from "./memo-editor.js";
@@ -142,6 +148,7 @@ export function mountMemosHome(root) {
     highlightTimer: null,
     expandedMemoIds: new Set(),
     draftsLoaded: false,
+    editorSettings: loadEditorSettings(),
     gtdItems: [],
     gtdLoading: false,
     gtdMilestones: [],
@@ -180,6 +187,7 @@ export function mountMemosHome(root) {
     composerHost: root.querySelector("[data-composer-host]"),
     composerStatus: root.querySelector("[data-composer-status]"),
     composerVimStatus: root.querySelector("[data-composer-vim-status]"),
+    codeNavCount: root.querySelector("[data-code-nav-count]"),
     createButton: root.querySelector('[data-action="createMemo"]'),
     feedCount: root.querySelector("[data-feed-count]"),
     fileNavCount: root.querySelector("[data-file-nav-count]"),
@@ -205,35 +213,7 @@ export function mountMemosHome(root) {
     visibilitySelect: root.querySelector("[data-visibility-select]"),
   };
 
-  composerEditor = createMiniEditor(els.composerHost, {
-    memoItems() {
-      return state.memos;
-    },
-    onChange(value) {
-      renderComposerStatus(value);
-    },
-    onCommit() {
-      return createMemo({ source: "vim-wq" });
-    },
-    onDiscard() {
-      return clearComposerDraft({ clearEditor: true, message: "草稿已丢弃" });
-    },
-    onQuit() {
-      return exitComposer();
-    },
-    onSave() {
-      return writeComposerDraft();
-    },
-    onSubmit() {
-      createMemo();
-    },
-    onWriteDraft() {
-      return writeComposerDraft();
-    },
-    placeholder: "记录想法、任务或链接...",
-    value: "",
-    vimStatusHost: els.composerVimStatus,
-  });
+  composerEditor = createComposerEditor("");
 
   renderAll();
   renderComposerStatus(composerEditor.getText());
@@ -243,6 +223,7 @@ export function mountMemosHome(root) {
   refreshMemoDraftsFromVault();
   refreshTasksFromVault();
   refreshGTDFromVault();
+  refreshEditorSettings({ silent: true });
   refreshStorageForRender();
 
   window.addEventListener("click", handleExternalLinkClick, true);
@@ -250,7 +231,9 @@ export function mountMemosHome(root) {
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
   root.addEventListener("submit", handleSubmit);
+  window.addEventListener("focus", refreshEditorSettings);
   window.addEventListener("keydown", handleKeydown);
+  window.addEventListener("storage", handleStorage);
 
   return {
     destroy() {
@@ -259,7 +242,9 @@ export function mountMemosHome(root) {
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
       root.removeEventListener("submit", handleSubmit);
+      window.removeEventListener("focus", refreshEditorSettings);
       window.removeEventListener("keydown", handleKeydown);
+      window.removeEventListener("storage", handleStorage);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
       if (composerEditor) composerEditor.destroy();
@@ -268,6 +253,73 @@ export function mountMemosHome(root) {
       root.innerHTML = "";
     },
   };
+
+  function createComposerEditor(value) {
+    return createMiniEditor(els.composerHost, {
+      memoItems() {
+        return state.memos;
+      },
+      onChange(nextValue) {
+        renderComposerStatus(nextValue);
+      },
+      onCommit() {
+        return createMemo({ source: "vim-wq" });
+      },
+      onDiscard() {
+        return clearComposerDraft({ clearEditor: true, message: "草稿已丢弃" });
+      },
+      onQuit() {
+        return exitComposer();
+      },
+      onSave() {
+        return writeComposerDraft();
+      },
+      onSubmit() {
+        createMemo();
+      },
+      onWriteDraft() {
+        return writeComposerDraft();
+      },
+      placeholder: "记录想法、任务或链接...",
+      value: value || "",
+      vim: editorVimEnabled(),
+      vimStatusHost: els.composerVimStatus,
+    });
+  }
+
+  function editorVimEnabled() {
+    return state.editorSettings && state.editorSettings.vimMode === true;
+  }
+
+  function handleStorage(event) {
+    if (event.key !== EDITOR_SETTINGS_STORAGE_KEY) return;
+    refreshEditorSettings();
+  }
+
+  function refreshEditorSettings(options = {}) {
+    return loadEditorSettingsFromVault().then(function (next) {
+      applyEditorSettings(next, options);
+    }, function (err) {
+      if (!options.silent) showToast("读取编辑器设置失败: " + errorMessage(err));
+    });
+  }
+
+  function applyEditorSettings(nextSettings, options = {}) {
+    const next = nextSettings || loadEditorSettings();
+    if (next.vimMode === editorVimEnabled()) return;
+
+    const composerText = composerEditor ? composerEditor.getText() : "";
+    if (editEditor) syncEditDraftFromEditor();
+    state.editorSettings = next;
+
+    if (composerEditor) composerEditor.destroy();
+    els.composerHost.innerHTML = "";
+    composerEditor = createComposerEditor(composerText);
+    renderComposerStatus(composerEditor.getText());
+
+    if (state.activeView === "memos" && state.editingId) renderFeed();
+    if (!options.silent) showToast(next.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式");
+  }
 
   function handleExternalLinkClick(event) {
     if (event.defaultPrevented || event.button !== 0) return;
@@ -416,6 +468,9 @@ export function mountMemosHome(root) {
         break;
       case "copyMemoRef":
         copyMemoRef(memoId);
+        break;
+      case "copyCodeBlock":
+        copyCodeBlock(action);
         break;
       case "copyTaskRef":
         copyTaskRef(taskId);
@@ -662,9 +717,20 @@ export function mountMemosHome(root) {
 
   function openMemoSearchResult(memoId) {
     if (!memoId) return;
-    const memo = findMemo(memoId);
+    const result = memoSearchResults().find((item) => item.key === memoId || item.id === memoId);
+    if (result && result.kind === "codeblock") {
+      closeMemoSearchPalette();
+      copyText(result.block.code).then(
+        () => showToast("已复制代码片段"),
+        () => showToast("复制失败"),
+      );
+      return;
+    }
+
+    const targetMemoId = result && result.memoId ? result.memoId : memoId;
+    const memo = findMemo(targetMemoId);
     if (!memo) {
-      showToast("找不到 memo");
+      showToast("找不到 memo 或代码片段");
       return;
     }
     closeMemoSearchPalette();
@@ -687,25 +753,17 @@ export function mountMemosHome(root) {
     const results = memoSearchResults();
     if (!els.memoSearchResults) return;
     if (!results.length) {
-      els.memoSearchResults.innerHTML = '<div class="memo-command-empty">没有匹配的 memo</div>';
+      els.memoSearchResults.innerHTML = '<div class="memo-command-empty">没有匹配的 memo 或代码片段</div>';
       return;
     }
 
     state.memoSearchActiveIndex = Math.max(0, Math.min(state.memoSearchActiveIndex, results.length - 1));
-    els.memoSearchResults.innerHTML = results.map(function (memo, index) {
-      const title = memoTitle(memo);
-      const summary = compactText(memo.content, 112);
-      const meta = [
-        memo.archived ? "归档" : "",
-        memo.pinned ? "置顶" : "",
-        projectLabel(memo.projectId),
-        formatRelativeDate(memo.createdAt),
-      ].filter(Boolean).join(" · ");
+    els.memoSearchResults.innerHTML = results.map(function (result, index) {
       return [
-        '<button class="memo-command-result ' + (index === state.memoSearchActiveIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.memoSearchActiveIndex ? "true" : "false") + '" data-memo-search-result="' + escapeAttr(memo.id) + '">',
-        '<span class="memo-command-result-title">' + escapeHTML(title) + '</span>',
-        '<span class="memo-command-result-summary">' + escapeHTML(summary) + '</span>',
-        '<span class="memo-command-result-meta">' + escapeHTML(meta) + '</span>',
+        '<button class="memo-command-result ' + (index === state.memoSearchActiveIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.memoSearchActiveIndex ? "true" : "false") + '" data-memo-search-result="' + escapeAttr(result.key) + '">',
+        '<span class="memo-command-result-title"><span class="memo-command-result-kind">' + escapeHTML(result.kindLabel) + '</span>' + escapeHTML(result.title) + '</span>',
+        '<span class="memo-command-result-summary">' + escapeHTML(result.summary) + '</span>',
+        '<span class="memo-command-result-meta">' + escapeHTML(result.meta) + '</span>',
         '</button>',
       ].join("");
     }).join("");
@@ -716,20 +774,74 @@ export function mountMemosHome(root) {
 
   function memoSearchResults() {
     const query = state.memoSearchQuery.toLowerCase();
-    return state.memos
+    const memoResults = state.memos
       .filter(function (memo) {
         if (!query) return true;
-        return [
+        return matchesSearchQuery([
           memo.id,
           memoTitle(memo),
           memo.content,
           memo.visibility,
           projectLabel(memo.projectId),
-        ].join(" ").toLowerCase().includes(query);
+        ].join(" "), query);
       })
       .sort(function (a, b) {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      })
+      .map(function (memo) {
+        return {
+          id: memo.id,
+          key: "memo:" + memo.id,
+          kind: "memo",
+          kindLabel: "MEMO",
+          memoId: memo.id,
+          priority: 2,
+          summary: compactText(memo.content, 112),
+          time: new Date(memo.createdAt).getTime() || 0,
+          title: memoTitle(memo),
+          meta: [
+            memo.archived ? "归档" : "",
+            memo.pinned ? "置顶" : "",
+            projectLabel(memo.projectId),
+            formatRelativeDate(memo.createdAt),
+          ].filter(Boolean).join(" · "),
+        };
+      });
+
+    const codeResults = collectCodeBlocks(state.memos)
+      .filter(function (block) {
+        if (!query) return block.marked;
+        return matchesSearchQuery(codeBlockSearchText(block), query);
+      })
+      .sort(sortCodeBlocks)
+      .map(function (block) {
+        return {
+          block,
+          id: block.id,
+          key: "codeblock:" + block.id,
+          kind: "codeblock",
+          kindLabel: block.marked ? "SNIP" : "CODE",
+          memoId: block.memoId,
+          priority: block.marked ? 0 : 4,
+          summary: compactText(block.code, 112),
+          time: new Date(block.memo.createdAt).getTime() || 0,
+          title: block.label || "代码片段",
+          meta: [
+            block.marked ? "代码片段" : "未标记代码块",
+            block.language,
+            block.aliases && block.aliases.length ? block.aliases.join(" ") : "",
+            projectLabel(block.memo.projectId),
+            "Enter 复制",
+          ].filter(Boolean).join(" · "),
+        };
+      });
+
+    return codeResults.concat(memoResults)
+      .sort(function (a, b) {
+        if (query && a.priority !== b.priority) return a.priority - b.priority;
+        if (!query && a.kind !== b.kind) return a.kind === "memo" ? -1 : 1;
+        return state.sortDesc ? b.time - a.time : a.time - b.time;
       })
       .slice(0, 12);
   }
@@ -1681,6 +1793,17 @@ export function mountMemosHome(root) {
     );
   }
 
+  function copyCodeBlock(action) {
+    const blockNode = closestElement(action, "[data-code-block-id]");
+    const blockId = blockNode ? blockNode.dataset.codeBlockId : "";
+    const block = collectCodeBlocks(scopedMemos()).find((item) => item.id === blockId);
+    if (!block) return;
+    copyText(block.code).then(
+      () => showToast("已复制代码片段"),
+      () => showToast("复制失败"),
+    );
+  }
+
   function insertFiles(files) {
     if (!files || files.length === 0) return;
     if (composerEditor.insertFiles) {
@@ -1738,7 +1861,7 @@ export function mountMemosHome(root) {
     els.composer.classList.toggle("hidden", viewMeta.hideComposer);
     els.searchInput.placeholder = viewMeta.searchPlaceholder;
     els.memoList.classList.toggle("is-todo-list", state.activeView === "todos" || state.activeView === "items" || state.activeView === "milestones");
-    els.memoList.classList.toggle("is-resource-list", state.activeView === "links" || state.activeView === "files");
+    els.memoList.classList.toggle("is-resource-list", state.activeView === "links" || state.activeView === "files" || state.activeView === "codeblocks");
   }
 
   function renderMainContent() {
@@ -1754,6 +1877,9 @@ export function mountMemosHome(root) {
         return;
       case "links":
         renderLinks();
+        return;
+      case "codeblocks":
+        renderCodeBlocks();
         return;
       case "files":
         renderFiles();
@@ -1795,6 +1921,9 @@ export function mountMemosHome(root) {
     const memos = scopedMemos();
     const todoStats = getTaskStats(scopedTasks());
     const linkCount = collectLinks(memos).length;
+    const codeBlocks = collectCodeBlocks(memos);
+    const codeSnippetCount = codeBlocks.filter((block) => block.marked).length;
+    const codeBlockCount = codeBlocks.length;
     const resourceCount = collectResources(memos).length;
     const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
     const activeMilestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
@@ -1802,6 +1931,7 @@ export function mountMemosHome(root) {
     if (els.itemNavCount) els.itemNavCount.textContent = openItemCount ? String(openItemCount) : "";
     if (els.milestoneNavCount) els.milestoneNavCount.textContent = activeMilestoneCount ? String(activeMilestoneCount) : "";
     els.linkNavCount.textContent = linkCount ? String(linkCount) : "";
+    if (els.codeNavCount) els.codeNavCount.textContent = codeBlockCount ? (codeSnippetCount ? `${codeSnippetCount}/${codeBlockCount}` : String(codeBlockCount)) : "";
     els.fileNavCount.textContent = resourceCount ? String(resourceCount) : "";
   }
 
@@ -1828,6 +1958,7 @@ export function mountMemosHome(root) {
     const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
     const milestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
     const linkCount = collectLinks(memos).length;
+    const codeSnippetCount = collectCodeBlocks(memos).filter((block) => block.marked).length;
     const resourceStats = getResourceStats(memos);
 
     els.stats.innerHTML = [
@@ -1839,6 +1970,7 @@ export function mountMemosHome(root) {
       statTemplate("事项", openItemCount),
       statTemplate("里程碑", milestoneCount),
       statTemplate("链接", linkCount),
+      statTemplate("代码片段", codeSnippetCount),
       statTemplate("文件", resourceStats.files),
       statTemplate("图片", resourceStats.images),
       statTemplate("归档", archived),
@@ -1927,6 +2059,7 @@ export function mountMemosHome(root) {
           placeholder: "编辑 memo...",
           sourceMemoId: memo.id,
           value: state.editDraft,
+          vim: editorVimEnabled(),
           vimStatusHost: statusHost,
         });
         editEditorMemoId = memo.id;
@@ -2046,6 +2179,22 @@ export function mountMemosHome(root) {
     const links = visibleLinks();
     els.feedCount.textContent = links.length ? `${links.length} 个链接` : "0 个链接";
     els.memoList.innerHTML = links.length ? links.map(linkTemplate).join("") : emptyLinksTemplate();
+  }
+
+  function renderCodeBlocks() {
+    if (editEditor) {
+      syncEditDraftFromEditor();
+      editEditor.destroy();
+      editEditor = null;
+      editEditorMemoId = "";
+    }
+
+    const blocks = visibleCodeBlocks();
+    const markedCount = blocks.filter((block) => block.marked).length;
+    els.feedCount.textContent = blocks.length
+      ? `${markedCount} 个片段 / ${blocks.length - markedCount} 个未标记`
+      : "0 个代码片段";
+    els.memoList.innerHTML = blocks.length ? blocks.map(codeBlockTemplate).join("") : emptyCodeBlocksTemplate();
   }
 
   function renderFiles() {
@@ -2520,6 +2669,45 @@ export function mountMemosHome(root) {
         return `${link.label} ${link.url} ${link.sourceText} ${link.memo.content} ${link.memo.visibility}`.toLowerCase().includes(query);
       })
       .sort((a, b) => sortMemoReference(a, b, state.sortDesc));
+  }
+
+  function visibleCodeBlocks() {
+    const query = state.query.toLowerCase();
+    return collectCodeBlocks(scopedMemos())
+      .filter((block) => {
+        if (state.activeTag && !extractTags(block.memo.content).includes(state.activeTag)) return false;
+        if (!query) return true;
+        return matchesSearchQuery(codeBlockSearchText(block), query);
+      })
+      .sort(sortCodeBlocks);
+  }
+
+  function sortCodeBlocks(a, b) {
+    if (a.marked !== b.marked) return a.marked ? -1 : 1;
+    return sortMemoReference(a, b, state.sortDesc);
+  }
+
+  function codeBlockSearchText(block) {
+    return [
+      block.label,
+      block.title,
+      block.language,
+      Array.isArray(block.aliases) ? block.aliases.join(" ") : "",
+      block.code,
+      block.sourceText,
+      block.memo.content,
+      block.memo.visibility,
+      projectLabel(block.memo.projectId),
+    ].join(" ");
+  }
+
+  function matchesSearchQuery(value, query) {
+    const haystack = String(value || "").toLowerCase();
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return true;
+    if (haystack.includes(needle)) return true;
+    const terms = needle.split(/\s+/).filter(Boolean);
+    return terms.length > 0 && terms.every((term) => haystack.includes(term));
   }
 
   function visibleResources() {

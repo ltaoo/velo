@@ -719,7 +719,7 @@
         </button>
         <button class="settings-nav-button" type="button" data-panel="shortcuts">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h.01"></path><path d="M11 9h.01"></path><path d="M15 9h.01"></path><path d="M7 13h10"></path></svg>
-          <span>快捷键</span>
+          <span>键盘</span>
         </button>
         <button class="settings-nav-button" type="button" data-panel="about">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg>
@@ -758,6 +758,22 @@
       </div>
 
       <div class="settings-form settings-panel" data-settings-panel="shortcuts" hidden>
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">编辑器</div>
+          </div>
+          <div class="settings-shortcut-card">
+            <div>
+              <div class="settings-shortcut-title">Vim 模式</div>
+              <div class="settings-shortcut-description">默认关闭，开启后 memo 编辑器启用 Vim 键位。</div>
+            </div>
+            <label class="settings-check">
+              <input type="checkbox" data-editor-vim-enabled />
+              <span>启用</span>
+            </label>
+          </div>
+        </section>
+
         <section class="settings-section">
           <div class="settings-profile-head">
             <div class="settings-profile-title">Memo 搜索</div>
@@ -824,7 +840,10 @@
   <script>
     (function () {
       var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
+      var EDITOR_SETTINGS_KEY = "demo-desktop:settings:editor:v1";
       var SHORTCUTS_KEY = "demo-desktop:settings:shortcuts:v1";
+      var EDITOR_SETTINGS_API = "/api/settings/editor";
+      var EDITOR_SETTINGS_SAVE_API = "/api/settings/editor/save";
       var STORAGE_API = "/api/settings/cloud-storage";
       var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
       var OPEN_WINDOW_API = "/api/open_window";
@@ -840,6 +859,7 @@
       var shortcutInput = document.querySelector('[data-shortcut-input="openMemoSearch"]');
       var shortcutEnabled = document.querySelector('[data-shortcut-enabled="openMemoSearch"]');
       var shortcutMessage = document.querySelector("[data-shortcut-message]");
+      var editorVimEnabled = document.querySelector("[data-editor-vim-enabled]");
       var status = document.querySelector("[data-config-status]");
       var statusText = document.querySelector("[data-config-status-text]");
       var storageList = document.querySelector("[data-storage-list]");
@@ -859,11 +879,18 @@
         status: "idle",
       };
       var state = normalizeSettings(null);
+      var editorSettings = loadEditorSettings();
       var shortcuts = loadShortcutSettings();
 
       render();
       loadAppInfo();
       bindUpdateMessages();
+      loadEditorConfig().then(function (settings) {
+        editorSettings = normalizeEditorSettings(settings);
+        renderEditorSettings();
+      }, function (err) {
+        setShortcutMessage("读取编辑器设置失败: " + errorMessage(err), "warning");
+      });
       loadConfig().then(function (settings) {
         state = normalizeSettings(settings);
         render();
@@ -919,6 +946,25 @@
       });
 
       shortcutsPanel.addEventListener("change", function (event) {
+        if (event.target.matches("[data-editor-vim-enabled]")) {
+          var previousEditorSettings = editorSettings;
+          editorSettings = normalizeEditorSettings({
+            vimMode: Boolean(event.target.checked),
+          });
+          renderEditorSettings();
+          setShortcutMessage("正在保存 Vim 模式设置...", "");
+          saveEditorSettings(editorSettings).then(function (saved) {
+            editorSettings = normalizeEditorSettings(saved || editorSettings);
+            renderEditorSettings();
+            setShortcutMessage(editorSettings.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式", editorSettings.vimMode ? "ready" : "");
+          }, function (err) {
+            editorSettings = previousEditorSettings;
+            renderEditorSettings();
+            setShortcutMessage("保存 Vim 模式设置失败: " + errorMessage(err), "warning");
+          });
+          return;
+        }
+
         if (!event.target.matches("[data-shortcut-enabled]")) return;
         shortcuts.enabled = Boolean(event.target.checked);
         saveShortcutSettings(shortcuts);
@@ -958,6 +1004,12 @@
       });
 
       window.addEventListener("focus", function () {
+        loadEditorConfig().then(function (settings) {
+          editorSettings = normalizeEditorSettings(settings);
+          renderEditorSettings();
+        }, function (_) { });
+        shortcuts = loadShortcutSettings();
+        render();
         loadConfig().then(function (settings) {
           state = normalizeSettings(settings);
           render();
@@ -1164,6 +1216,7 @@
       function render() {
         renderShell();
         renderStorageList();
+        renderEditorSettings();
         renderShortcuts();
         renderStatus(state);
         renderAbout();
@@ -1184,8 +1237,8 @@
         panels.forEach(function (panel) {
           panel.hidden = panel.dataset.settingsPanel !== activePanel;
         });
-        headerTitle.textContent = isAbout ? "关于" : isShortcuts ? "快捷键" : "云存储";
-        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "键盘操作与快速入口" : "S3/OSS 兼容对象存储配置";
+        headerTitle.textContent = isAbout ? "关于" : isShortcuts ? "键盘" : "云存储";
+        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "编辑器模式与快速入口" : "S3/OSS 兼容对象存储配置";
         status.hidden = isAbout || isShortcuts;
       }
 
@@ -1263,6 +1316,61 @@
         shortcuts = normalizeShortcutSettings(shortcuts);
         if (shortcutInput) shortcutInput.value = shortcuts.openMemoSearch;
         if (shortcutEnabled) shortcutEnabled.checked = shortcuts.enabled;
+      }
+
+      function renderEditorSettings() {
+        editorSettings = normalizeEditorSettings(editorSettings);
+        if (editorVimEnabled) editorVimEnabled.checked = editorSettings.vimMode;
+      }
+
+      function loadEditorSettings() {
+        try {
+          return normalizeEditorSettings(JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY) || "null"));
+        } catch (_) {
+          return defaultEditorSettings();
+        }
+      }
+
+      function saveEditorSettings(value) {
+        var next = normalizeEditorSettings(value);
+        if (canUseNativeStorage()) {
+          return callStorage(EDITOR_SETTINGS_SAVE_API, "POST", next).then(function (data) {
+            var saved = normalizeEditorSettings(data && data.config ? data.config : next);
+            localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(saved));
+            return saved;
+          });
+        }
+        localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(next));
+        return Promise.resolve(next);
+      }
+
+      function loadEditorConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(EDITOR_SETTINGS_API, "GET").then(function (data) {
+            if (data && data.config) {
+              var settings = normalizeEditorSettings(data.config);
+              localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(settings));
+              return settings;
+            }
+            return loadEditorSettings();
+          }, function () {
+            return loadEditorSettings();
+          });
+        }
+        return Promise.resolve(loadEditorSettings());
+      }
+
+      function defaultEditorSettings() {
+        return {
+          vimMode: false,
+        };
+      }
+
+      function normalizeEditorSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          vimMode: raw.vimMode === true,
+        };
       }
 
       function loadShortcutSettings() {
