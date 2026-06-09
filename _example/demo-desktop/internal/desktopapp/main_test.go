@@ -254,6 +254,80 @@ func TestCreateVaultMemoRejectsUnknownProject(t *testing.T) {
 	}
 }
 
+func TestVaultMemoDraftLifecycle(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	project, err := createVaultProject(ctx, ProjectCreateRequest{Name: "Drafts", Color: "#10b981"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	draft, err := upsertVaultMemoDraft(ctx, MemoDraftUpsertRequest{
+		Content:    "draft body",
+		ID:         "draft_composer",
+		Kind:       "composer",
+		ProjectID:  project.ID,
+		Visibility: "PUBLIC",
+	})
+	if err != nil {
+		t.Fatalf("upsert draft: %v", err)
+	}
+	if draft.ProjectID != project.ID || draft.Visibility != "PUBLIC" || draft.UpdatedAt == "" {
+		t.Fatalf("draft = %#v, want normalized project/visibility/time", draft)
+	}
+
+	path := filepath.Join(ctx.VeloDir, vaultMemoDraftsFileName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read draft file: %v", err)
+	}
+	if !strings.Contains(string(raw), `"draft_composer"`) || !strings.Contains(string(raw), `"draft body"`) {
+		t.Fatalf("draft file missing data:\n%s", string(raw))
+	}
+
+	updated, err := upsertVaultMemoDraft(ctx, MemoDraftUpsertRequest{
+		Content:    "updated body",
+		ID:         "draft_composer",
+		Kind:       "composer",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	if updated.Content != "updated body" {
+		t.Fatalf("updated content = %q", updated.Content)
+	}
+
+	drafts, err := listVaultMemoDrafts(ctx)
+	if err != nil {
+		t.Fatalf("list drafts: %v", err)
+	}
+	if len(drafts) != 1 || drafts[0].Content != "updated body" {
+		t.Fatalf("drafts = %#v, want one updated draft", drafts)
+	}
+
+	if _, err := upsertVaultMemoDraft(ctx, MemoDraftUpsertRequest{
+		Content: "edit draft",
+		ID:      "draft_memo_missing",
+		Kind:    "memo-edit",
+	}); err == nil {
+		t.Fatalf("expected memo-edit draft without memo id to fail")
+	}
+
+	if err := deleteVaultMemoDraft(ctx, "draft_composer"); err != nil {
+		t.Fatalf("delete draft: %v", err)
+	}
+	drafts, err = listVaultMemoDrafts(ctx)
+	if err != nil {
+		t.Fatalf("list drafts after delete: %v", err)
+	}
+	if len(drafts) != 0 {
+		t.Fatalf("drafts after delete = %#v, want empty", drafts)
+	}
+}
+
 func TestCreateVaultTaskWritesJSONAndIndex(t *testing.T) {
 	ctx, _, err := openVaultDirectory(t.TempDir(), true)
 	if err != nil {

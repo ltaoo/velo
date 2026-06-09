@@ -14,7 +14,7 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260609-vim-ime-feedback-clear";
+  const VIM_PLUGIN_VERSION = "20260609-vim-ex-drafts";
   const REGISTER_TYPES = {
     CHAR: "char",
     LINE: "line",
@@ -1196,21 +1196,144 @@
     return runSearch(view, pluginState.searchQuery, direction || 1);
   }
 
+  function exResultMessage(result, fallback) {
+    if (typeof result === "string") return result;
+    if (result && typeof result === "object" && result.message) return result.message;
+    return fallback;
+  }
+
+  function exErrorMessage(error, fallback) {
+    if (error && error.message) return fallback + ": " + error.message;
+    if (error) return fallback + ": " + String(error);
+    return fallback;
+  }
+
+  function dispatchVimMessage(view, message, extra) {
+    if (!view || view.isDestroyed || !view.state || !view.dispatch) return;
+    try {
+      view.dispatch(setVimMeta(view.state.tr, { ...(extra || {}), message }));
+    } catch (error) {
+      if (window.console && window.console.debug) {
+        window.console.debug("Skipped vim message for inactive editor.", error);
+      }
+    }
+  }
+
+  function runAsyncExCommand(view, pendingMessage, fallbackMessage, failureMessage, runner) {
+    dispatchVimMessage(view, pendingMessage);
+    Promise.resolve()
+      .then(runner)
+      .then(
+        function (result) {
+          dispatchVimMessage(view, exResultMessage(result, fallbackMessage));
+        },
+        function (error) {
+          dispatchVimMessage(view, exErrorMessage(error, failureMessage));
+        },
+      );
+    return true;
+  }
+
+  function parseSimpleExCommand(raw) {
+    const value = String(raw || "").trim().replace(/^:/, "");
+    const bang = value.endsWith("!");
+    const command = bang ? value.slice(0, -1).trim() : value;
+    return { raw: value, command, bang };
+  }
+
+  function jumpToExLine(view, command) {
+    let index = null;
+    if (command === "$") {
+      index = -1;
+    } else if (/^[1-9]\d*$/.test(command)) {
+      index = Number(command) - 1;
+    }
+    if (index == null) return false;
+    const blocks = textblockList(view.state);
+    if (!blocks.length) {
+      dispatchVimMessage(view, "line number out of range");
+      return true;
+    }
+    if (index === -1) index = blocks.length - 1;
+    if (index < 0 || index >= blocks.length) {
+      dispatchVimMessage(view, "line number out of range");
+      return true;
+    }
+    setCursor(view.state, view.dispatch, blocks[index].start, clearTransient({
+      message: ":" + command,
+    }));
+    return true;
+  }
+
   function runExCommand(view, options) {
     const raw = window.prompt(":", "");
     if (raw == null) return true;
-    const command = raw.trim();
-    let message = ":" + command;
+    const parsed = parseSimpleExCommand(raw);
+    const command = parsed.command;
 
-    if (command === "w" || command === "write") {
-      if (options.onSave) options.onSave();
-      message = "written";
-    } else if (command === "wq" || command === "x") {
-      if (options.onSave) options.onSave();
-      message = "written; quit is not available in browser";
-    } else if (command === "q" || command === "quit") {
-      message = "quit is not available in browser";
-    } else if (command === "nohl" || command === "noh") {
+    if (!command) {
+      dispatchVimMessage(view, "");
+      return true;
+    }
+
+    if (jumpToExLine(view, command)) return true;
+
+    if (command === "w" || command === "write" || command === "up" || command === "update") {
+      const writeDraft = options.onWriteDraft || options.onSave;
+      if (!writeDraft) {
+        dispatchVimMessage(view, "write draft is not available");
+        return true;
+      }
+      if ((command === "up" || command === "update") && options.isDirty && !options.isDirty()) {
+        dispatchVimMessage(view, "draft unchanged");
+        return true;
+      }
+      return runAsyncExCommand(
+        view,
+        "writing draft...",
+        "draft written",
+        "write draft failed",
+        function () {
+          return writeDraft({ bang: parsed.bang, command, source: "vim-write" });
+        },
+      );
+    }
+
+    if (command === "wq" || command === "x") {
+      const commit = options.onCommit || options.onSave;
+      if (!commit) {
+        dispatchVimMessage(view, "commit is not available");
+        return true;
+      }
+      return runAsyncExCommand(
+        view,
+        "committing...",
+        "committed",
+        "commit failed",
+        function () {
+          return commit({ bang: parsed.bang, command, source: command === "x" ? "vim-x" : "vim-wq" });
+        },
+      );
+    }
+
+    if (command === "q" || command === "quit") {
+      const quit = parsed.bang ? (options.onDiscard || options.onQuit) : options.onQuit;
+      if (!quit) {
+        dispatchVimMessage(view, "quit is not available");
+        return true;
+      }
+      return runAsyncExCommand(
+        view,
+        parsed.bang ? "discarding..." : "quitting...",
+        parsed.bang ? "discarded" : "quit",
+        parsed.bang ? "discard failed" : "quit failed",
+        function () {
+          return quit({ bang: parsed.bang, command, force: parsed.bang, source: parsed.bang ? "vim-q-bang" : "vim-q" });
+        },
+      );
+    }
+
+    if (command === "nohl" || command === "noh") {
       view.dispatch(
         setVimMeta(view.state.tr, {
           searchRange: null,
@@ -1218,11 +1341,14 @@
         }),
       );
       return true;
-    } else if (command) {
-      message = "unknown command: " + command;
     }
 
-    view.dispatch(setVimMeta(view.state.tr, { message }));
+    if (command === "help") {
+      dispatchVimMessage(view, "commands: w, wq, q, q!, x, nohl, {line}");
+      return true;
+    }
+
+    dispatchVimMessage(view, "Not an editor command: " + command);
     return true;
   }
 

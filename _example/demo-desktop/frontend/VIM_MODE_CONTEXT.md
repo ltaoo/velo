@@ -77,3 +77,15 @@
 - Root cause: `compositionend` cleared `imeFeedback`, but a following native `beforeinput`/`textInput` event could be blocked and treated as another feedback advance, recreating the underline.
 - Fix: `beforeinput` and `textInput` now only block native input in non-insert modes; they no longer advance IME feedback. Feedback advances only on `compositionupdate` and composing keydown, and `compositionend` clears it.
 - Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-ime-feedback-clear`.
+
+## 2026-06-09: empty-line IME feedback adds visual blank space
+
+- Symptom: when the normal cursor was on an empty line, IME composition made a blank area appear below the line without actually inserting a new paragraph.
+- Root cause: the empty-line IME feedback widget used `display: inline-block` with `height: 1em`, so it participated in layout inside an otherwise empty paragraph.
+- Fix: changed `.vim-ime-feedback-empty` to a zero-size inline overlay and moved the visible white underline into an absolutely positioned `::after` pseudo-element.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-ime-empty-line-overlay`.
+
+## 2026-06-09: Ex `:w` writes vault drafts
+
+- Change: Ex `:w` now calls the editor's draft-write callback, while `:wq`/`:x` call commit and `:q`/`:q!` call quit/discard callbacks. The editor callback layer now returns async results so Vim messages can reflect draft, commit, and quit outcomes.
+- Cache note: updated `vim.js` script query keys to `20260609-vim-ex-drafts` and `prosemirror-editor.umd.js` query keys to `20260609-editor-draft-events`.

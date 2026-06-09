@@ -20,6 +20,7 @@ function createMiniEditor(host, options) {
   host.dataset.placeholder = editorOptions.placeholder || "";
 
   let editor = null;
+  let api = null;
   editor = new window.ProsemirrorEditor({
     $el: host,
     mode: "mini",
@@ -35,11 +36,21 @@ function createMiniEditor(host, options) {
       const source = editorOptions.fileItems || defaultEditorFileItems();
       editor.setFileItems(filterEditorFileItems(source, query), query);
     },
+    onCommit(instance, detail) {
+      if (editorOptions.onCommit) return editorOptions.onCommit(api || instance, detail);
+    },
+    onDiscard(instance, detail) {
+      if (editorOptions.onDiscard) return editorOptions.onDiscard(api || instance, detail);
+    },
     onRemoveFile(file) {
       if (editorOptions.onRemoveFile) editorOptions.onRemoveFile(file);
     },
-    onSave(instance) {
-      if (editorOptions.onSave) editorOptions.onSave(instance);
+    onQuit(instance, detail) {
+      if (editorOptions.onQuit) return editorOptions.onQuit(api || instance, detail);
+    },
+    onSave(instance, detail) {
+      if (editorOptions.onWriteDraft) return editorOptions.onWriteDraft(api || instance, detail);
+      if (editorOptions.onSave) return editorOptions.onSave(api || instance, detail);
     },
     onSelectFile(file) {
       if (editorOptions.onSelectFile) editorOptions.onSelectFile(file);
@@ -53,6 +64,10 @@ function createMiniEditor(host, options) {
         });
       });
     },
+    onWriteDraft(instance, detail) {
+      if (editorOptions.onWriteDraft) return editorOptions.onWriteDraft(api || instance, detail);
+      if (editorOptions.onSave) return editorOptions.onSave(api || instance, detail);
+    },
   });
 
   const removePlugins = installMemoEditorPlugins(editor, editorOptions);
@@ -64,7 +79,10 @@ function createMiniEditor(host, options) {
   setEditorVimMode(editor, "insert");
   syncEmptyState();
 
-  return {
+  api = {
+    blur() {
+      if (editor.view && editor.view.dom) editor.view.dom.blur();
+    },
     destroy() {
       removeSubmit();
       removeDrop();
@@ -108,6 +126,7 @@ function createMiniEditor(host, options) {
       view.dispatch(transaction.scrollIntoView());
     },
   };
+  return api;
 
   function insertText(text) {
     const view = editor.view;
@@ -1506,6 +1525,13 @@ function createFallbackEditor(host, options) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && options.onSubmit) {
       event.preventDefault();
       options.onSubmit();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const save = options.onWriteDraft || options.onSave;
+      if (!save) return;
+      event.preventDefault();
+      save();
     }
   });
   function onPaste(event) {
@@ -1517,6 +1543,9 @@ function createFallbackEditor(host, options) {
   }
   textarea.addEventListener("paste", onPaste);
   return {
+    blur() {
+      textarea.blur();
+    },
     destroy() {
       textarea.removeEventListener("paste", onPaste);
       textarea.remove();
