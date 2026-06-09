@@ -1,0 +1,42 @@
+# Vim Mode Context
+
+## 2026-06-09: `yy` then `p` inserts at current line start
+
+- Symptom: in the ProseMirror memo editor, normal-mode `yy` followed by `p` inserted the yanked line text at the current cursor position, which often looked like insertion at the current line start. Vim linewise paste should insert the copied line as a new line after the current line.
+- Root cause: `vim.js` stored only a plain string in `pluginState.register`. `pasteRegister` always called `insertText` at the selection position, so linewise yanks from `yy` were handled like characterwise yanks.
+- Fix: added `registerType` with `char` and `line`. `yy` and linewise deletes store `line`; characterwise operations store `char`. `p`/`P` now insert paragraph nodes after/before the current textblock when the register is linewise.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM and simulated `yy` then `p`; a two-paragraph doc `one / two` became `one / one / two`. Also checked `2p` and empty-line `yy p`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-linewise-paste`.
+- Follow-up watch point: visual-line paste is now tagged linewise, but visual-mode replacement still uses the older characterwise replace path.
+
+## 2026-06-09: `v`, `e`, `y` leaves cursor after selected word
+
+- Symptom: entering visual mode with `v`, extending to the word end with `e`, then yanking with `y` left the normal-mode cursor at the selected word's right boundary plus one character. Expected behavior for this editor: return to the position where visual mode started.
+- Root cause: `visualCommand` copied the range and then called `leaveVisual(view)`. The default `leaveVisual` implementation collapsed the selection to `state.selection.to`, which is the expanded head after `e`.
+- Fix: `leaveVisual` now accepts an optional cursor position, and visual yank passes `pluginState.visualAnchor`.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM and simulated `v`, `e`, `y` on `hello world`; the register became `hello` and the final selection returned to the initial position.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-visual-yank-cursor`.
+
+## 2026-06-09: visual `p` inserts before the current cursor
+
+- Symptom: after selecting content with `v`, pressing `p` pasted before the current visual cursor. Expected behavior for this editor: paste after the current visual cursor.
+- Root cause: visual-mode `p` deleted the selected range and then inserted the register at `state.selection.from`, which is the start of the selected range.
+- Fix: visual-mode `p` now computes the displayed visual cursor position and inserts at the next document position without deleting the selection.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM, set the register to `X`, and simulated `v`, `e`, `p` on `foo bar`; the document became `fooX bar`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-visual-paste-after-cursor`.
+
+## 2026-06-09: normal `p` inserts before the current character
+
+- Symptom: with text `123456`, normal cursor on `3`, and register `abc`, pressing `p` produced `12abc3456`. Expected behavior: `123abc456`.
+- Root cause: charwise `pasteRegister` used `state.selection.to` as the `p` insertion point. In this editor's normal mode, the collapsed selection marks the current character position, so `selection.to` is still before that character.
+- Fix: added `pasteInsertPos`; charwise normal `p` now inserts after `normalCursorPos(state)`, while `P` still inserts at the current position.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM, set the cursor on `3` in `123456`, set register `abc`, and pressed `p`; the document became `123abc456`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-char-paste-after-cursor`.
+
+## 2026-06-09: normal `p` leaves cursor at the original character
+
+- Symptom: after fixing insertion position, `123456` with cursor on `3` and register `abc` became `123abc456`, but the normal cursor stayed on `3`. Expected behavior: move to the last inserted character, `c`.
+- Root cause: charwise `pasteRegister` inserted text without setting the transaction selection, so the editor's default mapping kept the cursor near its original position.
+- Fix: charwise paste now sets selection to `insertAt + pastedText.length - 1`.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM, set the cursor on `3` in `123456`, set register `abc`, and pressed `p`; the document became `123abc456`, selection moved to position `6`, and that position reads as `c`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-char-paste-cursor`.

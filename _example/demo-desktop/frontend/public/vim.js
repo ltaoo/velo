@@ -14,7 +14,11 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260607-vim-jump-shift-key";
+  const VIM_PLUGIN_VERSION = "20260609-vim-char-paste-cursor";
+  const REGISTER_TYPES = {
+    CHAR: "char",
+    LINE: "line",
+  };
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -685,9 +689,9 @@
     });
   }
 
-  function leaveVisual(view) {
+  function leaveVisual(view, cursorPos) {
     const { state } = view;
-    const pos = state.selection.to;
+    const pos = cursorPos == null ? state.selection.to : cursorPos;
     return setCursor(state, view.dispatch, pos, {
       mode: MODES.NORMAL,
       visualAnchor: null,
@@ -698,12 +702,13 @@
     });
   }
 
-  function yankRange(state, dispatch, from, to, message) {
+  function yankRange(state, dispatch, from, to, message, registerType) {
     if (!dispatch) return true;
     const text = state.doc.textBetween(from, to, "\n");
     dispatch(
       setVimMeta(state.tr, {
         register: text,
+        registerType: registerType || REGISTER_TYPES.CHAR,
         pending: null,
         count: "",
         message: message || "yanked",
@@ -720,6 +725,7 @@
     tr = tr.setSelection(PM.Selection.near(tr.doc.resolve(nextPos), 1));
     const meta = withRepeat({
       register: text,
+      registerType: REGISTER_TYPES.CHAR,
       mode: change ? MODES.INSERT : MODES.NORMAL,
       visualAnchor: null,
       visualLine: false,
@@ -753,6 +759,7 @@
     tr = tr.setSelection(PM.Selection.near(tr.doc.resolve(nextPos), 1));
     tr = setVimMeta(tr, withRepeat({
       register: text,
+      registerType: REGISTER_TYPES.LINE,
       mode: MODES.NORMAL,
       visualAnchor: null,
       visualLine: false,
@@ -778,7 +785,14 @@
     }
 
     if (operator === "y") {
-      return yankRange(view.state, view.dispatch, range.from, range.to, "yanked");
+      return yankRange(
+        view.state,
+        view.dispatch,
+        range.from,
+        range.to,
+        "yanked",
+        range.linewise ? REGISTER_TYPES.LINE : REGISTER_TYPES.CHAR,
+      );
     }
     if (operator === "d") {
       if (range.linewise) {
@@ -897,18 +911,71 @@
     return true;
   }
 
+  function linewisePasteNodes(state, text, count) {
+    const paragraph = state.schema.nodes.paragraph;
+    if (!paragraph) return [];
+
+    const lines = String(text == null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
+    const repeatTimes = Math.max(1, count || 1);
+    const nodes = [];
+    for (let i = 0; i < repeatTimes; i += 1) {
+      for (let j = 0; j < lines.length; j += 1) {
+        const line = lines[j];
+        nodes.push(paragraph.create(null, line ? state.schema.text(line) : null));
+      }
+    }
+    return nodes;
+  }
+
+  function pasteLinewiseRegister(view, before, repeatAction, count) {
+    const { state } = view;
+    const pluginState = getPluginState(state);
+    const block = textblockInfo(state, state.selection.from);
+    const nodes = linewisePasteNodes(state, pluginState.register, count);
+    if (!nodes.length) {
+      view.dispatch(setVimMeta(state.tr, { message: "register empty" }));
+      return true;
+    }
+
+    const insertAt = before ? block.before : block.after;
+    let tr = state.tr.insert(insertAt, nodes.length === 1 ? nodes[0] : nodes);
+    const selectionPos = clamp(insertAt + 1, 0, tr.doc.content.size);
+    tr = tr.setSelection(textSelection(tr.doc, selectionPos, selectionPos));
+    tr = setVimMeta(
+      tr,
+      withRepeat(
+        {
+          message: "pasted",
+          pending: null,
+          count: "",
+          insertSession: null,
+          registerType: REGISTER_TYPES.LINE,
+        },
+        repeatAction,
+      ),
+    );
+    view.dispatch(tr.scrollIntoView());
+    return true;
+  }
+
   function pasteRegister(view, before, repeatAction, count) {
     const { state } = view;
     const pluginState = getPluginState(state);
+    if (pluginState.registerType === REGISTER_TYPES.LINE) {
+      return pasteLinewiseRegister(view, before, repeatAction, count);
+    }
     if (!pluginState.register) {
       view.dispatch(setVimMeta(state.tr, { message: "register empty" }));
       return true;
     }
 
-    const pos = before ? state.selection.from : state.selection.to;
+    const pos = pasteInsertPos(state, before);
     const text = pluginState.register.repeat(Math.max(1, count || 1));
-    const tr = setVimMeta(
-      state.tr.insertText(text, pos, pos),
+    const cursorPos = clamp(pos + text.length - 1, 0, state.doc.content.size + text.length);
+    let tr = state.tr.insertText(text, pos, pos);
+    tr = tr.setSelection(textSelection(tr.doc, cursorPos, cursorPos));
+    tr = setVimMeta(
+      tr,
       withRepeat({ message: "pasted", pending: null, count: "", insertSession: null }, repeatAction),
     );
     view.dispatch(tr.scrollIntoView());
@@ -961,6 +1028,7 @@
       tr,
       withRepeat({
         register: deletedText,
+        registerType: REGISTER_TYPES.CHAR,
         mode: MODES.NORMAL,
         visualAnchor: null,
         visualLine: false,
@@ -1461,15 +1529,24 @@
       );
     }
     if (key === "y") {
-      const handled = yankRange(state, view.dispatch, state.selection.from, state.selection.to, "yanked");
-      leaveVisual(view);
+      const handled = yankRange(
+        state,
+        view.dispatch,
+        state.selection.from,
+        state.selection.to,
+        "yanked",
+        pluginState.visualLine ? REGISTER_TYPES.LINE : REGISTER_TYPES.CHAR,
+      );
+      leaveVisual(view, pluginState.visualAnchor);
       return handled;
     }
     if (key === "p") {
       const register = pluginState.register;
       if (!register) return true;
-      let tr = state.tr.delete(state.selection.from, state.selection.to);
-      tr = tr.insertText(register, state.selection.from, state.selection.from);
+      const insertAt = visualPasteInsertPos(state, pluginState);
+      let tr = state.tr.insertText(register, insertAt, insertAt);
+      const selectionPos = clamp(insertAt + register.length, 0, tr.doc.content.size);
+      tr = tr.setSelection(textSelection(tr.doc, selectionPos, selectionPos));
       tr = setVimMeta(tr, {
         mode: MODES.NORMAL,
         visualAnchor: null,
@@ -1477,6 +1554,7 @@
         pending: null,
         count: "",
         register,
+        registerType: pluginState.registerType || REGISTER_TYPES.CHAR,
         lastRepeat: { type: "command", key: "p", count: 1 },
         message: "pasted",
       });
@@ -1545,6 +1623,16 @@
     return head;
   }
 
+  function visualPasteInsertPos(state, pluginState) {
+    return moveHorizontalPos(state, visualCursorDisplayPos(state, pluginState), 1);
+  }
+
+  function pasteInsertPos(state, before) {
+    if (before) return state.selection.from;
+    if (!state.selection.empty) return state.selection.to;
+    return moveHorizontalPos(state, normalCursorPos(state), 1);
+  }
+
   function decorationsFor(state) {
     const pluginState = getPluginState(state);
     if (!pluginState) return PM.DecorationSet.empty;
@@ -1592,6 +1680,7 @@
               pending: null,
               count: "",
               register: "",
+              registerType: REGISTER_TYPES.CHAR,
               visualAnchor: null,
               visualLine: false,
               searchQuery: "",
@@ -1632,6 +1721,9 @@
             if (Object.prototype.hasOwnProperty.call(meta, "pending")) next.pending = meta.pending;
             if (Object.prototype.hasOwnProperty.call(meta, "count")) next.count = meta.count;
             if (Object.prototype.hasOwnProperty.call(meta, "register")) next.register = meta.register;
+            if (Object.prototype.hasOwnProperty.call(meta, "registerType")) {
+              next.registerType = meta.registerType;
+            }
             if (Object.prototype.hasOwnProperty.call(meta, "visualAnchor")) {
               next.visualAnchor = meta.visualAnchor;
             }
