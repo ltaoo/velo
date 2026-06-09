@@ -1100,6 +1100,10 @@
           fileQuery: [],
           change: [],
           save: [],
+          writeDraft: [],
+          commit: [],
+          quit: [],
+          discard: [],
         };
         this.keys = {
           filePicker: new PM.PluginKey(this.id + "-filePicker"),
@@ -1126,6 +1130,18 @@
         }
         if (typeof editorOptions.onSave === "function") {
           this.onSave(editorOptions.onSave);
+        }
+        if (typeof editorOptions.onWriteDraft === "function") {
+          this.onWriteDraft(editorOptions.onWriteDraft);
+        }
+        if (typeof editorOptions.onCommit === "function") {
+          this.onCommit(editorOptions.onCommit);
+        }
+        if (typeof editorOptions.onQuit === "function") {
+          this.onQuit(editorOptions.onQuit);
+        }
+        if (typeof editorOptions.onDiscard === "function") {
+          this.onDiscard(editorOptions.onDiscard);
         }
 
         this.$el.classList.add("mini-editor");
@@ -1189,6 +1205,23 @@
         });
       }
 
+      emitAsync(type) {
+        const args = Array.prototype.slice.call(arguments, 1);
+        const callbacks = this.callbacks[type] ? this.callbacks[type].slice() : [];
+        if (!callbacks.length) return Promise.resolve(undefined);
+
+        return Promise.all(
+          callbacks.map((callback) => {
+            try {
+              return Promise.resolve(callback.apply(null, args));
+            } catch (error) {
+              root.console && root.console.error("ProsemirrorEditor callback failed.", error);
+              return Promise.reject(error);
+            }
+          }),
+        ).then((results) => results[results.length - 1]);
+      }
+
       onSelectFile(callback) {
         return this.addCallback("selectFile", callback);
       }
@@ -1212,6 +1245,60 @@
       onSave(callback) {
         return this.addCallback("save", callback);
       }
+
+      onWriteDraft(callback) {
+        return this.addCallback("writeDraft", callback);
+      }
+
+      onCommit(callback) {
+        return this.addCallback("commit", callback);
+      }
+
+      onQuit(callback) {
+        return this.addCallback("quit", callback);
+      }
+
+      onDiscard(callback) {
+        return this.addCallback("discard", callback);
+      }
+
+      requestWriteDraft(detail) {
+        if (this.callbacks.writeDraft.length) {
+          return this.emitAsync("writeDraft", this, detail || {});
+        }
+        if (this.callbacks.save.length) {
+          return this.emitAsync("save", this, detail || {});
+        }
+        return Promise.resolve({ ok: false, message: "write draft is not available" });
+      }
+
+      requestCommit(detail) {
+        if (this.callbacks.commit.length) {
+          return this.emitAsync("commit", this, detail || {});
+        }
+        if (this.callbacks.save.length) {
+          return this.emitAsync("save", this, detail || {});
+        }
+        return Promise.resolve({ ok: false, message: "commit is not available" });
+      }
+
+      requestQuit(detail) {
+        if (!this.callbacks.quit.length) {
+          return Promise.resolve({ ok: false, message: "quit is not available" });
+        }
+        return this.emitAsync("quit", this, detail || {});
+      }
+
+      requestDiscard(detail) {
+        if (this.callbacks.discard.length) {
+          return this.emitAsync("discard", this, detail || {});
+        }
+        if (!this.callbacks.quit.length) {
+          return Promise.resolve({ ok: false, message: "discard is not available" });
+        }
+        return this.requestQuit({ ...(detail || {}), force: true });
+      }
+
 
       dispatchTransaction(transaction) {
         if (this.destroyed) return;
@@ -2473,8 +2560,20 @@
         if (this.options.vim === false || typeof root.createVimPlugin !== "function") return [];
 
         return root.createVimPlugin({
-          onSave: () => {
-            this.emit("save", this);
+          onWriteDraft: (detail) => {
+            return this.requestWriteDraft(detail || { source: "vim-write" });
+          },
+          onCommit: (detail) => {
+            return this.requestCommit(detail || { source: "vim-commit" });
+          },
+          onQuit: (detail) => {
+            return this.requestQuit(detail || { source: "vim-quit" });
+          },
+          onDiscard: (detail) => {
+            return this.requestDiscard(detail || { source: "vim-discard" });
+          },
+          onSave: (detail) => {
+            return this.requestWriteDraft(detail || { source: "vim-write" });
           },
         });
       }
@@ -2482,7 +2581,7 @@
       saveKeymap() {
         return PM.keymap({
           "Mod-s": () => {
-            this.emit("save", this);
+            this.requestWriteDraft({ source: "keyboard" });
             return true;
           },
         });

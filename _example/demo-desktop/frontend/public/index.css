@@ -481,10 +481,21 @@ ol {
 }
 
 .vim-ime-feedback-empty {
-  border-bottom: 2px solid #fff;
-  display: inline-block;
-  height: 1em;
+  display: inline;
+  height: 0;
+  line-height: 0;
   pointer-events: none;
+  position: relative;
+  width: 0;
+}
+
+.vim-ime-feedback-empty::after {
+  border-bottom: 2px solid #fff;
+  content: "";
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 1.06em;
   width: 0.62em;
 }
 

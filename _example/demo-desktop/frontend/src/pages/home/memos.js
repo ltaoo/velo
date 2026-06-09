@@ -58,6 +58,14 @@ import {
   saveProjects,
   updateMemoInVault,
 } from "../../domain/memo-repository.js";
+import {
+  COMPOSER_DRAFT_ID,
+  deleteMemoDraftInVault,
+  loadMemoDraftsFromVault,
+  memoEditDraftId,
+  normalizeMemoDraftPayload,
+  upsertMemoDraftInVault,
+} from "../../domain/memo-drafts.js";
 import { SVG } from "./memo-icons.js";
 import {
   activeViewMeta,
@@ -102,7 +110,6 @@ import {
   externalBrowserURLFromAnchor,
 } from "./memo-utils.js";
 
-const DRAFT_STORAGE_KEY = "demo-desktop:memos:draft:v1";
 const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
 const SHORTCUTS_STORAGE_KEY = "demo-desktop:settings:shortcuts:v1";
 const TASK_FILTER_STORAGE_KEY = "demo-desktop:gtd:task-filter:v1";
@@ -134,6 +141,7 @@ export function mountMemosHome(root) {
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
+    draftsLoaded: false,
     gtdItems: [],
     gtdLoading: false,
     gtdMilestones: [],
@@ -144,6 +152,7 @@ export function mountMemosHome(root) {
     memoSearchActiveIndex: 0,
     memoSearchOpen: false,
     memoSearchQuery: "",
+    memoDrafts: [],
     memos: loadMemos(),
     projects: loadProjects(),
     query: "",
@@ -193,6 +202,7 @@ export function mountMemosHome(root) {
     tagSummary: root.querySelector("[data-tag-summary]"),
     todoNavCount: root.querySelector("[data-todo-nav-count]"),
     toast: root.querySelector("[data-toast]"),
+    visibilitySelect: root.querySelector("[data-visibility-select]"),
   };
 
   composerEditor = createMiniEditor(els.composerHost, {
@@ -200,14 +210,28 @@ export function mountMemosHome(root) {
       return state.memos;
     },
     onChange(value) {
-      localStorage.setItem(DRAFT_STORAGE_KEY, value);
       renderComposerStatus(value);
+    },
+    onCommit() {
+      return createMemo({ source: "vim-wq" });
+    },
+    onDiscard() {
+      return clearComposerDraft({ clearEditor: true, message: "草稿已丢弃" });
+    },
+    onQuit() {
+      return exitComposer();
+    },
+    onSave() {
+      return writeComposerDraft();
     },
     onSubmit() {
       createMemo();
     },
+    onWriteDraft() {
+      return writeComposerDraft();
+    },
     placeholder: "记录想法、任务或链接...",
-    value: localStorage.getItem(DRAFT_STORAGE_KEY) || "",
+    value: "",
     vimStatusHost: els.composerVimStatus,
   });
 
@@ -216,6 +240,7 @@ export function mountMemosHome(root) {
   bindGoMessages();
   refreshProjectsFromVault();
   refreshMemosFromVault();
+  refreshMemoDraftsFromVault();
   refreshTasksFromVault();
   refreshGTDFromVault();
   refreshStorageForRender();
@@ -972,25 +997,25 @@ export function mountMemosHome(root) {
     composerEditor.focus();
   }
 
-  function createMemo() {
-    if (state.saving) return;
+  function createMemo(options = {}) {
+    if (state.saving) return Promise.resolve({ ok: false, message: "正在保存" });
     const content = composerEditor.getText();
     if (!content.trim()) {
       showToast("先写点内容");
       composerEditor.focus();
-      return;
+      return Promise.resolve({ ok: false, message: "先写点内容" });
     }
 
     state.saving = true;
     renderComposerStatus(content);
-    createMemoInVault(content, state.visibility, state.composerProjectId).then(
+    return createMemoInVault(content, state.visibility, state.composerProjectId).then(
       function (memo) {
         const normalized = normalizeMemoPayload(memo);
         state.memos = [normalized].filter(Boolean).concat(state.memos);
         saveMemos(state.memos);
         rememberComposerProject(state.composerProjectId);
         composerEditor.setText("");
-        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        removeDraftFromState(COMPOSER_DRAFT_ID);
         state.activeView = "memos";
         state.activeFilter = "all";
         state.activeTag = "";
@@ -999,17 +1024,73 @@ export function mountMemosHome(root) {
         renderComposerStatus("");
         refreshTasksFromVault();
         showToast("已发布到 " + projectLabel(normalized && normalized.projectId));
-        window.requestAnimationFrame(() => {
-          if (composerEditor && els.composerHost.isConnected) composerEditor.focus();
+        deleteMemoDraftInVault(COMPOSER_DRAFT_ID).catch(function (err) {
+          showToast("清理草稿失败: " + errorMessage(err));
         });
+        if (options.source !== "vim-wq") {
+          window.requestAnimationFrame(() => {
+            if (composerEditor && els.composerHost.isConnected) composerEditor.focus();
+          });
+        }
+        return { ok: true, message: "已发布" };
       },
       function (err) {
         showToast("发布失败: " + errorMessage(err));
+        return { ok: false, message: "发布失败: " + errorMessage(err) };
       },
     ).finally(function () {
       state.saving = false;
       renderComposerStatus(composerEditor.getText());
     });
+  }
+
+  function writeComposerDraft() {
+    if (!composerEditor) return Promise.resolve({ ok: false, message: "没有可保存的草稿" });
+    const content = composerEditor.getText();
+    if (!content.trim()) {
+      return clearComposerDraft({ clearEditor: false, message: "空草稿已清理" });
+    }
+
+    return upsertMemoDraftInVault({
+      content,
+      id: COMPOSER_DRAFT_ID,
+      kind: "composer",
+      projectId: state.composerProjectId,
+      visibility: state.visibility,
+    }).then(
+      function (draft) {
+        upsertDraftInState(draft);
+        showToast("草稿已保存");
+        return { ok: true, message: "draft written" };
+      },
+      function (err) {
+        showToast("保存草稿失败: " + errorMessage(err));
+        return { ok: false, message: "保存草稿失败: " + errorMessage(err) };
+      },
+    );
+  }
+
+  function clearComposerDraft(options = {}) {
+    removeDraftFromState(COMPOSER_DRAFT_ID);
+    if (options.clearEditor && composerEditor) {
+      composerEditor.setText("");
+      renderComposerStatus("");
+    }
+    return deleteMemoDraftInVault(COMPOSER_DRAFT_ID).then(
+      function () {
+        if (options.message) showToast(options.message);
+        return { ok: true, message: options.message || "empty draft cleared" };
+      },
+      function (err) {
+        showToast("删除草稿失败: " + errorMessage(err));
+        return { ok: false, message: "删除草稿失败: " + errorMessage(err) };
+      },
+    );
+  }
+
+  function exitComposer() {
+    if (composerEditor && typeof composerEditor.blur === "function") composerEditor.blur();
+    return Promise.resolve({ ok: true, message: "quit" });
   }
 
   function createTaskFromForm(form) {
@@ -1212,11 +1293,13 @@ export function mountMemosHome(root) {
   function startEdit(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
+    const draft = findDraft(memoEditDraftId(memoId));
     state.editingId = memoId;
-    state.editDraft = memo.content;
-    state.editProjectId = memo.projectId || "";
-    state.editVisibility = memo.visibility || DEFAULT_VISIBILITY;
+    state.editDraft = draft ? draft.content : memo.content;
+    state.editProjectId = draft ? normalizeProjectID(draft.projectId) : memo.projectId || "";
+    state.editVisibility = draft ? draft.visibility || DEFAULT_VISIBILITY : memo.visibility || DEFAULT_VISIBILITY;
     renderFeed();
+    if (draft) showToast("已恢复编辑草稿");
   }
 
   function toggleMemoExpand(memoId) {
@@ -1230,26 +1313,46 @@ export function mountMemosHome(root) {
   }
 
   function cancelEdit() {
+    const draftId = state.editingId ? memoEditDraftId(state.editingId) : "";
     state.editingId = "";
     state.editDraft = "";
     renderFeed();
+    if (draftId) {
+      removeDraftFromState(draftId);
+      deleteMemoDraftInVault(draftId).catch(function (err) {
+        showToast("删除草稿失败: " + errorMessage(err));
+      });
+    }
   }
 
-  function saveEdit(memoId) {
+  function saveEdit(memoId, options = {}) {
     const memo = findMemo(memoId);
-    if (!memo) return;
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
     const content = editEditor ? editEditor.getText() : state.editDraft;
     if (!content.trim()) {
       showToast("内容不能为空");
-      return;
+      return Promise.resolve({ ok: false, message: "内容不能为空" });
     }
     state.editingId = "";
     state.editDraft = "";
-    updateMemo(memoId, {
+    return updateMemo(memoId, {
       content,
       projectId: state.editProjectId,
       updatedAt: new Date().toISOString(),
       visibility: state.editVisibility,
+    }).then(function (result) {
+      if (result && result.ok === false) return result;
+      removeDraftFromState(memoEditDraftId(memoId));
+      return deleteMemoDraftInVault(memoEditDraftId(memoId)).then(
+        function () {
+          if (options.source === "vim-wq") return { ok: true, message: "committed" };
+          return result || { ok: true, message: "已保存" };
+        },
+        function (err) {
+          showToast("清理草稿失败: " + errorMessage(err));
+          return { ok: false, message: "清理草稿失败: " + errorMessage(err) };
+        },
+      );
     });
   }
 
@@ -1267,23 +1370,104 @@ export function mountMemosHome(root) {
     saveMemos(state.memos);
     renderAll();
     if (nextMemo) {
-      updateMemoInVault(memoId, patch).then(
+      return updateMemoInVault(memoId, patch).then(
         function (memo) {
           const normalized = normalizeMemoPayload(memo);
-          if (!normalized) return;
+          if (!normalized) return { ok: false, message: "保存失败" };
           state.memos = state.memos.map((item) => item.id === memoId ? normalized : item);
           saveMemos(state.memos);
           renderAll();
           if (Object.prototype.hasOwnProperty.call(patch, "content")) {
             refreshTasksFromVault();
           }
+          return { ok: true, message: "已保存" };
         },
         function (err) {
           showToast("保存失败: " + errorMessage(err));
           refreshMemosFromVault();
+          return { ok: false, message: "保存失败: " + errorMessage(err) };
         },
       );
     }
+    return Promise.resolve({ ok: false, message: "找不到 memo" });
+  }
+
+  function writeEditDraft(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    const content = editEditor ? editEditor.getText() : state.editDraft;
+    if (!content.trim()) {
+      return discardEditDraft(memoId, { exit: false, message: "空草稿已清理" });
+    }
+    return upsertMemoDraftInVault({
+      baseUpdatedAt: memo.updatedAt || "",
+      content,
+      id: memoEditDraftId(memoId),
+      kind: "memo-edit",
+      memoId,
+      projectId: state.editProjectId,
+      visibility: state.editVisibility,
+    }).then(
+      function (draft) {
+        upsertDraftInState(draft);
+        state.editDraft = content;
+        showToast("草稿已保存");
+        return { ok: true, message: "draft written" };
+      },
+      function (err) {
+        showToast("保存草稿失败: " + errorMessage(err));
+        return { ok: false, message: "保存草稿失败: " + errorMessage(err) };
+      },
+    );
+  }
+
+  function exitEdit(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) {
+      state.editingId = "";
+      state.editDraft = "";
+      renderFeed();
+      return Promise.resolve({ ok: true, message: "quit" });
+    }
+
+    const content = editEditor ? editEditor.getText() : state.editDraft;
+    const changed =
+      content !== memo.content ||
+      normalizeProjectID(state.editProjectId) !== normalizeProjectID(memo.projectId) ||
+      (state.editVisibility || DEFAULT_VISIBILITY) !== (memo.visibility || DEFAULT_VISIBILITY);
+
+    const finish = function () {
+      state.editingId = "";
+      state.editDraft = "";
+      renderFeed();
+      return { ok: true, message: "quit" };
+    };
+
+    if (!changed) return Promise.resolve(finish());
+    return writeEditDraft(memoId).then(function (result) {
+      if (result && result.ok === false) return result;
+      return finish();
+    });
+  }
+
+  function discardEditDraft(memoId, options = {}) {
+    const draftId = memoEditDraftId(memoId);
+    removeDraftFromState(draftId);
+    if (options.exit) {
+      state.editingId = "";
+      state.editDraft = "";
+      renderFeed();
+    }
+    return deleteMemoDraftInVault(draftId).then(
+      function () {
+        if (options.message) showToast(options.message);
+        return { ok: true, message: options.message || "draft discarded" };
+      },
+      function (err) {
+        showToast("删除草稿失败: " + errorMessage(err));
+        return { ok: false, message: "删除草稿失败: " + errorMessage(err) };
+      },
+    );
   }
 
   function togglePin(memoId) {
@@ -1722,8 +1906,23 @@ export function mountMemosHome(root) {
           onChange(value) {
             state.editDraft = value;
           },
+          onCommit() {
+            return saveEdit(memo.id, { source: "vim-wq" });
+          },
+          onDiscard() {
+            return discardEditDraft(memo.id, { exit: true, message: "草稿已丢弃" });
+          },
+          onQuit() {
+            return exitEdit(memo.id);
+          },
+          onSave() {
+            return writeEditDraft(memo.id);
+          },
           onSubmit() {
             saveEdit(memo.id);
+          },
+          onWriteDraft() {
+            return writeEditDraft(memo.id);
           },
           placeholder: "编辑 memo...",
           sourceMemoId: memo.id,
@@ -1884,7 +2083,11 @@ export function mountMemosHome(root) {
       function (payload) {
         state.projects = payload.projects.map(normalizeProjectPayload).filter(Boolean);
         saveProjects(state.projects);
-        if (payload.activeProjectId && state.activeProjectFilter === "all") {
+        if (
+          payload.activeProjectId &&
+          state.activeProjectFilter === "all" &&
+          !(composerEditor && composerEditor.getText().trim())
+        ) {
           state.composerProjectId = payload.activeProjectId;
           rememberComposerProject(payload.activeProjectId);
         }
@@ -1930,6 +2133,53 @@ export function mountMemosHome(root) {
         showToast("读取 vault memo 失败: " + errorMessage(err));
       },
     );
+  }
+
+  function refreshMemoDraftsFromVault() {
+    loadMemoDraftsFromVault().then(
+      function (drafts) {
+        state.memoDrafts = drafts.map(normalizeMemoDraftPayload).filter(Boolean);
+        state.draftsLoaded = true;
+        applyComposerDraft();
+        renderComposerProjectSelect();
+        renderComposerStatus(composerEditor ? composerEditor.getText() : "");
+      },
+      function (err) {
+        if (typeof globalThis.invoke === "function") {
+          showToast("读取草稿失败: " + errorMessage(err));
+        }
+      },
+    );
+  }
+
+  function findDraft(draftId) {
+    return state.memoDrafts.find((draft) => draft && draft.id === draftId) || null;
+  }
+
+  function upsertDraftInState(draft) {
+    const normalized = normalizeMemoDraftPayload(draft);
+    if (!normalized) return;
+    const index = state.memoDrafts.findIndex((item) => item.id === normalized.id);
+    if (index >= 0) {
+      state.memoDrafts[index] = normalized;
+    } else {
+      state.memoDrafts.push(normalized);
+    }
+  }
+
+  function removeDraftFromState(draftId) {
+    state.memoDrafts = state.memoDrafts.filter((draft) => draft && draft.id !== draftId);
+  }
+
+  function applyComposerDraft() {
+    const draft = findDraft(COMPOSER_DRAFT_ID);
+    if (!draft || !composerEditor) return;
+    if (composerEditor.getText().trim()) return;
+    state.composerProjectId = normalizeProjectID(draft.projectId);
+    state.visibility = draft.visibility || DEFAULT_VISIBILITY;
+    if (els.visibilitySelect) els.visibilitySelect.value = state.visibility;
+    composerEditor.setText(draft.content || "");
+    renderComposerStatus(draft.content || "");
   }
 
   function refreshTasksFromVault() {

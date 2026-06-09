@@ -213,4 +213,47 @@ func registerVaultProjectMemoRoutes(b *velo.Box) {
 			"tasksDeleted":  result.TasksDeleted,
 		})
 	})
+
+	b.Get("/api/memo-drafts", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		drafts, err := listVaultMemoDrafts(ctx)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"drafts": drafts})
+	})
+
+	b.Post("/api/memo-drafts/upsert", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoDraftUpsertRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		draft, err := upsertVaultMemoDraft(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"draft": draft})
+	})
+
+	b.Post("/api/memo-drafts/delete", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoDraftDeleteRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		if err := deleteVaultMemoDraft(ctx, req.ID); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
 }
