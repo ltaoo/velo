@@ -40,3 +40,19 @@
 - Fix: charwise paste now sets selection to `insertAt + pastedText.length - 1`.
 - Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM, set the cursor on `3` in `123456`, set register `abc`, and pressed `p`; the document became `123abc456`, selection moved to position `6`, and that position reads as `c`.
 - Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-char-paste-cursor`.
+
+## 2026-06-09: IME composition inserts text in normal mode
+
+- Symptom: when using a Chinese IME in normal mode, intermediate composition text was inserted at the cursor position. Expected behavior: composition input is invalid outside insert mode and should not change the document.
+- Root cause: vim normal mode only handled keydown. IME composition can enter ProseMirror through native `beforeinput`, `composition*`, or text input paths even when no mapped vim key is produced.
+- Fix: added native text input blocking for non-insert modes through `handleTextInput` and `handleDOMEvents` for `beforeinput`, `compositionstart`, `compositionupdate`, `compositionend`, and `textInput`.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM; in normal mode `handleTextInput` and `beforeinput` returned `true` and called `preventDefault`, while insert mode returned `false`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-normal-ime-block`.
+
+## 2026-06-09: IME composition keydown triggers vim commands
+
+- Symptom: during Chinese IME composition in normal mode, composing keydown events whose key matched vim commands such as `h` or `j` still moved the cursor or triggered vim behavior. Expected behavior: while composing, no vim key command should run outside insert mode.
+- Root cause: the previous IME fix blocked native text input events, but `handleKeyDown` still parsed composing keydown events through `keyName` and dispatched normal/visual commands.
+- Fix: `handleKeyDown` now checks `event.isComposing`, `key === "Process"`, `keyCode === 229`, and `which === 229` before key mapping; in non-insert modes those events are prevented and swallowed.
+- Verification: loaded `prosemirror.umd.min.js` and `vim.js` in a browser-like Node VM; a normal-mode composing `h` keydown returned `true`, called `preventDefault`, and left the cursor unchanged. A non-composing `h` still moved left, and insert-mode composing keydown returned `false`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260609-vim-composing-key-block`.

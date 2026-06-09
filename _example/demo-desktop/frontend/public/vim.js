@@ -14,7 +14,7 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260609-vim-char-paste-cursor";
+  const VIM_PLUGIN_VERSION = "20260609-vim-composing-key-block";
   const REGISTER_TYPES = {
     CHAR: "char",
     LINE: "line",
@@ -1567,6 +1567,12 @@
 
   function handleKeyDown(view, event, options) {
     const pluginState = getPluginState(view.state);
+    if (pluginState.mode !== MODES.INSERT && isComposingKeyEvent(event)) {
+      event.preventDefault();
+      if (typeof event.stopPropagation === "function") event.stopPropagation();
+      return true;
+    }
+
     const key = keyName(event);
 
     if (pluginState.mode === MODES.INSERT) {
@@ -1586,6 +1592,28 @@
     event.preventDefault();
     if (pluginState.mode === MODES.VISUAL) return visualCommand(view, key);
     return normalCommand(view, key, options);
+  }
+
+  function shouldBlockNativeTextInput(view) {
+    const pluginState = getPluginState(view.state);
+    return pluginState && pluginState.mode !== MODES.INSERT;
+  }
+
+  function isComposingKeyEvent(event) {
+    return !!(
+      event &&
+      (event.isComposing ||
+        event.key === "Process" ||
+        event.keyCode === 229 ||
+        event.which === 229)
+    );
+  }
+
+  function blockNativeTextInput(view, event) {
+    if (!shouldBlockNativeTextInput(view)) return false;
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+    return true;
   }
 
   function pushCursorDecoration(decorations, state, pos) {
@@ -1763,6 +1791,26 @@
             };
           },
           decorations: decorationsFor,
+          handleTextInput(view) {
+            return shouldBlockNativeTextInput(view);
+          },
+          handleDOMEvents: {
+            beforeinput(view, event) {
+              return blockNativeTextInput(view, event);
+            },
+            compositionstart(view, event) {
+              return blockNativeTextInput(view, event);
+            },
+            compositionupdate(view, event) {
+              return blockNativeTextInput(view, event);
+            },
+            compositionend(view, event) {
+              return blockNativeTextInput(view, event);
+            },
+            textInput(view, event) {
+              return blockNativeTextInput(view, event);
+            },
+          },
           handleKeyDown(view, event) {
             return handleKeyDown(view, event, pluginOptions);
           },
