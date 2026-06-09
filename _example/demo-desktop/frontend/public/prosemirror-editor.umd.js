@@ -57,6 +57,79 @@
       return "loading: Uploading " + (fileName || "image");
     }
 
+    function numericPixel(value) {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function selectionTextblockRect(viewInstance) {
+      const selection = viewInstance && viewInstance.state && viewInstance.state.selection;
+      const $head = selection && selection.$head;
+      if (!$head) return null;
+
+      for (let depth = $head.depth; depth > 0; depth -= 1) {
+        const node = $head.node(depth);
+        if (!node || !node.isTextblock) continue;
+        const dom = viewInstance.nodeDOM($head.before(depth));
+        if (dom && typeof dom.getBoundingClientRect === "function") {
+          return dom.getBoundingClientRect();
+        }
+      }
+      return null;
+    }
+
+    function selectionRect(viewInstance) {
+      const selection = viewInstance && viewInstance.state && viewInstance.state.selection;
+      if (!selection) return null;
+
+      if (PM.NodeSelection && selection instanceof PM.NodeSelection) {
+        const dom = viewInstance.nodeDOM(selection.from);
+        if (dom && typeof dom.getBoundingClientRect === "function") {
+          return dom.getBoundingClientRect();
+        }
+      }
+
+      try {
+        return viewInstance.coordsAtPos(selection.head, 1);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function scrollSelectionIntoEditorPadding(viewInstance) {
+      const scroller = viewInstance && viewInstance.dom;
+      if (!scroller || typeof scroller.getBoundingClientRect !== "function") return false;
+      if (scroller.scrollHeight <= scroller.clientHeight) return false;
+
+      const rect = selectionRect(viewInstance);
+      if (!rect) return false;
+
+      const style = root.getComputedStyle ? root.getComputedStyle(scroller) : null;
+      const paddingTop = style ? numericPixel(style.paddingTop) : 0;
+      const paddingBottom = style ? numericPixel(style.paddingBottom) : 0;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const topLimit = scrollerRect.top + paddingTop;
+      const bottomLimit = scrollerRect.bottom - paddingBottom;
+
+      let targetTop = rect.top;
+      let targetBottom = rect.bottom;
+      const blockRect = selectionTextblockRect(viewInstance);
+      if (blockRect && blockRect.height <= bottomLimit - topLimit) {
+        targetTop = Math.min(targetTop, blockRect.top);
+        targetBottom = Math.max(targetBottom, blockRect.bottom);
+      }
+
+      if (targetTop < topLimit) {
+        scroller.scrollTop -= topLimit - targetTop;
+        return true;
+      }
+      if (targetBottom > bottomLimit) {
+        scroller.scrollTop += targetBottom - bottomLimit;
+        return true;
+      }
+      return true;
+    }
+
     function markdownLinkPlainText(label, href, image) {
       const text = String(label || href || "").trim();
       const target = String(href || text).trim();
@@ -1071,6 +1144,7 @@
             spellcheck: "false",
             writingsuggestions: "false",
           },
+          handleScrollToSelection: scrollSelectionIntoEditorPadding,
           dispatchTransaction: (transaction) => {
             this.dispatchTransaction(transaction);
           },

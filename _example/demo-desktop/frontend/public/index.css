@@ -464,6 +464,30 @@ ol {
   text-decoration: none;
 }
 
+.ProseMirror .vim-ime-feedback,
+.mini-editor .mini-file-token.vim-ime-feedback,
+.mini-editor .mini-link-token.vim-ime-feedback,
+.mini-editor .mini-markdown-syntax.vim-ime-feedback,
+.mini-editor .mini-inline-code.vim-ime-feedback,
+.mini-editor .mini-markdown-emphasis-token.vim-ime-feedback,
+.mini-editor .mini-markdown-strike-token.vim-ime-feedback,
+.mini-editor .mini-hashtag-token.vim-ime-feedback,
+.mini-editor .mini-markdown-link-token.vim-ime-feedback,
+.mini-editor .mini-markdown-image-token.vim-ime-feedback {
+  text-decoration-line: underline;
+  text-decoration-color: #fff;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+}
+
+.vim-ime-feedback-empty {
+  border-bottom: 2px solid #fff;
+  display: inline-block;
+  height: 1em;
+  pointer-events: none;
+  width: 0.62em;
+}
+
 .vim-empty-line-cursor {
   display: inline;
   height: 0;

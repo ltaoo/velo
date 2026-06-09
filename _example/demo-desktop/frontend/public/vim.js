@@ -14,7 +14,7 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260609-vim-composing-key-block";
+  const VIM_PLUGIN_VERSION = "20260609-vim-ime-feedback-clear";
   const REGISTER_TYPES = {
     CHAR: "char",
     LINE: "line",
@@ -616,6 +616,7 @@
       pending: null,
       count: "",
       message: "",
+      imeFeedback: null,
       ...(meta || {}),
     };
   }
@@ -1568,6 +1569,7 @@
   function handleKeyDown(view, event, options) {
     const pluginState = getPluginState(view.state);
     if (pluginState.mode !== MODES.INSERT && isComposingKeyEvent(event)) {
+      updateImeFeedback(view, event, "advance");
       event.preventDefault();
       if (typeof event.stopPropagation === "function") event.stopPropagation();
       return true;
@@ -1611,8 +1613,48 @@
 
   function blockNativeTextInput(view, event) {
     if (!shouldBlockNativeTextInput(view)) return false;
+    const type = event && event.type;
+    if (type === "compositionstart") {
+      updateImeFeedback(view, event, "start");
+    } else if (type === "compositionend") {
+      updateImeFeedback(view, event, "end");
+    } else if (type === "compositionupdate") {
+      updateImeFeedback(view, event, "advance");
+    }
     if (event && typeof event.preventDefault === "function") event.preventDefault();
     if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+    return true;
+  }
+
+  function imeEventTextLength(event) {
+    if (!event || typeof event.data !== "string") return null;
+    return Array.from(event.data).length;
+  }
+
+  function updateImeFeedback(view, event, action) {
+    const pluginState = getPluginState(view.state);
+    if (!pluginState || pluginState.mode === MODES.INSERT || !view.dispatch) return false;
+
+    if (action === "end") {
+      view.dispatch(setVimMeta(view.state.tr, { imeFeedback: null }));
+      return true;
+    }
+
+    const current = pluginState.imeFeedback || {
+      anchor: normalCursorPos(view.state),
+      offset: 0,
+    };
+    const textLength = imeEventTextLength(event);
+    const offset =
+      action === "start"
+        ? 0
+        : Math.max(1, textLength == null ? current.offset + 1 : textLength);
+    view.dispatch(setVimMeta(view.state.tr, {
+      imeFeedback: {
+        anchor: current.anchor,
+        offset,
+      },
+    }));
     return true;
   }
 
@@ -1638,6 +1680,37 @@
     decorations.push(
       PM.Decoration.inline(cursor.from, cursor.to, {
         class: "vim-cursor-char",
+      }),
+    );
+  }
+
+  function pushImeFeedbackDecoration(decorations, state, feedback) {
+    if (!feedback) return;
+    const anchor = clamp(feedback.anchor, 0, state.doc.content.size);
+    const block = textblockInfo(state, anchor);
+    if (!block.node.isTextblock) return;
+
+    if (block.node.content.size === 0) {
+      decorations.push(
+        PM.Decoration.widget(
+          block.start,
+          () => {
+            const marker = document.createElement("span");
+            marker.className = "vim-ime-feedback-empty";
+            return marker;
+          },
+          { side: 1 },
+        ),
+      );
+      return;
+    }
+
+    const from = clamp(anchor, block.start, block.end - 1);
+    const offset = Math.max(0, feedback.offset || 0);
+    const to = clamp(anchor + offset + 1, from + 1, block.end);
+    decorations.push(
+      PM.Decoration.inline(from, to, {
+        class: "vim-ime-feedback",
       }),
     );
   }
@@ -1668,6 +1741,10 @@
     const decorations = [];
     if (pluginState.mode === MODES.NORMAL && state.selection.empty) {
       pushCursorDecoration(decorations, state);
+    }
+
+    if (pluginState.mode !== MODES.INSERT) {
+      pushImeFeedbackDecoration(decorations, state, pluginState.imeFeedback);
     }
 
     if (pluginState.mode === MODES.VISUAL && !state.selection.empty) {
@@ -1717,6 +1794,7 @@
               lastRepeat: null,
               lastFind: null,
               insertSession: null,
+              imeFeedback: null,
               message: "",
             };
           },
@@ -1730,6 +1808,12 @@
                 ? {
                     from: tr.mapping.map(value.searchRange.from),
                     to: tr.mapping.map(value.searchRange.to),
+                  }
+                : null,
+              imeFeedback: value.imeFeedback
+                ? {
+                    anchor: tr.mapping.map(value.imeFeedback.anchor),
+                    offset: value.imeFeedback.offset || 0,
                   }
                 : null,
             };
@@ -1775,6 +1859,9 @@
             }
             if (Object.prototype.hasOwnProperty.call(meta, "insertSession")) {
               next.insertSession = meta.insertSession;
+            }
+            if (Object.prototype.hasOwnProperty.call(meta, "imeFeedback")) {
+              next.imeFeedback = meta.imeFeedback;
             }
             if (Object.prototype.hasOwnProperty.call(meta, "message")) {
               next.message = meta.message;
