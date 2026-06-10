@@ -9,6 +9,7 @@ import (
 
 type Handler func(message string) (id string, result string)
 type DragDropHandler func(event string, payload string)
+type ReopenHandler func()
 
 type BoxWebviewOptions struct {
 	ID                     string
@@ -21,10 +22,14 @@ type BoxWebviewOptions struct {
 	Title                  string
 	Width                  int
 	Height                 int
+	X                      int
+	Y                      int
+	HasPosition            bool
 	Mux                    http.Handler
 	FrontendFS             fs.FS
 	HandleMessage          Handler
 	HandleDragDrop         DragDropHandler
+	HandleReopen           ReopenHandler
 	QuitOnLastWindowClosed bool
 	Frameless              bool
 	Hidden                 bool

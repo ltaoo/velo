@@ -479,15 +479,35 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	if title == "" {
 		title = b.appName
 	}
+	windowName := opt.Name
+	if windowName == "" {
+		windowName = "default"
+	}
+	width := opt.Width
+	height := opt.Height
+	var x, y int
+	hasPosition := false
+	savedState := b.Store.GetWindow(windowName)
+	if savedState != nil {
+		if savedState.Width > 0 && savedState.Height > 0 {
+			width = savedState.Width
+			height = savedState.Height
+		}
+		if savedState.X != 0 || savedState.Y != 0 {
+			x = savedState.X
+			y = savedState.Y
+			hasPosition = true
+		}
+	}
 	windowURL := b.webviewURL(opt.URL, pathname)
 	windowInfo := &veloRuntimeWindowInfo{
 		ID:                id,
-		Name:              opt.Name,
+		Name:              windowName,
 		Pathname:          pathname,
 		URL:               windowURL,
 		Title:             title,
-		Width:             opt.Width,
-		Height:            opt.Height,
+		Width:             width,
+		Height:            height,
 		Frameless:         opt.Frameless,
 		Hidden:            opt.Hidden,
 		HideTrafficLights: opt.HideTrafficLights,
@@ -495,18 +515,22 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
-		Name:                   opt.Name,
+		Name:                   windowName,
 		Pathname:               pathname,
 		IconData:               b.iconData,
 		InjectedJS:             b.injectedRuntimeJS(windowInfo),
 		AppName:                b.appName,
 		Title:                  title,
-		Width:                  opt.Width,
-		Height:                 opt.Height,
+		Width:                  width,
+		Height:                 height,
+		X:                      x,
+		Y:                      y,
+		HasPosition:            hasPosition,
 		Mux:                    mux,
 		FrontendFS:             opt.FrontendFS,
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
+		HandleReopen:           opt.OnReopen,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
@@ -794,6 +818,7 @@ type VeloWebviewOpt struct {
 	FrontendFS           fs.FS
 	EntryPage            string
 	OnDragDrop           func(event string, payload string)
+	OnReopen             func()
 	URL                  string
 }
 
@@ -809,10 +834,19 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	width := opt.Width
 	height := opt.Height
+	var x, y int
+	hasPosition := false
 	savedState := b.Store.GetWindow(windowName)
-	if savedState != nil && savedState.Width > 0 && savedState.Height > 0 {
-		width = savedState.Width
-		height = savedState.Height
+	if savedState != nil {
+		if savedState.Width > 0 && savedState.Height > 0 {
+			width = savedState.Width
+			height = savedState.Height
+		}
+		if savedState.X != 0 || savedState.Y != 0 {
+			x = savedState.X
+			y = savedState.Y
+			hasPosition = true
+		}
 	}
 
 	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
@@ -852,10 +886,14 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		Title:                  title,
 		Width:                  width,
 		Height:                 height,
+		X:                      x,
+		Y:                      y,
+		HasPosition:            hasPosition,
 		Mux:                    mux,
 		FrontendFS:             opt.FrontendFS,
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
+		HandleReopen:           opt.OnReopen,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
@@ -867,9 +905,5 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	b.webviews = append(b.webviews, opts)
 	wv := &webview.Webview{}
 	b.Webview = wv
-	// Restore saved window position
-	if savedState != nil && (savedState.X != 0 || savedState.Y != 0) {
-		wv.SetPosition(savedState.X, savedState.Y)
-	}
 	return wv
 }
