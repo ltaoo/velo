@@ -10,17 +10,52 @@ import (
 
 	"github.com/ltaoo/velo"
 	"github.com/ltaoo/velo/file"
+	"github.com/ltaoo/velo/store"
 	"github.com/rs/zerolog"
 )
 
+type WindowStateSaveRequest struct {
+	Height int    `json:"height"`
+	Name   string `json:"name"`
+	Width  int    `json:"width"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+}
+
+func memoWindowName(memoID string) string {
+	nameSuffix := sanitizeStorageID(memoID)
+	if nameSuffix == "" {
+		nameSuffix = "memo"
+	}
+	return "memo-window-" + nameSuffix
+}
+
 func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 	b.Get("/api/window/show", func(c *velo.BoxContext) interface{} {
-		b.Webview.Show()
+		showMainWindow(b, logger)
 		return c.Ok(velo.H{"success": true})
 	})
 
 	b.Get("/api/window/hide", func(c *velo.BoxContext) interface{} {
 		b.Webview.Hide()
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Post("/api/window/state/save", func(c *velo.BoxContext) interface{} {
+		var req WindowStateSaveRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			return c.Error("name is required")
+		}
+		if req.Width <= 0 || req.Height <= 0 {
+			return c.Error("width and height are required")
+		}
+		if err := b.Store.SaveWindow(req.Name, &store.WindowState{X: req.X, Y: req.Y, Width: req.Width, Height: req.Height}); err != nil {
+			return c.Error(err.Error())
+		}
 		return c.Ok(velo.H{"success": true})
 	})
 
@@ -146,12 +181,9 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			params.Set("fixed", "1")
 		}
 
-		nameSuffix := sanitizeStorageID(memoID)
-		if nameSuffix == "" {
-			nameSuffix = "memo"
-		}
+		windowName := memoWindowName(memoID)
 		b.OpenWindow(&velo.VeloWebviewOpt{
-			Name:       "memo-window-" + nameSuffix,
+			Name:       windowName,
 			Title:      "Memo",
 			Pathname:   "/memo-window?" + params.Encode(),
 			Width:      460,
@@ -160,7 +192,7 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			EntryPage:  "memo-window.html",
 			FrontendFS: appAssets.FrontendFS,
 		})
-		return c.Ok(velo.H{"success": true, "id": memoID})
+		return c.Ok(velo.H{"success": true, "id": memoID, "windowName": windowName})
 	})
 
 	b.Get("/api/memo-window/get", func(c *velo.BoxContext) interface{} {
@@ -176,10 +208,11 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			return c.Ok(velo.H{"found": false})
 		}
 		return c.Ok(velo.H{
-			"found": true,
-			"fixed": payload.Fixed,
-			"memo":  payload.Memo,
-			"memos": payload.Memos,
+			"found":      true,
+			"fixed":      payload.Fixed,
+			"memo":       payload.Memo,
+			"memos":      payload.Memos,
+			"windowName": memoWindowName(memoID),
 		})
 	})
 }

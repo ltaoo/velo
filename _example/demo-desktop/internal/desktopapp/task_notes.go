@@ -32,6 +32,7 @@ type ParsedTaskLine struct {
 
 type ParsedTaskText struct {
 	DueAt string
+	Notes string
 	Tags  []string
 	Title string
 }
@@ -132,6 +133,7 @@ func extractSubtaskFromMemoLine(ctx *VaultContext, req TaskExtractRequest) (Task
 		Contexts:  parent.Contexts,
 		DueAt:     metadata.DueAt,
 		ListID:    parent.ListID,
+		Notes:     metadata.Notes,
 		ParentID:  parent.ID,
 		Priority:  parent.Priority,
 		ProjectID: parent.ProjectID,
@@ -213,14 +215,39 @@ func taskTitleFromTodoText(text string) string {
 func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
 	tags := extractMemoTags(text)
 	dueAt := ""
-	titleSource := rewriteTaskTextOutsideInlineCode(text, func(segment string) string {
+	explicitTitle := ""
+	withoutTitleSyntax := rewriteTaskTextOutsideInlineCode(text, func(segment string) string {
+		if explicitTitle == "" {
+			if next, title, ok := removeTaskTitlePropertySyntax(segment); ok {
+				explicitTitle = title
+				segment = next
+			}
+		}
+		if explicitTitle == "" {
+			if next, title, ok := removeTaskTitlePrefixSyntax(segment); ok {
+				explicitTitle = title
+				segment = next
+			}
+		}
+		return segment
+	})
+	titleSource := rewriteTaskTextOutsideInlineCode(withoutTitleSyntax, func(segment string) string {
 		withoutDates, foundDueAt := removeTaskDateSyntax(segment)
 		if dueAt == "" {
 			dueAt = foundDueAt
 		}
 		return removeTaskTagSyntax(withoutDates)
 	})
-	title := cleanTaskTitleText(titleSource)
+	notes := ""
+	title := cleanTaskTitleText(explicitTitle)
+	if title != "" {
+		notes = cleanTaskTitleText(titleSource)
+		if notes == title {
+			notes = ""
+		}
+	} else {
+		title = cleanTaskTitleText(titleSource)
+	}
 	if title == "" {
 		title = cleanTaskTitleText(text)
 	}
@@ -229,9 +256,77 @@ func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
 	}
 	return ParsedTaskText{
 		DueAt: dueAt,
+		Notes: notes,
 		Tags:  tags,
 		Title: title,
 	}
+}
+
+var taskTitlePropertyPattern = regexp.MustCompile(`(?i)(^|[\s([{（【「『])\{(title|标题)\s*[:=：]\s*([^{}]{1,120})\}`)
+
+func removeTaskTitlePropertySyntax(text string) (string, string, bool) {
+	match := taskTitlePropertyPattern.FindStringSubmatchIndex(text)
+	if len(match) < 8 {
+		return text, "", false
+	}
+	title := trimTaskTitleValue(text[match[6]:match[7]])
+	if title == "" {
+		return text, "", false
+	}
+	leading := text[match[2]:match[3]]
+	next := text[:match[0]] + leading + text[match[1]:]
+	return next, title, true
+}
+
+func removeTaskTitlePrefixSyntax(text string) (string, string, bool) {
+	leading := text[:len(text)-len(strings.TrimLeft(text, " \t"))]
+	rest := strings.TrimLeft(text, " \t")
+	pairs := []struct {
+		open       string
+		close      string
+		requireGap bool
+	}{
+		{open: "[", close: "]", requireGap: true},
+		{open: "【", close: "】"},
+		{open: "「", close: "」"},
+		{open: "『", close: "』"},
+	}
+	for _, pair := range pairs {
+		if !strings.HasPrefix(rest, pair.open) {
+			continue
+		}
+		closeIndex := strings.Index(rest[len(pair.open):], pair.close)
+		if closeIndex < 0 {
+			continue
+		}
+		titleEnd := len(pair.open) + closeIndex
+		title := trimTaskTitleValue(rest[len(pair.open):titleEnd])
+		if title == "" {
+			continue
+		}
+		after := rest[titleEnd+len(pair.close):]
+		if pair.requireGap && !taskTitlePrefixHasGap(after) {
+			continue
+		}
+		return leading + strings.TrimLeft(after, " \t"), title, true
+	}
+	return text, "", false
+}
+
+func trimTaskTitleValue(value string) string {
+	title := strings.TrimSpace(value)
+	title = strings.Trim(title, `"'“”‘’`)
+	return strings.TrimSpace(title)
+}
+
+func taskTitlePrefixHasGap(after string) bool {
+	if after == "" {
+		return true
+	}
+	if strings.HasPrefix(after, "(") || strings.HasPrefix(after, "[") {
+		return false
+	}
+	return len(after) != len(strings.TrimLeft(after, " \t:-|,.;，。：；、"))
 }
 
 func cleanTaskTitleText(text string) string {

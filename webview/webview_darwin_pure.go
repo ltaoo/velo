@@ -65,6 +65,7 @@ func init() {
 	// Register VeloAppDelegate class
 	appDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloAppDelegate", 0)
 	cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), applicationShouldTerminateAfterLastWindowClosed, "B@:@")
+	cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldHandleReopen:hasVisibleWindows:"), applicationShouldHandleReopen, "B@:@B")
 	cocoa.RegisterClassPair(appDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloAppDelegate registered")
 
@@ -99,6 +100,21 @@ func applicationShouldTerminateAfterLastWindowClosed(self, _cmd, app uintptr) ui
 		return 1
 	}
 	return 0
+}
+
+func applicationShouldHandleReopen(self, _cmd, app, hasVisibleWindows uintptr) uintptr {
+	if webview_opts != nil && webview_opts.HandleReopen != nil {
+		go webview_opts.HandleReopen()
+		return 1
+	}
+	if globalWindow != 0 {
+		cocoa.DispatchMain(func() {
+			nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+			nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
+			globalWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+		})
+	}
+	return 1
 }
 
 func windowWillClose(self, _cmd, notification uintptr) {
@@ -264,6 +280,11 @@ func handleWindowControlMessage(webView cocoa.ID, id string, method string, args
 		if width > 0 && height > 0 {
 			setWindowFrameSizeKeepingTop(nsWindow, width, height)
 		}
+	case "__velo/window/state":
+		if id != "" {
+			sendCallbackTo(webView, id, windowStateResult(nsWindow))
+		}
+		return true
 	case "__velo/window/toggle_maximize":
 		nsWindow.Send(cocoa.RegisterName("zoom:"), 0)
 	case "__velo/window/maximize":
@@ -291,6 +312,24 @@ func handleWindowControlMessage(webView cocoa.ID, id string, method string, args
 		sendCallbackTo(webView, id, `{"success":true}`)
 	}
 	return true
+}
+
+func windowStateResult(nsWindow cocoa.ID) string {
+	if nsWindow == 0 {
+		return `{"success":false}`
+	}
+	value := nsWindow.Send(cocoa.RegisterName("valueForKey:"), cocoa.StringToNSString("frame"))
+	if value == 0 {
+		return `{"success":false}`
+	}
+	var rect cocoa.CGRect
+	value.Send(cocoa.RegisterName("getValue:"), unsafe.Pointer(&rect))
+	screenHeight := getPrimaryScreenHeight()
+	x := int(rect.X)
+	y := screenHeight - int(rect.Y+rect.Height)
+	width := int(rect.Width)
+	height := int(rect.Height)
+	return fmt.Sprintf(`{"success":true,"x":%d,"y":%d,"width":%d,"height":%d}`, x, y, width, height)
 }
 
 func intArg(args interface{}, key string) int {
@@ -572,8 +611,12 @@ func open_window(opts *BoxWebviewOptions) {
 	if count == 0 {
 		open_webview(opts)
 	} else {
+		isMain := false
+		if webview_opts != nil && strings.TrimSpace(opts.Name) != "" && opts.Name == webview_opts.Name {
+			isMain = true
+		}
 		cocoa.DispatchMain(func() {
-			createWindow(opts, false)
+			createWindow(opts, isMain)
 		})
 	}
 }
@@ -802,8 +845,11 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	windowDelegate := cocoa.GetClass("VeloWindowDelegate").Send(cocoa.RegisterName("alloc")).Send(cocoa.RegisterName("init"))
 	nsWindow.Send(cocoa.RegisterName("setDelegate:"), windowDelegate)
 
-	// Center window
-	nsWindow.Send(cocoa.RegisterName("center"))
+	if opts.HasPosition {
+		setWindowTopLeft(nsWindow, opts.X, opts.Y)
+	} else {
+		nsWindow.Send(cocoa.RegisterName("center"))
+	}
 
 	// Make Key and Order Front (unless hidden)
 	if !opts.Hidden {
@@ -930,6 +976,19 @@ func hideTrafficLights(nsWindow cocoa.ID) {
 	}
 }
 
+func setWindowTopLeft(nsWindow cocoa.ID, x, y int) {
+	if nsWindow == 0 {
+		return
+	}
+	screenHeight := getPrimaryScreenHeight()
+	cy := screenHeight - y
+	point := cocoa.CGPoint{
+		X: cocoa.CGFloat(x),
+		Y: cocoa.CGFloat(cy),
+	}
+	nsWindow.SendPoint(cocoa.RegisterName("setFrameTopLeftPoint:"), point)
+}
+
 func loadURLInWebView(wkWebView cocoa.ID, rawURL string) {
 	if wkWebView == 0 || strings.TrimSpace(rawURL) == "" {
 		return
@@ -1002,20 +1061,7 @@ func setMaxSize(width, height int) {
 func setPosition(x, y int) {
 	cocoa.DispatchMain(func() {
 		if globalWindow != 0 {
-			// Convert webview top-left coordinates to Cocoa top-left
-			// Wait, setFrameTopLeftPoint takes Cocoa screen coordinates.
-			// Cocoa screen coordinates have (0,0) at bottom-left.
-			// To position at (x, y) where y is from top-left:
-			// y_cocoa = ScreenHeight - y_webview
-
-			screenHeight := getPrimaryScreenHeight()
-			cy := screenHeight - y
-
-			point := cocoa.CGPoint{
-				X: cocoa.CGFloat(x),
-				Y: cocoa.CGFloat(cy),
-			}
-			globalWindow.SendPoint(cocoa.RegisterName("setFrameTopLeftPoint:"), point)
+			setWindowTopLeft(globalWindow, x, y)
 		}
 	})
 }
