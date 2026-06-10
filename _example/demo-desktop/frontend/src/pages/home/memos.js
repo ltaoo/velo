@@ -97,10 +97,12 @@ import {
 import {
   EDITOR_SETTINGS_STORAGE_KEY,
   createMiniEditor,
+  fileInfoToUploadURL,
   filesToMarkdown,
   insertPlainTextIntoEditor,
   loadEditorSettings,
   loadEditorSettingsFromVault,
+  normalizeEditorSettings,
   refreshCloudStorageSettings,
   uploadErrorMessage,
 } from "./memo-editor.js";
@@ -119,6 +121,9 @@ import {
 const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
 const SHORTCUTS_STORAGE_KEY = "demo-desktop:settings:shortcuts:v1";
 const TASK_FILTER_STORAGE_KEY = "demo-desktop:gtd:task-filter:v1";
+const CLIPBOARD_AUTO_HIDE_MS = 5000;
+const CLIPBOARD_EXIT_MS = 180;
+const CLIPBOARD_MIN_VISIBLE_MS = 1500;
 const DETACHED_WINDOW_STATE_POLL_INTERVAL = 250;
 const DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
 const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
@@ -170,8 +175,19 @@ export function mountMemosHome(root) {
     saving: false,
     taskDetails: new Map(),
     taskFilter: loadTaskFilter(),
+    retainedCompletedTaskFilters: new Map(),
     tasks: [],
     tasksLoading: false,
+    clipboardItem: null,
+    clipboardDisplayedId: "",
+    clipboardForeground: true,
+    clipboardLastAppearedId: "",
+    clipboardLeaving: false,
+    clipboardShownAt: 0,
+    clipboardVisible: false,
+    clipboardWorking: false,
+    clipboardLeaveTimer: null,
+    clipboardTimer: null,
     toastTimer: null,
     visibility: DEFAULT_VISIBILITY,
   };
@@ -190,6 +206,7 @@ export function mountMemosHome(root) {
     composerStatus: root.querySelector("[data-composer-status]"),
     composerVimStatus: root.querySelector("[data-composer-vim-status]"),
     codeNavCount: root.querySelector("[data-code-nav-count]"),
+    clipboardCard: root.querySelector("[data-clipboard-card]"),
     createButton: root.querySelector('[data-action="createMemo"]'),
     feedCount: root.querySelector("[data-feed-count]"),
     fileNavCount: root.querySelector("[data-file-nav-count]"),
@@ -220,6 +237,7 @@ export function mountMemosHome(root) {
   renderAll();
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
+  requestClipboardLatest();
   refreshProjectsFromVault();
   refreshMemosFromVault();
   refreshMemoDraftsFromVault();
@@ -233,7 +251,8 @@ export function mountMemosHome(root) {
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
   root.addEventListener("submit", handleSubmit);
-  window.addEventListener("focus", refreshEditorSettings);
+  window.addEventListener("focus", handleWindowFocus);
+  window.addEventListener("blur", handleWindowBlur);
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("storage", handleStorage);
 
@@ -244,10 +263,13 @@ export function mountMemosHome(root) {
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
       root.removeEventListener("submit", handleSubmit);
-      window.removeEventListener("focus", refreshEditorSettings);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
       window.removeEventListener("keydown", handleKeydown);
       window.removeEventListener("storage", handleStorage);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
+      if (state.clipboardTimer) window.clearTimeout(state.clipboardTimer);
+      if (state.clipboardLeaveTimer) window.clearTimeout(state.clipboardLeaveTimer);
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
       if (composerEditor) composerEditor.destroy();
       if (editEditor) editEditor.destroy();
@@ -298,6 +320,10 @@ export function mountMemosHome(root) {
     return state.editorSettings && state.editorSettings.vimMode === true;
   }
 
+  function calendarWeekStart() {
+    return state.editorSettings && state.editorSettings.calendarWeekStart === "sunday" ? "sunday" : "monday";
+  }
+
   function handleStorage(event) {
     if (event.key !== EDITOR_SETTINGS_STORAGE_KEY) return;
     refreshEditorSettings();
@@ -311,21 +337,48 @@ export function mountMemosHome(root) {
     });
   }
 
+  function handleWindowFocus() {
+    state.clipboardForeground = true;
+    refreshEditorSettings();
+    requestClipboardLatest();
+  }
+
+  function handleWindowBlur() {
+    state.clipboardForeground = false;
+    hideClipboardCard();
+  }
+
+  function isClipboardForeground() {
+    if (state.clipboardForeground) return true;
+    return typeof document.hasFocus === "function" && document.hasFocus();
+  }
+
   function applyEditorSettings(nextSettings, options = {}) {
-    const next = nextSettings || loadEditorSettings();
-    if (next.vimMode === editorVimEnabled()) return;
+    const next = normalizeEditorSettings(nextSettings || loadEditorSettings());
+    const vimChanged = next.vimMode !== editorVimEnabled();
+    const calendarChanged = next.calendarWeekStart !== calendarWeekStart();
+    if (!vimChanged && !calendarChanged) return;
 
     const composerText = composerEditor ? composerEditor.getText() : "";
-    if (editEditor) syncEditDraftFromEditor();
     state.editorSettings = next;
 
-    if (composerEditor) composerEditor.destroy();
-    els.composerHost.innerHTML = "";
-    composerEditor = createComposerEditor(composerText);
-    renderComposerStatus(composerEditor.getText());
+    if (vimChanged) {
+      if (editEditor) syncEditDraftFromEditor();
+      if (composerEditor) composerEditor.destroy();
+      els.composerHost.innerHTML = "";
+      composerEditor = createComposerEditor(composerText);
+      renderComposerStatus(composerEditor.getText());
 
-    if (state.activeView === "memos" && state.editingId) renderFeed();
-    if (!options.silent) showToast(next.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式");
+      if (state.activeView === "memos" && state.editingId) renderFeed();
+      if (calendarChanged) renderCalendar();
+      if (!options.silent) showToast(next.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式");
+      return;
+    }
+
+    if (calendarChanged) {
+      renderCalendar();
+      if (!options.silent) showToast(next.calendarWeekStart === "sunday" ? "日历已设为周日开始" : "日历已设为周一开始");
+    }
   }
 
   function handleExternalLinkClick(event) {
@@ -377,6 +430,7 @@ export function mountMemosHome(root) {
 
     const view = closestElement(event.target, "[data-view]");
     if (view && root.contains(view)) {
+      clearRetainedCompletedTasks();
       state.activeView = view.dataset.view;
       state.activeFilter = "all";
       state.activeTag = "";
@@ -390,6 +444,7 @@ export function mountMemosHome(root) {
 
     const taskFilter = closestElement(event.target, "[data-task-filter]");
     if (taskFilter && root.contains(taskFilter)) {
+      clearRetainedCompletedTasks();
       state.taskFilter = normalizeTaskFilter(taskFilter.dataset.taskFilter);
       rememberTaskFilter(state.taskFilter);
       renderAll();
@@ -500,6 +555,12 @@ export function mountMemosHome(root) {
       case "createMemo":
         createMemo();
         break;
+      case "clipboardAccept":
+        acceptClipboardItem();
+        break;
+      case "clipboardDismiss":
+        hideClipboardCard({ forceAppeared: true });
+        break;
       case "createProject":
         createProjectFromPrompt();
         break;
@@ -571,6 +632,219 @@ export function mountMemosHome(root) {
       if (payload.type === "memo_file_drop") {
         insertDroppedFiles(payload.files);
       }
+      if (payload.type === "clipboard_update" && payload.item) {
+        state.clipboardItem = normalizeClipboardItem(payload.item);
+        if (isClipboardForeground()) showClipboardCard();
+      }
+      if (payload.type === "main_window_focus") {
+        state.clipboardForeground = true;
+        requestClipboardLatest();
+      }
+    });
+  }
+
+  function requestClipboardLatest() {
+    if (typeof invoke !== "function") return;
+    invoke("/api/clipboard/latest", { method: "GET" }).then(
+      function (resp) {
+        if (!resp || resp.code !== 0 || !resp.data || !resp.data.found) return;
+        const item = normalizeClipboardItem(resp.data.item);
+        if (!item || !item.id) return;
+        state.clipboardItem = item;
+        if (isClipboardForeground()) showClipboardCard();
+      },
+      function () {},
+    );
+  }
+
+  function normalizeClipboardItem(item) {
+    if (!item || typeof item !== "object") return null;
+    return {
+      capturedAt: String(item.capturedAt || ""),
+      content: String(item.content || ""),
+      contentBase64: String(item.contentBase64 || ""),
+      dataURL: String(item.dataURL || ""),
+      id: String(item.id || ""),
+      mimeType: String(item.mimeType || ""),
+      name: String(item.name || ""),
+      rawType: String(item.rawType || ""),
+      size: Number(item.size || 0),
+      type: String(item.type || "text"),
+    };
+  }
+
+  function showClipboardCard() {
+    if (!state.clipboardItem || !els.clipboardCard) return;
+    const itemId = String(state.clipboardItem.id || "");
+    const sameActiveItem = (state.clipboardVisible || state.clipboardLeaving) && itemId && state.clipboardDisplayedId === itemId;
+    if (itemId && state.clipboardLastAppearedId === itemId) return;
+    if (sameActiveItem) {
+      if (state.clipboardLeaving) {
+        if (state.clipboardLeaveTimer) {
+          window.clearTimeout(state.clipboardLeaveTimer);
+          state.clipboardLeaveTimer = null;
+        }
+        state.clipboardLeaving = false;
+        state.clipboardVisible = true;
+        state.clipboardShownAt = Date.now();
+        renderClipboardCard();
+        scheduleClipboardAutoHide();
+      }
+      return;
+    }
+
+    state.clipboardDisplayedId = itemId;
+    state.clipboardLastAppearedId = "";
+    state.clipboardShownAt = Date.now();
+    if (state.clipboardLeaveTimer) {
+      window.clearTimeout(state.clipboardLeaveTimer);
+      state.clipboardLeaveTimer = null;
+    }
+    state.clipboardLeaving = false;
+    state.clipboardVisible = true;
+    renderClipboardCard();
+    scheduleClipboardAutoHide();
+  }
+
+  function scheduleClipboardAutoHide() {
+    if (state.clipboardTimer) window.clearTimeout(state.clipboardTimer);
+    state.clipboardTimer = window.setTimeout(function () {
+      if (!state.clipboardWorking) hideClipboardCard();
+    }, CLIPBOARD_AUTO_HIDE_MS);
+  }
+
+  function hideClipboardCard(options = {}) {
+    if (state.clipboardTimer) {
+      window.clearTimeout(state.clipboardTimer);
+      state.clipboardTimer = null;
+    }
+    if (!state.clipboardVisible && !state.clipboardLeaving) {
+      renderClipboardCard();
+      return;
+    }
+    markClipboardAppearedIfReady(options);
+    state.clipboardLeaving = true;
+    renderClipboardCard();
+    if (state.clipboardLeaveTimer) window.clearTimeout(state.clipboardLeaveTimer);
+    state.clipboardLeaveTimer = window.setTimeout(function () {
+      state.clipboardVisible = false;
+      state.clipboardLeaving = false;
+      state.clipboardLeaveTimer = null;
+      renderClipboardCard();
+    }, CLIPBOARD_EXIT_MS);
+  }
+
+  function markClipboardAppearedIfReady(options = {}) {
+    const itemId = String(state.clipboardDisplayedId || "");
+    if (!itemId) return;
+    const visibleFor = Date.now() - Number(state.clipboardShownAt || 0);
+    if (options.forceAppeared || visibleFor >= CLIPBOARD_MIN_VISIBLE_MS) {
+      state.clipboardLastAppearedId = itemId;
+    }
+  }
+
+  function renderClipboardCard() {
+    if (!els.clipboardCard) return;
+    if ((!state.clipboardVisible && !state.clipboardLeaving) || !state.clipboardItem) {
+      els.clipboardCard.hidden = true;
+      els.clipboardCard.innerHTML = "";
+      return;
+    }
+
+    const item = state.clipboardItem;
+    const meta = clipboardTypeLabel(item.type);
+    const action = clipboardActionLabel(item.type);
+    const preview = item.type === "image" && item.dataURL
+      ? `<img class="memo-clipboard-image" src="${escapeAttr(item.dataURL)}" alt="Clipboard image preview" />`
+      : `<p class="memo-clipboard-text">${escapeHTML(compactText(item.content, 180))}</p>`;
+    els.clipboardCard.hidden = false;
+    els.clipboardCard.classList.toggle("is-leaving", state.clipboardLeaving);
+    els.clipboardCard.innerHTML = `
+      <header class="memo-clipboard-head">
+        <span class="memo-clipboard-type">${escapeHTML(meta)}</span>
+        <button class="memo-clipboard-close" type="button" data-action="clipboardDismiss" title="关闭" aria-label="关闭">×</button>
+      </header>
+      ${preview}
+      <footer class="memo-clipboard-actions">
+        <button class="memo-secondary-button" type="button" data-action="clipboardDismiss">忽略</button>
+        <button class="memo-primary-button" type="button" data-action="clipboardAccept" ${state.clipboardWorking ? "disabled" : ""}>${escapeHTML(action)}</button>
+      </footer>
+    `;
+  }
+
+  function clipboardTypeLabel(type) {
+    if (type === "link") return "链接";
+    if (type === "image") return "图片";
+    return "文本";
+  }
+
+  function clipboardActionLabel(type) {
+    if (type === "link") return "保存链接";
+    if (type === "image") return "上传文件";
+    return "创建 memo";
+  }
+
+  function acceptClipboardItem() {
+    const item = state.clipboardItem;
+    if (!item || state.clipboardWorking) return;
+    state.clipboardWorking = true;
+    renderClipboardCard();
+
+    let task;
+    if (item.type === "image") {
+      task = uploadClipboardImage(item);
+    } else if (item.type === "link") {
+      task = createMemoFromContent(item.content, "链接已保存");
+    } else {
+      task = createMemoFromContent(item.content, "已创建 memo");
+    }
+
+    task.then(
+      function () {
+        hideClipboardCard({ forceAppeared: true });
+      },
+      function (err) {
+        showToast(errorMessage(err));
+      },
+    ).finally(function () {
+      state.clipboardWorking = false;
+      renderClipboardCard();
+    });
+  }
+
+  function uploadClipboardImage(item) {
+    if (!item.contentBase64 && !item.dataURL) {
+      return Promise.reject(new Error("剪贴板图片为空"));
+    }
+    return fileInfoToUploadURL({
+      name: item.name || "clipboard.png",
+      type: item.mimeType || "image/png",
+      url: item.dataURL || item.contentBase64,
+    }).then(function (uploaded) {
+      const name = uploaded.name || item.name || "clipboard.png";
+      const url = uploaded.ref || uploaded.url || item.dataURL;
+      const content = `![${name}](${url})`;
+      return createMemoFromContent(content, "图片已上传并保存");
+    });
+  }
+
+  function createMemoFromContent(content, successMessage) {
+    const text = String(content || "").trim();
+    if (!text) return Promise.reject(new Error("剪贴板内容为空"));
+    return createMemoInVault(text, state.visibility, state.composerProjectId).then(function (memo) {
+      const normalized = normalizeMemoPayload(memo);
+      if (!normalized) throw new Error("创建 memo 失败");
+      state.memos = [normalized].concat(state.memos);
+      saveMemos(state.memos);
+      rememberComposerProject(state.composerProjectId);
+      state.activeView = "memos";
+      state.activeFilter = "all";
+      state.activeTag = "";
+      state.selectedCalendarDate = "";
+      renderAll();
+      refreshTasksFromVault();
+      showToast(successMessage || "已保存");
+      return normalized;
     });
   }
 
@@ -958,6 +1232,7 @@ export function mountMemosHome(root) {
 
   function selectProjectFilter(value) {
     const next = normalizeProjectFilter(value);
+    clearRetainedCompletedTasks();
     state.activeProjectFilter = next;
     state.activeTag = "";
     state.selectedCalendarDate = "";
@@ -1066,7 +1341,7 @@ export function mountMemosHome(root) {
     if (event.target.matches("[data-task-complete]")) {
       const taskNode = closestElement(event.target, "[data-task-id]");
       if (!taskNode) return;
-      completeExistingTask(taskNode.dataset.taskId);
+      completeExistingTask(taskNode.dataset.taskId, event.target);
       return;
     }
 
@@ -1353,18 +1628,25 @@ export function mountMemosHome(root) {
     );
   }
 
-  function completeExistingTask(taskId) {
+  function completeExistingTask(taskId, checkbox) {
     const id = String(taskId || "").trim();
     if (!id) return;
+    const completedInFilter = state.taskFilter;
+    const taskCard = checkbox ? closestElement(checkbox, "[data-task-id]") : null;
+    if (checkbox) checkbox.disabled = true;
     completeTask(id).then(
       function (task) {
         const summary = normalizeTaskSummary(task);
+        retainCompletedTaskInFilter(id, completedInFilter);
         state.tasks = state.tasks.map((item) => item.id === id && summary ? summary : item);
-        renderAll();
-        refreshTasksFromVault();
+        if (taskCard) taskCard.classList.add("is-complete");
         showToast("已完成任务");
       },
       function (err) {
+        if (checkbox) {
+          checkbox.checked = false;
+          checkbox.disabled = false;
+        }
         showToast("完成任务失败: " + errorMessage(err));
         refreshTasksFromVault();
       },
@@ -1428,7 +1710,8 @@ export function mountMemosHome(root) {
     } else {
       state.expandedMemoIds.add(memoId);
     }
-    renderFeed();
+    renderPinned();
+    if (state.activeView === "memos") renderFeed();
   }
 
   function cancelEdit() {
@@ -1952,7 +2235,7 @@ export function mountMemosHome(root) {
   }
 
   function renderCalendar() {
-    els.calendar.innerHTML = calendarTemplate(state.calendarMonth, scopedMemos(), state.selectedCalendarDate);
+    els.calendar.innerHTML = calendarTemplate(state.calendarMonth, scopedMemos(), state.selectedCalendarDate, calendarWeekStart());
   }
 
   function renderStats() {
@@ -2005,8 +2288,10 @@ export function mountMemosHome(root) {
     const pinned = scopedMemos().filter((memo) => memo.pinned && !memo.archived).slice(0, 3);
     els.pinnedList.innerHTML = pinned.length
       ? pinned
-          .map(
-            (memo) => `
+          .map(function (memo) {
+            const expanded = state.expandedMemoIds.has(memo.id);
+            const expandLabel = expanded ? "收起" : "展开";
+            return `
               <article class="memo-pinned-item" data-memo-id="${escapeAttr(memo.id)}">
                 <header class="memo-pinned-head">
                   <small>${formatShortDate(memo.createdAt)}</small>
@@ -2015,12 +2300,19 @@ export function mountMemosHome(root) {
                     <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口" aria-label="分离为窗口">${SVG.external}</button>
                   </div>
                 </header>
-                <div class="memo-pinned-content memo-content">${renderMemoMarkdown(memo.content, memoRenderContext(memo.id, { readonly: true }))}</div>
+                <div class="memo-pinned-collapse memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
+                  <div class="memo-pinned-content memo-content">${renderMemoMarkdown(memo.content, memoRenderContext(memo.id, { readonly: true, showLineNumbers: false }))}</div>
+                  <button class="memo-expand-button memo-pinned-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
+                    <span>${expandLabel}</span>
+                    ${SVG.chevronDown}
+                  </button>
+                </div>
               </article>
-            `,
-          )
+            `;
+          })
           .join("")
       : '<div class="memo-empty-mini">暂无置顶</div>';
+    syncMemoExpandControls();
   }
 
   function renderFeed() {
@@ -2085,7 +2377,7 @@ export function mountMemosHome(root) {
   }
 
   function syncMemoExpandControls() {
-    const collapsibleItems = els.memoList.querySelectorAll("[data-memo-collapse]");
+    const collapsibleItems = root.querySelectorAll("[data-memo-collapse]");
     collapsibleItems.forEach(function (item) {
       const content = item.querySelector(".memo-content");
       if (!content) return;
@@ -2570,6 +2862,7 @@ export function mountMemosHome(root) {
   }
 
   function taskMatchesFilter(task, filter) {
+    if (isRetainedCompletedTask(task, filter)) return true;
     switch (filter) {
       case "all":
         return true;
@@ -2587,6 +2880,22 @@ export function mountMemosHome(root) {
       default:
         return task.status !== "completed" && (isTaskToday(task) || isTaskOverdue(task));
     }
+  }
+
+  function retainCompletedTaskInFilter(taskId, filter) {
+    const id = String(taskId || "").trim();
+    const taskFilter = normalizeTaskFilter(filter);
+    if (!id || taskFilter === "all" || taskFilter === "completed") return;
+    state.retainedCompletedTaskFilters.set(id, taskFilter);
+  }
+
+  function isRetainedCompletedTask(task, filter) {
+    if (!task || task.status !== "completed") return false;
+    return state.retainedCompletedTaskFilters.get(task.id) === normalizeTaskFilter(filter);
+  }
+
+  function clearRetainedCompletedTasks() {
+    if (state.retainedCompletedTaskFilters.size) state.retainedCompletedTaskFilters.clear();
   }
 
   function taskFilterCounts(tasks) {
@@ -2811,6 +3120,7 @@ export function mountMemosHome(root) {
       index,
       maxDepth: options.maxDepth || 2,
       readonly: Boolean(options.readonly),
+      showLineNumbers: options.showLineNumbers !== false,
       sourceId: sourceId || "",
       stack: options.stack || (sourceId ? [sourceId] : []),
     };
