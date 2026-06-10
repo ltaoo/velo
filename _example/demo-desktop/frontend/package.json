@@ -10,5 +10,7 @@
   "devDependencies": {
     "eslint": "^8.56.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "lunar-javascript": "^1.7.7"
+  }
 }

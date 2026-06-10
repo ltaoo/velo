@@ -1214,17 +1214,20 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-calendar-day {
-  aspect-ratio: 1;
+  align-items: flex-start;
+  aspect-ratio: auto;
   background: var(--BG-1);
   border: 0;
   border-radius: 0;
   color: var(--FG-0);
   flex-direction: column;
   font-size: var(--font-sm);
-  gap: 1px;
-  min-height: 30px;
+  gap: 0;
+  justify-content: flex-start;
+  min-height: 44px;
   min-width: 0;
-  padding: 2px;
+  overflow: hidden;
+  padding: 3px 4px 4px;
   position: relative;
 }
 
@@ -1233,7 +1236,7 @@ body.is-fixed-window .memo-window-shell {
   opacity: 0.48;
 }
 
-.memo-calendar-day.is-today span {
+.memo-calendar-day.is-today .memo-calendar-solar {
   align-items: center;
   background: var(--memo-blue);
   border-radius: 999px;
@@ -1245,20 +1248,76 @@ body.is-fixed-window .memo-window-shell {
   padding: 0 5px;
 }
 
+.memo-calendar-day.is-holiday {
+  background: var(--memo-warn-soft);
+  color: var(--memo-warn);
+}
+
+.memo-calendar-day.is-workday {
+  background: color-mix(in srgb, var(--BG-1) 78%, var(--memo-blue-soft));
+  color: var(--FG-0);
+}
+
 .memo-calendar-day.is-selected {
   background: var(--memo-accent-soft);
   box-shadow: inset 0 0 0 2px var(--memo-accent-border);
   color: var(--memo-accent-strong);
 }
 
-.memo-calendar-day strong {
-  background: var(--memo-accent);
+.memo-calendar-solar {
+  font-weight: 800;
+  line-height: 20px;
+  min-height: 20px;
+}
+
+.memo-calendar-lunar,
+.memo-calendar-festival {
+  display: block;
+  font-size: var(--font-2xs);
+  line-height: 1.15;
+  max-width: 100%;
+  min-height: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-calendar-lunar {
+  color: var(--FG-1);
+}
+
+.memo-calendar-festival {
+  color: var(--memo-warn);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.memo-calendar-holiday-badge,
+.memo-calendar-memo-count {
   border-radius: 999px;
   color: #fff;
   font-size: var(--font-2xs);
   line-height: 1;
   min-width: 14px;
   padding: 2px 4px;
+  position: absolute;
+  text-align: center;
+}
+
+.memo-calendar-holiday-badge {
+  background: var(--memo-warn);
+  right: 2px;
+  top: 2px;
+}
+
+.memo-calendar-day.is-workday .memo-calendar-holiday-badge {
+  background: var(--memo-blue);
+}
+
+.memo-calendar-memo-count {
+  background: var(--memo-accent);
+  bottom: 2px;
+  right: 2px;
 }
 
 .memo-tag-filter,
