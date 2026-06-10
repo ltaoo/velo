@@ -8,18 +8,25 @@ import (
 const editorSettingsKey = "demo-desktop:settings:editor:v1"
 
 type EditorSettings struct {
-	VimMode bool `json:"vimMode"`
+	VimMode           bool   `json:"vimMode"`
+	CalendarWeekStart string `json:"calendarWeekStart"`
 }
 
 func defaultEditorSettings() EditorSettings {
 	return EditorSettings{
-		VimMode: false,
+		VimMode:           false,
+		CalendarWeekStart: "monday",
 	}
 }
 
 func normalizeEditorSettings(settings EditorSettings) EditorSettings {
+	weekStart := settings.CalendarWeekStart
+	if weekStart != "sunday" {
+		weekStart = "monday"
+	}
 	return EditorSettings{
-		VimMode: settings.VimMode,
+		VimMode:           settings.VimMode,
+		CalendarWeekStart: weekStart,
 	}
 }
 

@@ -8,7 +8,7 @@ import {
 import { fileDisplayName } from "../../domain/memo-resources.js";
 import { normalizeProjectColor, normalizeProjectFilter, normalizeProjectID } from "../../domain/projects.js";
 import {
-  CALENDAR_WEEKDAYS,
+  calendarWeekdays,
   formatDateKey,
   formatRelativeDate,
   generateCalendarDays,
@@ -83,6 +83,7 @@ function detachedMemoRenderContext(state, sourceId, options = {}) {
     index,
     maxDepth: options.maxDepth || 2,
     readonly: Boolean(options.readonly),
+    showLineNumbers: options.showLineNumbers !== false,
     sourceId: sourceId || "",
     stack: options.stack || (sourceId ? [sourceId] : []),
   };
@@ -291,6 +292,7 @@ function shellTemplate() {
           <div class="memo-command-results" data-memo-search-results role="listbox"></div>
         </div>
       </div>
+      <section class="memo-clipboard-card" data-clipboard-card hidden></section>
       <div class="memo-toast" data-toast role="status"></div>
     </div>
   `;
@@ -365,10 +367,11 @@ function statTemplate(label, value) {
   `;
 }
 
-function calendarTemplate(monthDate, memos, selectedDate) {
+function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
   const month = startOfMonth(monthDate);
   const counts = memoDateCounts(memos);
-  const days = generateCalendarDays(month);
+  const weekdays = calendarWeekdays(weekStart);
+  const days = generateCalendarDays(month, weekStart);
   const todayKey = formatDateKey(new Date());
 
   return `
@@ -389,7 +392,7 @@ function calendarTemplate(monthDate, memos, selectedDate) {
       ${selectedDate ? '<button class="memo-calendar-clear" type="button" data-calendar-action="clearDate">清除</button>' : ""}
     </div>
     <div class="memo-calendar-weekdays">
-      ${CALENDAR_WEEKDAYS.map((day) => `<span>${day}</span>`).join("")}
+      ${weekdays.map((day) => `<span>${day}</span>`).join("")}
     </div>
     <div class="memo-calendar-grid">
       ${days

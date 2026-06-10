@@ -411,6 +411,11 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    .settings-shortcut-card .settings-checks {
+      grid-template-columns: repeat(2, minmax(86px, 1fr));
+      min-width: 190px;
+    }
+
     .settings-check {
       align-items: center;
       background: var(--BG-1);
@@ -615,6 +620,50 @@
       gap: 8px;
     }
 
+    .settings-inputsource-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .settings-inputsource-rule {
+      align-items: center;
+      background: var(--BG-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(180px, 1fr) minmax(180px, 220px) auto auto;
+      padding: 10px;
+    }
+
+    .settings-inputsource-rule-main {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .settings-inputsource-rule-title {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-inputsource-rule-meta {
+      color: var(--FG-1);
+      font-size: var(--font-sm);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-inputsource-add {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(160px, 1fr) minmax(140px, 180px) minmax(180px, 220px) auto;
+    }
+
     @media (max-width: 620px) {
       .settings-shell {
         grid-template-columns: minmax(0, 1fr);
@@ -639,7 +688,8 @@
       }
 
       .settings-grid,
-      .settings-checks {
+      .settings-checks,
+      .settings-shortcut-card .settings-checks {
         grid-template-columns: minmax(0, 1fr);
       }
 
@@ -683,6 +733,11 @@
       .settings-shortcut-input {
         width: 100%;
       }
+
+      .settings-inputsource-rule,
+      .settings-inputsource-add {
+        grid-template-columns: minmax(0, 1fr);
+      }
     }
   </style>
 </head>
@@ -720,6 +775,14 @@
         <button class="settings-nav-button" type="button" data-panel="shortcuts">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h.01"></path><path d="M11 9h.01"></path><path d="M15 9h.01"></path><path d="M7 13h10"></path></svg>
           <span>键盘</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-panel="input-source">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 8h.01"></path><path d="M11 8h.01"></path><path d="M15 8h.01"></path><path d="M7 12h10"></path><path d="M9 16h6"></path></svg>
+          <span>输入法</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-panel="calendar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h18"></path><path d="M8 14h.01"></path><path d="M12 14h.01"></path><path d="M16 14h.01"></path></svg>
+          <span>日历</span>
         </button>
         <button class="settings-nav-button" type="button" data-panel="about">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg>
@@ -799,6 +862,98 @@
         </div>
       </div>
 
+      <div class="settings-form settings-panel" data-settings-panel="input-source" hidden>
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">锁定策略</div>
+          </div>
+          <div class="settings-shortcut-card">
+            <div>
+              <div class="settings-shortcut-title">按应用锁定输入法</div>
+              <div class="settings-shortcut-description">启用后，前台应用匹配规则时会切换并保持指定输入法；无规则时可回退到全局默认。</div>
+            </div>
+            <label class="settings-check">
+              <input type="checkbox" data-inputsource-enabled />
+              <span>启用</span>
+            </label>
+          </div>
+          <div class="settings-grid">
+            <label class="settings-field is-wide">
+              <span class="settings-label-row">全局默认输入法</span>
+              <select class="settings-select" data-inputsource-default></select>
+            </label>
+          </div>
+          <div class="settings-info-list">
+            <div class="settings-info-row">
+              <div class="settings-info-label">当前输入法</div>
+              <div class="settings-info-value" data-inputsource-current>读取中</div>
+            </div>
+            <div class="settings-info-row">
+              <div class="settings-info-label">前台应用</div>
+              <div class="settings-info-value" data-inputsource-frontmost>读取中</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">应用规则</div>
+            <span>
+              <button class="settings-button is-secondary" type="button" data-action="inputsource-refresh">刷新状态</button>
+              <button class="settings-button is-secondary" type="button" data-action="inputsource-add-current">添加当前应用</button>
+            </span>
+          </div>
+          <div class="settings-inputsource-add">
+            <label class="settings-field">
+              <span class="settings-label-row">App ID / 路径</span>
+              <input class="settings-input" data-inputsource-new-app-id placeholder="com.apple.Terminal 或 C:\\...\app.exe" />
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">显示名称</span>
+              <input class="settings-input" data-inputsource-new-app-name placeholder="可选" />
+            </label>
+            <label class="settings-field">
+              <span class="settings-label-row">锁定输入法</span>
+              <select class="settings-select" data-inputsource-new-source></select>
+            </label>
+            <button class="settings-button is-primary" type="button" data-action="inputsource-add-rule">添加</button>
+          </div>
+          <div class="settings-inputsource-list" data-inputsource-rule-list></div>
+        </section>
+
+        <div class="settings-actions">
+          <div class="settings-message" data-inputsource-message></div>
+        </div>
+      </div>
+
+      <div class="settings-form settings-panel" data-settings-panel="calendar" hidden>
+        <section class="settings-section">
+          <div class="settings-profile-head">
+            <div class="settings-profile-title">日历视图</div>
+          </div>
+          <div class="settings-shortcut-card">
+            <div>
+              <div class="settings-shortcut-title">每周起始日</div>
+              <div class="settings-shortcut-description">控制首页 memo 日历的星期栏顺序和月视图起始位置。</div>
+            </div>
+            <div class="settings-checks" role="radiogroup" aria-label="每周起始日">
+              <label class="settings-check">
+                <input type="radio" name="calendarWeekStart" value="monday" data-calendar-week-start />
+                <span>周一</span>
+              </label>
+              <label class="settings-check">
+                <input type="radio" name="calendarWeekStart" value="sunday" data-calendar-week-start />
+                <span>周日</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <div class="settings-actions">
+          <div class="settings-message" data-calendar-message></div>
+        </div>
+      </div>
+
       <div class="settings-form settings-panel" data-settings-panel="about" hidden>
         <section class="settings-section">
           <div class="settings-profile-head">
@@ -842,8 +997,11 @@
       var STORAGE_KEY = "demo-desktop:settings:cloud-storage:v1";
       var EDITOR_SETTINGS_KEY = "demo-desktop:settings:editor:v1";
       var SHORTCUTS_KEY = "demo-desktop:settings:shortcuts:v1";
+      var INPUT_SOURCE_LOCK_KEY = "demo-desktop:settings:input-source-lock:v1";
       var EDITOR_SETTINGS_API = "/api/settings/editor";
       var EDITOR_SETTINGS_SAVE_API = "/api/settings/editor/save";
+      var INPUT_SOURCE_LOCK_API = "/api/settings/input-source-lock";
+      var INPUT_SOURCE_LOCK_SAVE_API = "/api/settings/input-source-lock/save";
       var STORAGE_API = "/api/settings/cloud-storage";
       var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
       var OPEN_WINDOW_API = "/api/open_window";
@@ -854,12 +1012,25 @@
       var headerSubtitle = document.querySelector("[data-settings-subtitle]");
       var storagePanel = document.querySelector('[data-settings-panel="cloud-storage"]');
       var shortcutsPanel = document.querySelector('[data-settings-panel="shortcuts"]');
+      var inputSourcePanel = document.querySelector('[data-settings-panel="input-source"]');
+      var calendarPanel = document.querySelector('[data-settings-panel="calendar"]');
       var aboutPanel = document.querySelector('[data-settings-panel="about"]');
       var message = document.querySelector("[data-settings-message]");
       var shortcutInput = document.querySelector('[data-shortcut-input="openMemoSearch"]');
       var shortcutEnabled = document.querySelector('[data-shortcut-enabled="openMemoSearch"]');
       var shortcutMessage = document.querySelector("[data-shortcut-message]");
       var editorVimEnabled = document.querySelector("[data-editor-vim-enabled]");
+      var calendarWeekStartInputs = Array.prototype.slice.call(document.querySelectorAll("[data-calendar-week-start]"));
+      var calendarMessage = document.querySelector("[data-calendar-message]");
+      var inputSourceEnabled = document.querySelector("[data-inputsource-enabled]");
+      var inputSourceDefault = document.querySelector("[data-inputsource-default]");
+      var inputSourceCurrent = document.querySelector("[data-inputsource-current]");
+      var inputSourceFrontmost = document.querySelector("[data-inputsource-frontmost]");
+      var inputSourceNewAppID = document.querySelector("[data-inputsource-new-app-id]");
+      var inputSourceNewAppName = document.querySelector("[data-inputsource-new-app-name]");
+      var inputSourceNewSource = document.querySelector("[data-inputsource-new-source]");
+      var inputSourceRuleList = document.querySelector("[data-inputsource-rule-list]");
+      var inputSourceMessage = document.querySelector("[data-inputsource-message]");
       var status = document.querySelector("[data-config-status]");
       var statusText = document.querySelector("[data-config-status-text]");
       var storageList = document.querySelector("[data-storage-list]");
@@ -881,6 +1052,10 @@
       var state = normalizeSettings(null);
       var editorSettings = loadEditorSettings();
       var shortcuts = loadShortcutSettings();
+      var inputSourceLock = loadInputSourceLockSettings();
+      var inputSourceStatus = defaultInputSourceStatus();
+      var inputSourceStatusLoaded = false;
+      var INPUT_SOURCE_UNSUPPORTED_MESSAGE = "当前平台不支持输入法锁定，或无法读取系统输入源。";
 
       render();
       loadAppInfo();
@@ -890,6 +1065,15 @@
         renderEditorSettings();
       }, function (err) {
         setShortcutMessage("读取编辑器设置失败: " + errorMessage(err), "warning");
+      });
+      loadInputSourceLockConfig().then(function (payload) {
+        inputSourceLock = normalizeInputSourceLockSettings(payload.config);
+        inputSourceStatus = normalizeInputSourceStatus(payload.status);
+        inputSourceStatusLoaded = true;
+        render();
+      }, function (err) {
+        inputSourceStatusLoaded = true;
+        setInputSourceMessage("读取输入法设置失败: " + errorMessage(err), "warning");
       });
       loadConfig().then(function (settings) {
         state = normalizeSettings(settings);
@@ -948,9 +1132,9 @@
       shortcutsPanel.addEventListener("change", function (event) {
         if (event.target.matches("[data-editor-vim-enabled]")) {
           var previousEditorSettings = editorSettings;
-          editorSettings = normalizeEditorSettings({
+          editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
             vimMode: Boolean(event.target.checked),
-          });
+          }));
           renderEditorSettings();
           setShortcutMessage("正在保存 Vim 模式设置...", "");
           saveEditorSettings(editorSettings).then(function (saved) {
@@ -970,6 +1154,69 @@
         saveShortcutSettings(shortcuts);
         renderShortcuts();
         setShortcutMessage(shortcuts.enabled ? "已启用快捷键" : "已停用快捷键", shortcuts.enabled ? "ready" : "");
+      });
+
+      calendarPanel.addEventListener("change", function (event) {
+        if (!event.target.matches("[data-calendar-week-start]")) return;
+        var previousEditorSettings = editorSettings;
+        editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
+          calendarWeekStart: event.target.value,
+        }));
+        renderEditorSettings();
+        setCalendarMessage("正在保存日历设置...", "");
+        saveEditorSettings(editorSettings).then(function (saved) {
+          editorSettings = normalizeEditorSettings(saved || editorSettings);
+          renderEditorSettings();
+          setCalendarMessage(editorSettings.calendarWeekStart === "sunday" ? "已设为从周日开始" : "已设为从周一开始", "ready");
+        }, function (err) {
+          editorSettings = previousEditorSettings;
+          renderEditorSettings();
+          setCalendarMessage("保存日历设置失败: " + errorMessage(err), "warning");
+        });
+      });
+
+      inputSourcePanel.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-action]");
+        if (!action) return;
+        if (action.dataset.action === "inputsource-refresh") {
+          refreshInputSourceLockStatus();
+          return;
+        }
+        if (action.dataset.action === "inputsource-add-current") {
+          addCurrentInputSourceAppRule();
+          return;
+        }
+        if (action.dataset.action === "inputsource-add-rule") {
+          addManualInputSourceAppRule();
+          return;
+        }
+        if (action.dataset.action === "inputsource-remove-rule") {
+          removeInputSourceAppRule(action.dataset.appId || "");
+        }
+      });
+
+      inputSourcePanel.addEventListener("change", function (event) {
+        if (event.target.matches("[data-inputsource-enabled]")) {
+          inputSourceLock.enabled = Boolean(event.target.checked);
+          saveInputSourceLockWithMessage(inputSourceLock.enabled ? "已启用输入法锁定" : "已停用输入法锁定");
+          return;
+        }
+        if (event.target.matches("[data-inputsource-default]")) {
+          inputSourceLock.defaultSourceId = event.target.value || "";
+          saveInputSourceLockWithMessage("已更新全局默认输入法");
+          return;
+        }
+        if (event.target.matches("[data-inputsource-rule-enabled]")) {
+          updateInputSourceRule(event.target.dataset.appId || "", {
+            enabled: Boolean(event.target.checked),
+          });
+          return;
+        }
+        if (event.target.matches("[data-inputsource-rule-source]")) {
+          updateInputSourceRule(event.target.dataset.appId || "", {
+            sourceId: event.target.value || "",
+          });
+        }
       });
 
       shortcutInput.addEventListener("keydown", function (event) {
@@ -1010,6 +1257,14 @@
         }, function (_) { });
         shortcuts = loadShortcutSettings();
         render();
+        loadInputSourceLockConfig().then(function (payload) {
+          inputSourceLock = normalizeInputSourceLockSettings(payload.config);
+          inputSourceStatus = normalizeInputSourceStatus(payload.status);
+          inputSourceStatusLoaded = true;
+          render();
+        }, function (_) {
+          inputSourceStatusLoaded = true;
+        });
         loadConfig().then(function (settings) {
           state = normalizeSettings(settings);
           render();
@@ -1217,13 +1472,14 @@
         renderShell();
         renderStorageList();
         renderEditorSettings();
+        renderInputSourceLock();
         renderShortcuts();
         renderStatus(state);
         renderAbout();
       }
 
       function setActivePanel(panelName) {
-        activePanel = panelName === "about" || panelName === "shortcuts" ? panelName : "cloud-storage";
+        activePanel = panelName === "about" || panelName === "shortcuts" || panelName === "input-source" || panelName === "calendar" ? panelName : "cloud-storage";
         render();
         replacePanelQuery();
       }
@@ -1231,15 +1487,17 @@
       function renderShell() {
         var isAbout = activePanel === "about";
         var isShortcuts = activePanel === "shortcuts";
+        var isInputSource = activePanel === "input-source";
+        var isCalendar = activePanel === "calendar";
         navButtons.forEach(function (button) {
           button.classList.toggle("is-active", button.dataset.panel === activePanel);
         });
         panels.forEach(function (panel) {
           panel.hidden = panel.dataset.settingsPanel !== activePanel;
         });
-        headerTitle.textContent = isAbout ? "关于" : isShortcuts ? "键盘" : "云存储";
-        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "编辑器模式与快速入口" : "S3/OSS 兼容对象存储配置";
-        status.hidden = isAbout || isShortcuts;
+        headerTitle.textContent = isAbout ? "关于" : isShortcuts ? "键盘" : isInputSource ? "输入法" : isCalendar ? "日历" : "云存储";
+        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "编辑器模式与快速入口" : isInputSource ? "按前台应用锁定键盘输入法" : isCalendar ? "周起始日与日历偏好" : "S3/OSS 兼容对象存储配置";
+        status.hidden = isAbout || isShortcuts || isInputSource || isCalendar;
       }
 
       function renderAbout() {
@@ -1294,6 +1552,8 @@
         try {
           var params = new URLSearchParams(window.location.search || "");
           if (params.get("panel") === "shortcuts") return "shortcuts";
+          if (params.get("panel") === "input-source") return "input-source";
+          if (params.get("panel") === "calendar") return "calendar";
           return params.get("panel") === "about" ? "about" : "cloud-storage";
         } catch (_) {
           return "cloud-storage";
@@ -1303,7 +1563,7 @@
       function replacePanelQuery() {
         try {
           var url = new URL(window.location.href);
-          if (activePanel === "about" || activePanel === "shortcuts") {
+          if (activePanel === "about" || activePanel === "shortcuts" || activePanel === "input-source" || activePanel === "calendar") {
             url.searchParams.set("panel", activePanel);
           } else {
             url.searchParams.delete("panel");
@@ -1321,6 +1581,326 @@
       function renderEditorSettings() {
         editorSettings = normalizeEditorSettings(editorSettings);
         if (editorVimEnabled) editorVimEnabled.checked = editorSettings.vimMode;
+        calendarWeekStartInputs.forEach(function (input) {
+          input.checked = input.value === editorSettings.calendarWeekStart;
+        });
+      }
+
+      function renderInputSourceLock() {
+        inputSourceLock = normalizeInputSourceLockSettings(inputSourceLock);
+        inputSourceStatus = normalizeInputSourceStatus(inputSourceStatus);
+        if (inputSourceEnabled) inputSourceEnabled.checked = inputSourceLock.enabled;
+        if (inputSourceDefault) {
+          inputSourceDefault.innerHTML = inputSourceOptions(inputSourceLock.defaultSourceId, true);
+          inputSourceDefault.disabled = !inputSourceStatus.supported;
+        }
+        if (inputSourceNewSource) {
+          inputSourceNewSource.innerHTML = inputSourceOptions(inputSourceNewSource.value || inputSourceLock.defaultSourceId, false);
+          inputSourceNewSource.disabled = !inputSourceStatus.supported || !inputSourceStatus.sources.length;
+        }
+        if (inputSourceCurrent) {
+          inputSourceCurrent.textContent = inputSourceStatus.current && inputSourceStatus.current.id
+            ? sourceLabel(inputSourceStatus.current)
+            : (inputSourceStatus.currentError || "不可用");
+        }
+        if (inputSourceFrontmost) {
+          var app = inputSourceStatus.frontmostApp || {};
+          inputSourceFrontmost.textContent = app.id ? ((app.name || app.id) + " · " + app.id) : (inputSourceStatus.frontmostError || "不可用");
+        }
+        renderInputSourceRuleList();
+        if (inputSourceStatusLoaded && !inputSourceStatus.supported) {
+          setInputSourceMessage(INPUT_SOURCE_UNSUPPORTED_MESSAGE, "warning");
+        } else if (inputSourceStatus.supported && inputSourceMessage && inputSourceMessage.textContent === INPUT_SOURCE_UNSUPPORTED_MESSAGE) {
+          setInputSourceMessage("", "");
+        }
+      }
+
+      function renderInputSourceRuleList() {
+        if (!inputSourceRuleList) return;
+        var rules = inputSourceLock.appRules || [];
+        if (!rules.length) {
+          inputSourceRuleList.innerHTML = '<div class="settings-storage-item"><span class="settings-storage-item-main"><span class="settings-storage-item-name">暂无应用规则</span><span class="settings-storage-item-meta">添加 App ID 后，该应用成为前台时会锁定到指定输入法。</span></span></div>';
+          return;
+        }
+        inputSourceRuleList.innerHTML = rules.map(function (rule) {
+          var appLabel = rule.appName || rule.appId;
+          return [
+            '<div class="settings-inputsource-rule">',
+            '<div class="settings-inputsource-rule-main">',
+            '<div class="settings-inputsource-rule-title">' + escapeHTML(appLabel) + '</div>',
+            '<div class="settings-inputsource-rule-meta">' + escapeHTML(rule.appId) + '</div>',
+            '</div>',
+            '<select class="settings-select" data-inputsource-rule-source data-app-id="' + escapeAttr(rule.appId) + '">',
+            inputSourceOptions(rule.sourceId, false),
+            '</select>',
+            '<label class="settings-check">',
+            '<input type="checkbox" data-inputsource-rule-enabled data-app-id="' + escapeAttr(rule.appId) + '" ' + (rule.enabled ? "checked" : "") + ' />',
+            '<span>启用</span>',
+            '</label>',
+            '<button class="settings-button is-secondary" type="button" data-action="inputsource-remove-rule" data-app-id="' + escapeAttr(rule.appId) + '">移除</button>',
+            '</div>',
+          ].join("");
+        }).join("");
+      }
+
+      function inputSourceOptions(selectedID, includeNone) {
+        var selected = String(selectedID || "");
+        var options = [];
+        if (includeNone) {
+          options.push('<option value=""' + (selected ? "" : " selected") + '>不设置全局默认</option>');
+        }
+        inputSourceStatus.sources.forEach(function (source) {
+          var id = source.id || "";
+          options.push('<option value="' + escapeAttr(id) + '"' + (id === selected ? " selected" : "") + '>' + escapeHTML(sourceLabel(source)) + '</option>');
+        });
+        if (selected && !inputSourceStatus.sources.some(function (source) { return source.id === selected; })) {
+          options.push('<option value="' + escapeAttr(selected) + '" selected>' + escapeHTML(selected + "（未在当前列表中）") + '</option>');
+        }
+        return options.join("");
+      }
+
+      function sourceLabel(source) {
+        if (!source) return "";
+        var label = source.name || source.id || "";
+        if (source.language) label += " · " + source.language;
+        if (source.id && source.id !== source.name) label += " · " + source.id;
+        return label;
+      }
+
+      function loadInputSourceLockSettings() {
+        try {
+          return normalizeInputSourceLockSettings(JSON.parse(localStorage.getItem(INPUT_SOURCE_LOCK_KEY) || "null"));
+        } catch (_) {
+          return defaultInputSourceLockSettings();
+        }
+      }
+
+      function loadInputSourceLockConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(INPUT_SOURCE_LOCK_API, "GET").then(function (data) {
+            var config = normalizeInputSourceLockSettings(data && data.config);
+            localStorage.setItem(INPUT_SOURCE_LOCK_KEY, JSON.stringify(config));
+            return {
+              config: config,
+              status: normalizeInputSourceStatus(data && data.status),
+            };
+          });
+        }
+        return Promise.resolve({
+          config: loadInputSourceLockSettings(),
+          status: defaultInputSourceStatus(),
+        });
+      }
+
+      function saveInputSourceLockSettings(value) {
+        var next = normalizeInputSourceLockSettings(value);
+        if (canUseNativeStorage()) {
+          return callStorage(INPUT_SOURCE_LOCK_SAVE_API, "POST", next).then(function (data) {
+            var saved = normalizeInputSourceLockSettings(data && data.config ? data.config : next);
+            inputSourceStatus = normalizeInputSourceStatus(data && data.status);
+            localStorage.setItem(INPUT_SOURCE_LOCK_KEY, JSON.stringify(saved));
+            return saved;
+          });
+        }
+        localStorage.setItem(INPUT_SOURCE_LOCK_KEY, JSON.stringify(next));
+        return Promise.resolve(next);
+      }
+
+      function saveInputSourceLockWithMessage(successText) {
+        var previous = inputSourceLock;
+        inputSourceLock = normalizeInputSourceLockSettings(inputSourceLock);
+        renderInputSourceLock();
+        setInputSourceMessage("正在保存输入法锁定设置...", "");
+        saveInputSourceLockSettings(inputSourceLock).then(function (saved) {
+          inputSourceLock = normalizeInputSourceLockSettings(saved);
+          renderInputSourceLock();
+          setInputSourceMessage(successText || "已保存输入法锁定设置", "ready");
+        }, function (err) {
+          inputSourceLock = previous;
+          renderInputSourceLock();
+          setInputSourceMessage("保存失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function refreshInputSourceLockStatus() {
+        setInputSourceMessage("正在刷新输入法状态...", "");
+        loadInputSourceLockConfig().then(function (payload) {
+          inputSourceLock = normalizeInputSourceLockSettings(payload.config);
+          inputSourceStatus = normalizeInputSourceStatus(payload.status);
+          inputSourceStatusLoaded = true;
+          render();
+          setInputSourceMessage("已刷新输入法状态", "ready");
+        }, function (err) {
+          inputSourceStatusLoaded = true;
+          setInputSourceMessage("刷新失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function addCurrentInputSourceAppRule() {
+        var app = inputSourceStatus.frontmostApp || {};
+        if (!app.id) {
+          setInputSourceMessage("当前无法读取前台应用", "warning");
+          return;
+        }
+        upsertInputSourceRule({
+          appId: app.id,
+          appName: app.name || app.id,
+          sourceId: inputSourceLock.defaultSourceId || ((inputSourceStatus.current || {}).id || firstInputSourceID()),
+          enabled: true,
+        });
+        saveInputSourceLockWithMessage("已添加当前应用规则");
+      }
+
+      function addManualInputSourceAppRule() {
+        var appId = String((inputSourceNewAppID && inputSourceNewAppID.value) || "").trim();
+        if (!appId) {
+          setInputSourceMessage("请填写 App ID / 路径", "warning");
+          return;
+        }
+        var sourceId = String((inputSourceNewSource && inputSourceNewSource.value) || "").trim() || firstInputSourceID();
+        if (!sourceId) {
+          setInputSourceMessage("请先选择一个输入法", "warning");
+          return;
+        }
+        upsertInputSourceRule({
+          appId: appId,
+          appName: String((inputSourceNewAppName && inputSourceNewAppName.value) || "").trim(),
+          sourceId: sourceId,
+          enabled: true,
+        });
+        if (inputSourceNewAppID) inputSourceNewAppID.value = "";
+        if (inputSourceNewAppName) inputSourceNewAppName.value = "";
+        saveInputSourceLockWithMessage("已添加应用规则");
+      }
+
+      function updateInputSourceRule(appId, patch) {
+        var id = String(appId || "").trim();
+        if (!id) return;
+        inputSourceLock.appRules = inputSourceLock.appRules.map(function (rule) {
+          if (rule.appId !== id) return rule;
+          return normalizeInputSourceRule(Object.assign({}, rule, patch || {}));
+        });
+        saveInputSourceLockWithMessage("已更新应用规则");
+      }
+
+      function removeInputSourceAppRule(appId) {
+        var id = String(appId || "").trim();
+        if (!id) return;
+        inputSourceLock.appRules = inputSourceLock.appRules.filter(function (rule) {
+          return rule.appId !== id;
+        });
+        saveInputSourceLockWithMessage("已移除应用规则");
+      }
+
+      function upsertInputSourceRule(rule) {
+        var next = normalizeInputSourceRule(rule);
+        if (!next.appId) return;
+        var found = false;
+        inputSourceLock.appRules = inputSourceLock.appRules.map(function (item) {
+          if (item.appId !== next.appId) return item;
+          found = true;
+          return next;
+        });
+        if (!found) inputSourceLock.appRules.push(next);
+        inputSourceLock = normalizeInputSourceLockSettings(inputSourceLock);
+      }
+
+      function firstInputSourceID() {
+        return inputSourceStatus.sources.length ? inputSourceStatus.sources[0].id : "";
+      }
+
+      function defaultInputSourceLockSettings() {
+        return {
+          enabled: false,
+          defaultSourceId: "",
+          appRules: [],
+        };
+      }
+
+      function normalizeInputSourceLockSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var seen = Object.create(null);
+        var rules = Array.isArray(raw.appRules) ? raw.appRules.map(normalizeInputSourceRule).filter(function (rule) {
+          if (!rule.appId || seen[rule.appId]) return false;
+          seen[rule.appId] = true;
+          return true;
+        }) : [];
+        return {
+          enabled: raw.enabled === true,
+          defaultSourceId: String(raw.defaultSourceId || "").trim(),
+          appRules: rules,
+        };
+      }
+
+      function normalizeInputSourceRule(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          appId: String(raw.appId || "").trim(),
+          appName: String(raw.appName || "").trim(),
+          sourceId: String(raw.sourceId || "").trim(),
+          enabled: raw.enabled !== false,
+        };
+      }
+
+      function defaultInputSourceStatus() {
+        return {
+          enabled: false,
+          supported: false,
+          sources: [],
+          current: null,
+          frontmostApp: null,
+          sourceError: "",
+          currentError: "",
+          frontmostError: "",
+        };
+      }
+
+      function normalizeInputSourceStatus(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          enabled: raw.enabled === true,
+          supported: raw.supported === true,
+          sources: Array.isArray(raw.sources) ? raw.sources.map(normalizeInputSource).filter(function (source) { return source.id; }) : [],
+          current: normalizeInputSource(raw.current),
+          frontmostApp: normalizeFrontmostApp(raw.frontmostApp),
+          sourceError: String(raw.sourceError || ""),
+          currentError: String(raw.currentError || ""),
+          frontmostError: String(raw.frontmostError || ""),
+        };
+      }
+
+      function normalizeInputSource(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var id = String(raw.ID || raw.id || "").trim();
+        return {
+          id: id,
+          name: String(raw.Name || raw.name || id).trim(),
+          language: String(raw.Language || raw.language || "").trim(),
+          enabled: raw.Enabled !== false && raw.enabled !== false,
+          selectable: raw.Selectable !== false && raw.selectable !== false,
+        };
+      }
+
+      function normalizeFrontmostApp(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var id = String(raw.ID || raw.id || "").trim();
+        return {
+          id: id,
+          name: String(raw.Name || raw.name || id).trim(),
+          pid: Number(raw.PID || raw.pid || 0) || 0,
+        };
+      }
+
+      function setInputSourceMessage(text, tone) {
+        if (!inputSourceMessage) return;
+        inputSourceMessage.textContent = text || "";
+        inputSourceMessage.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
+      }
+
+      function setCalendarMessage(text, tone) {
+        if (!calendarMessage) return;
+        calendarMessage.textContent = text || "";
+        calendarMessage.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
       }
 
       function loadEditorSettings() {
@@ -1362,13 +1942,16 @@
 
       function defaultEditorSettings() {
         return {
+          calendarWeekStart: "monday",
           vimMode: false,
         };
       }
 
       function normalizeEditorSettings(value) {
         var raw = value && typeof value === "object" ? value : {};
+        var weekStart = raw.calendarWeekStart === "sunday" ? "sunday" : "monday";
         return {
+          calendarWeekStart: weekStart,
           vimMode: raw.vimMode === true,
         };
       }

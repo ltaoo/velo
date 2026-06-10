@@ -18,7 +18,8 @@ import { escapeAttr, escapeHTML } from "./memo-utils.js";
 
 function renderMemoMarkdown(content, context = {}, lineNumberOffset = 0) {
   const lines = memoLines(content);
-  return `<div class="memo-line-list">${renderMemoMarkdownLines(lines, context, lineNumberOffset)}</div>`;
+  const lineNumberClass = context.showLineNumbers === false ? " is-line-numbers-hidden" : "";
+  return `<div class="memo-line-list${lineNumberClass}">${renderMemoMarkdownLines(lines, context, lineNumberOffset)}</div>`;
 }
 
 function renderMemoMarkdownLines(lines, context, lineNumberOffset) {

@@ -153,6 +153,7 @@ func mainWindowOptions(pathname string, b *velo.Box, logger *zerolog.Logger) *ve
 
 func showMainWindow(b *velo.Box, logger *zerolog.Logger) {
 	b.OpenWindow(mainWindowOptions(currentMainWindowPathname(), b, logger))
+	b.SendMessage(velo.H{"type": "main_window_focus"})
 }
 
 func Run(assets Assets) {
@@ -192,7 +193,12 @@ func Run(assets Assets) {
 	setMainWindowPathname(initialPathname)
 	logger.Info().Msgf("Store path: %s", b.Store.Path())
 
-	registerRoutes(b, logger, app_updater)
+	inputSourceLock := NewInputSourceLockService(logger)
+	applyStoredInputSourceLockSettings(b.Store, inputSourceLock, logger)
+	defer inputSourceLock.Stop()
+
+	registerRoutes(b, logger, app_updater, inputSourceLock)
+	startClipboardWatcher(b, logger)
 
 	fmt.Println("starting server...")
 

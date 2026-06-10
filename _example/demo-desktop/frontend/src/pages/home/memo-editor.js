@@ -19,6 +19,7 @@ let cloudStorageSettingsCache = null;
 
 function defaultEditorSettings() {
   return {
+    calendarWeekStart: "monday",
     vimMode: false,
   };
 }
@@ -26,6 +27,7 @@ function defaultEditorSettings() {
 function normalizeEditorSettings(value) {
   const raw = value && typeof value === "object" ? value : {};
   return {
+    calendarWeekStart: raw.calendarWeekStart === "sunday" ? "sunday" : "monday",
     vimMode: raw.vimMode === true,
   };
 }
@@ -1937,6 +1939,7 @@ export {
   cloudStorageById,
   createMiniEditor,
   defaultEditorSettings,
+  fileInfoToUploadURL,
   filesToMarkdown,
   insertPlainTextIntoEditor,
   loadEditorSettingsFromVault,

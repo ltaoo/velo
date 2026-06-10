@@ -13,6 +13,7 @@ Velo provides native webview, system tray, file dialogs, notifications, and erro
 - **File Dialog** — Native file selection dialog
 - **Notification** — System-level desktop notifications
 - **Error Dialog** — Native error dialog
+- **Input Source** — Read and switch keyboard input sources on macOS and Windows
 
 ## Installation
 
@@ -155,6 +156,7 @@ func main() {
 | `file` | Native file selection dialog |
 | `notification` | System-level desktop notifications |
 | `error` | Native error dialog |
+| `inputsource` | Keyboard input source enumeration, switching, and app-based locking |
 | `asset` | Embedded JS runtime assets |
 | `updater` | Auto-update system |
 | `buildcfg` | Build configuration and code generation |

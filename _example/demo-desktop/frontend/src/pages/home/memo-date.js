@@ -1,5 +1,18 @@
 export const CALENDAR_WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
+function normalizeCalendarWeekStart(value) {
+  return value === "sunday" ? "sunday" : "monday";
+}
+
+function calendarWeekStartIndex(value) {
+  return normalizeCalendarWeekStart(value) === "sunday" ? 0 : 1;
+}
+
+function calendarWeekdays(value) {
+  const startIndex = calendarWeekStartIndex(value);
+  return CALENDAR_WEEKDAYS.slice(startIndex).concat(CALENDAR_WEEKDAYS.slice(0, startIndex));
+}
+
 function formatRelativeDate(value) {
   const date = new Date(value);
   const diff = Date.now() - date.getTime();
@@ -28,10 +41,12 @@ function startOfMonth(date) {
   return new Date(value.getFullYear(), value.getMonth(), 1);
 }
 
-function generateCalendarDays(monthDate) {
+function generateCalendarDays(monthDate, weekStart) {
   const month = startOfMonth(monthDate);
   const start = new Date(month);
-  start.setDate(start.getDate() - start.getDay());
+  const startDay = calendarWeekStartIndex(weekStart);
+  const offset = (start.getDay() - startDay + 7) % 7;
+  start.setDate(start.getDate() - offset);
 
   return Array.from({ length: 42 }, function (_value, index) {
     const date = new Date(start);
@@ -79,6 +94,7 @@ function dateFromKey(value) {
 
 export {
   addMonths,
+  calendarWeekdays,
   dateFromKey,
   formatDateKey,
   formatRelativeDate,
@@ -86,5 +102,6 @@ export {
   generateCalendarDays,
   memoDateCounts,
   memoDateKey,
+  normalizeCalendarWeekStart,
   startOfMonth,
 };
