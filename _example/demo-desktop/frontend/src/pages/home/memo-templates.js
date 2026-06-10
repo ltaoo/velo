@@ -15,6 +15,7 @@ import {
   memoDateCounts,
   startOfMonth,
 } from "./memo-date.js";
+import { calendarDayInfo } from "./memo-calendar-info.js";
 import { SVG } from "./memo-icons.js";
 import {
   compactFileURL,
@@ -394,24 +395,32 @@ function calendarTemplate(monthDate, memos, selectedDate) {
       ${days
         .map((day) => {
           const count = counts.get(day.key) || 0;
+          const info = calendarDayInfo(day.date);
           const classes = [
             "memo-calendar-day",
             day.inMonth ? "" : "is-outside",
             day.key === todayKey ? "is-today" : "",
             day.key === selectedDate ? "is-selected" : "",
             count ? "has-memo" : "",
+            info.festivalLabel ? "has-festival" : "",
+            info.holidayStatus ? "is-" + info.holidayStatus : "",
           ]
             .filter(Boolean)
             .join(" ");
+          const ariaLabel = [day.key, info.title, count ? `${count} 条 memo` : ""].filter(Boolean).join("，");
           return `
             <button
               class="${classes}"
               type="button"
               data-calendar-date="${escapeAttr(day.key)}"
-              aria-label="${escapeAttr(day.key)}"
+              aria-label="${escapeAttr(ariaLabel)}"
+              title="${escapeAttr(ariaLabel)}"
             >
-              <span>${day.date.getDate()}</span>
-              ${count ? `<strong>${count}</strong>` : ""}
+              <span class="memo-calendar-solar">${day.date.getDate()}</span>
+              <span class="memo-calendar-lunar">${escapeHTML(info.lunarLabel)}</span>
+              ${info.festivalLabel ? `<em class="memo-calendar-festival">${escapeHTML(info.festivalLabel)}</em>` : ""}
+              ${info.holidayBadge ? `<span class="memo-calendar-holiday-badge" aria-hidden="true">${info.holidayBadge}</span>` : ""}
+              ${count ? `<strong class="memo-calendar-memo-count">${count}</strong>` : ""}
             </button>
           `;
         })
