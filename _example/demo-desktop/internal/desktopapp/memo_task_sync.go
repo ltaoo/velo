@@ -42,6 +42,7 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 		metadata := parseTaskMetadataFromTodoText(parsed.Text)
 		req := TaskCreateRequest{
 			DueAt:     metadata.DueAt,
+			Notes:     metadata.Notes,
 			ProjectID: memo.ProjectID,
 			Source: TaskSource{
 				Line:     index + 1,

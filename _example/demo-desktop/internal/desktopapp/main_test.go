@@ -47,6 +47,12 @@ func TestNormalizeExternalBrowserURL(t *testing.T) {
 	}
 }
 
+func TestMemoWindowNameUsesMemoID(t *testing.T) {
+	if got, want := memoWindowName("Memo:ABC/123"), "memo-window-memo-abc-123"; got != want {
+		t.Fatalf("memoWindowName = %q, want %q", got, want)
+	}
+}
+
 func stringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -513,6 +519,41 @@ func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
 	}
 }
 
+func TestCreateVaultMemoAutoCreatesTaskWithExplicitTitle(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "计划\n- [ ] [跟进发布] 这里写很长的上下文 `inline code` ::2026-06-09 #release\n",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	tasks, err := listVaultTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want one task", tasks)
+	}
+	task := tasks[0]
+	if task.Title != "跟进发布" {
+		t.Fatalf("task title = %q, want explicit title", task.Title)
+	}
+	if task.Notes != "这里写很长的上下文 inline code" {
+		t.Fatalf("task notes = %q, want remaining context", task.Notes)
+	}
+	if task.DueAt != "2026-06-09" {
+		t.Fatalf("task dueAt = %q, want date from todo text", task.DueAt)
+	}
+	if !strings.Contains(memo.Content, "[[task:"+task.ID+"|跟进发布]]") {
+		t.Fatalf("memo content = %q, want short task title alias", memo.Content)
+	}
+}
+
 func TestTaskTitleFromTodoTextUsesFullCleanedText(t *testing.T) {
 	metadata := parseTaskMetadataFromTodoText("Hello content `inline code` ::2026-06-09 #work")
 	if metadata.Title != "Hello content inline code" {
@@ -523,6 +564,38 @@ func TestTaskTitleFromTodoTextUsesFullCleanedText(t *testing.T) {
 	}
 	if !stringSliceContains(metadata.Tags, "work") {
 		t.Fatalf("tags = %#v, want work", metadata.Tags)
+	}
+}
+
+func TestTaskTitleFromTodoTextSupportsExplicitTitlePrefix(t *testing.T) {
+	metadata := parseTaskMetadataFromTodoText("[Ship release] Long context with `inline code` ::2026-06-09 #work")
+	if metadata.Title != "Ship release" {
+		t.Fatalf("title = %q, want explicit title", metadata.Title)
+	}
+	if metadata.Notes != "Long context with inline code" {
+		t.Fatalf("notes = %q, want remaining context", metadata.Notes)
+	}
+	if metadata.DueAt != "2026-06-09" {
+		t.Fatalf("dueAt = %q, want parsed date", metadata.DueAt)
+	}
+	if !stringSliceContains(metadata.Tags, "work") {
+		t.Fatalf("tags = %#v, want work", metadata.Tags)
+	}
+}
+
+func TestTaskTitleFromTodoTextSupportsExplicitTitleProperty(t *testing.T) {
+	metadata := parseTaskMetadataFromTodoText("Long context {标题：跟进发布} ::2026-06-09 #release")
+	if metadata.Title != "跟进发布" {
+		t.Fatalf("title = %q, want explicit title", metadata.Title)
+	}
+	if metadata.Notes != "Long context" {
+		t.Fatalf("notes = %q, want remaining context", metadata.Notes)
+	}
+	if metadata.DueAt != "2026-06-09" {
+		t.Fatalf("dueAt = %q, want parsed date", metadata.DueAt)
+	}
+	if !stringSliceContains(metadata.Tags, "release") {
+		t.Fatalf("tags = %#v, want release", metadata.Tags)
 	}
 }
 

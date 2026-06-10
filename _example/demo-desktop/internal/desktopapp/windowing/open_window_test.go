@@ -9,6 +9,16 @@ func TestBuildOpenWindowSpecDefaultsToSettings(t *testing.T) {
 	}
 }
 
+func TestBuildOpenWindowSpecDesktop(t *testing.T) {
+	spec := BuildOpenWindowSpec(OpenWindowRequest{Pathname: "/desktop"})
+	if spec.Pathname != "/desktop" || spec.EntryPage != "index.html" || spec.Name != "desktop" {
+		t.Fatalf("spec = %#v, want desktop window", spec)
+	}
+	if spec.Title != "App-Main" || spec.Width != 1024 || spec.Height != 768 {
+		t.Fatalf("spec = %#v, want main desktop dimensions", spec)
+	}
+}
+
 func TestBuildOpenWindowSpecPreviewIncludesQueryAndStableName(t *testing.T) {
 	spec := BuildOpenWindowSpec(OpenWindowRequest{
 		ObjectPath:       "docs/report.pdf",

@@ -30,6 +30,7 @@ type Assets struct {
 }
 
 var appAssets Assets
+var mainWindowPathname = "/desktop"
 
 func appVersion() string {
 	if appAssets.Version == "" {
@@ -106,6 +107,54 @@ func initUpdater(logger *zerolog.Logger) (*updater.AppUpdater, error) {
 	return u, nil
 }
 
+func setMainWindowPathname(pathname string) {
+	if pathname != "" {
+		mainWindowPathname = pathname
+	}
+}
+
+func currentMainWindowPathname() string {
+	if mainWindowPathname == "" {
+		return "/desktop"
+	}
+	return mainWindowPathname
+}
+
+func mainWindowOptions(pathname string, b *velo.Box, logger *zerolog.Logger) *velo.VeloWebviewOpt {
+	if pathname == "" {
+		pathname = currentMainWindowPathname()
+	}
+	return &velo.VeloWebviewOpt{
+		Name:                 "desktop",
+		Title:                "App-Main",
+		FrontendFS:           appAssets.FrontendFS,
+		Pathname:             pathname,
+		Width:                1024,
+		Height:               768,
+		PreserveStateOnFocus: true,
+		OnReopen: func() {
+			showMainWindow(b, logger)
+		},
+		OnDragDrop: func(event string, payload string) {
+			if event != "drop" {
+				return
+			}
+			files := droppedFilesFromPayload(payload, logger)
+			if len(files) == 0 {
+				return
+			}
+			b.SendMessage(velo.H{
+				"type":  "memo_file_drop",
+				"files": files,
+			})
+		},
+	}
+}
+
+func showMainWindow(b *velo.Box, logger *zerolog.Logger) {
+	b.OpenWindow(mainWindowOptions(currentMainWindowPathname(), b, logger))
+}
+
 func Run(assets Assets) {
 	appAssets = assets
 
@@ -117,7 +166,9 @@ func Run(assets Assets) {
 		logger.Warn().Msgf("Updater init: %v", err)
 	}
 
-	quitOnLastWindowClosed := false
+	// Keep secondary windows alive when the main window closes, but terminate the
+	// app once every window has been closed so it cannot remain docked headless.
+	quitOnLastWindowClosed := true
 	opt := velo.VeloAppOpt{Mode: velo.ModeBridge, IconData: appAssets.AppIcon, QuitOnLastWindowClosed: &quitOnLastWindowClosed}
 	b := velo.NewApp(&opt)
 	initialPathname := "/vault-picker"
@@ -138,6 +189,7 @@ func Run(assets Assets) {
 			b.Store = store.NewWithDir(dir)
 		}
 	}
+	setMainWindowPathname(initialPathname)
 	logger.Info().Msgf("Store path: %s", b.Store.Path())
 
 	registerRoutes(b, logger, app_updater)
@@ -147,27 +199,7 @@ func Run(assets Assets) {
 	sm := shortcut.NewManager()
 	_ = sm
 
-	b.NewWebview(&velo.VeloWebviewOpt{
-		Name:       "desktop",
-		Title:      "App-Main",
-		FrontendFS: appAssets.FrontendFS,
-		Pathname:   initialPathname,
-		Width:      1024,
-		Height:     768,
-		OnDragDrop: func(event string, payload string) {
-			if event != "drop" {
-				return
-			}
-			files := droppedFilesFromPayload(payload, logger)
-			if len(files) == 0 {
-				return
-			}
-			b.SendMessage(velo.H{
-				"type":  "memo_file_drop",
-				"files": files,
-			})
-		},
-	})
+	b.NewWebview(mainWindowOptions(initialPathname, b, logger))
 
 	// 注册全局快捷键: Cmd+Shift+M/H 显示/隐藏主窗口，Ctrl/Cmd+Shift+Space 打开 snippet 启动器。
 	// Carbon hotkeys need the AppKit application/run loop to be ready. Register
@@ -185,7 +217,7 @@ func Run(assets Assets) {
 			}
 		}
 		registerShortcut("MetaLeft+ShiftLeft+KeyM", func() {
-			b.Webview.Show()
+			showMainWindow(b, logger)
 		})
 		registerShortcut("MetaLeft+ShiftLeft+KeyH", func() {
 			b.Webview.Hide()

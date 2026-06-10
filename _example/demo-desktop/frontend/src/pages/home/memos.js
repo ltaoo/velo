@@ -119,6 +119,8 @@ import {
 const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
 const SHORTCUTS_STORAGE_KEY = "demo-desktop:settings:shortcuts:v1";
 const TASK_FILTER_STORAGE_KEY = "demo-desktop:gtd:task-filter:v1";
+const DETACHED_WINDOW_STATE_POLL_INTERVAL = 250;
+const DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
 const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
 
 function normalizeTaskFilter(value) {
@@ -2828,10 +2830,15 @@ export function mountDetachedMemoWindow(root, options = {}) {
   const params = new URLSearchParams(window.location.search);
   const state = {
     fixed: params.get("fixed") === "1" || Boolean(options.fixed),
+    lastWindowState: null,
     memo: null,
     memoRefIndex: null,
     memos: [],
+    snapshotDebounceTimer: null,
+    snapshotInFlight: false,
+    snapshotPollTimer: null,
     toastTimer: null,
+    windowName: detachedMemoWindowName(params.get("id") || ""),
   };
 
   root.innerHTML = detachedMemoWindowTemplate();
@@ -2849,11 +2856,17 @@ export function mountDetachedMemoWindow(root, options = {}) {
   loadDetachedMemo();
 
   window.addEventListener("click", handleExternalLinkClick, true);
+  window.addEventListener("beforeunload", handleDetachedBeforeUnload);
+  window.addEventListener("resize", scheduleDetachedWindowStateSnapshot);
   root.addEventListener("click", handleClick);
+  startDetachedWindowStateSnapshots();
 
   return {
     destroy() {
+      stopDetachedWindowStateSnapshots();
       window.removeEventListener("click", handleExternalLinkClick, true);
+      window.removeEventListener("beforeunload", handleDetachedBeforeUnload);
+      window.removeEventListener("resize", scheduleDetachedWindowStateSnapshot);
       root.removeEventListener("click", handleClick);
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       root.innerHTML = "";
@@ -2877,6 +2890,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
         const data = resp && resp.code === 0 ? resp.data || {} : {};
         if (data.found && data.memo) {
           if (typeof data.fixed === "boolean") state.fixed = data.fixed;
+          if (data.windowName) state.windowName = data.windowName;
           setDetachedPayload(data.memo, data.memos);
           renderDetachedMemo();
           applyFixedState();
@@ -2899,6 +2913,151 @@ export function mountDetachedMemoWindow(root, options = {}) {
     }
     setDetachedPayload(memo, payload.memos);
     renderDetachedMemo();
+  }
+
+  function detachedMemoWindowName(memoId) {
+    const suffix = sanitizeDetachedMemoWindowID(memoId) || "memo";
+    return "memo-window-" + suffix;
+  }
+
+  function sanitizeDetachedMemoWindowID(value) {
+    let text = String(value || "").trim().toLowerCase();
+    let output = "";
+    let lastDash = false;
+    for (const char of text) {
+      const ok = /[a-z0-9_-]/.test(char);
+      if (ok) {
+        output += char;
+        lastDash = false;
+      } else if (!lastDash) {
+        output += "-";
+        lastDash = true;
+      }
+    }
+    return output.replace(/^[-_]+|[-_]+$/g, "");
+  }
+
+  function handleDetachedBeforeUnload() {
+    snapshotDetachedWindowStateSync();
+  }
+
+  function startDetachedWindowStateSnapshots() {
+    if (typeof invoke !== "function" || state.snapshotPollTimer) return;
+    snapshotDetachedWindowStateIfChanged();
+    state.snapshotPollTimer = window.setInterval(function () {
+      snapshotDetachedWindowStateIfChanged();
+    }, DETACHED_WINDOW_STATE_POLL_INTERVAL);
+  }
+
+  function stopDetachedWindowStateSnapshots() {
+    if (state.snapshotPollTimer) {
+      window.clearInterval(state.snapshotPollTimer);
+      state.snapshotPollTimer = null;
+    }
+    if (state.snapshotDebounceTimer) {
+      window.clearTimeout(state.snapshotDebounceTimer);
+      state.snapshotDebounceTimer = null;
+    }
+  }
+
+  function scheduleDetachedWindowStateSnapshot() {
+    if (typeof invoke !== "function") return;
+    if (state.snapshotDebounceTimer) {
+      window.clearTimeout(state.snapshotDebounceTimer);
+    }
+    state.snapshotDebounceTimer = window.setTimeout(function () {
+      state.snapshotDebounceTimer = null;
+      snapshotDetachedWindowState();
+    }, DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE);
+  }
+
+  function snapshotDetachedWindowState() {
+    return readDetachedWindowState().then(function (nextWindowState) {
+      if (!nextWindowState) return null;
+      state.lastWindowState = nextWindowState;
+      return saveDetachedWindowState(nextWindowState);
+    });
+  }
+
+  function snapshotDetachedWindowStateIfChanged() {
+    if (typeof invoke !== "function" || state.snapshotInFlight) return;
+    state.snapshotInFlight = true;
+    readDetachedWindowState().then(
+      function (nextWindowState) {
+        if (!nextWindowState) return null;
+        if (isSameDetachedWindowStateHint(state.lastWindowState, nextWindowState)) return null;
+        state.lastWindowState = nextWindowState;
+        return saveDetachedWindowState(nextWindowState);
+      },
+      function () {},
+    ).finally(function () {
+      state.snapshotInFlight = false;
+    });
+  }
+
+  function snapshotDetachedWindowStateSync() {
+    const payload = detachedWindowStatePayload(state.lastWindowState || readDetachedWindowStateHint());
+    if (!payload) return;
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/window/state/save", false);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.send(JSON.stringify(payload));
+    } catch (_) {}
+  }
+
+  function saveDetachedWindowState(windowState) {
+    const payload = detachedWindowStatePayload(windowState);
+    if (!payload || typeof invoke !== "function") return Promise.resolve(null);
+    return invoke("/api/window/state/save", { method: "POST", args: payload }).catch(function () {});
+  }
+
+  function detachedWindowStatePayload(windowState) {
+    const name = String(state.windowName || "").trim();
+    if (!name) return null;
+    if (!windowState || windowState.width <= 0 || windowState.height <= 0) return null;
+    return {
+      name,
+      x: windowState.x,
+      y: windowState.y,
+      width: windowState.width,
+      height: windowState.height,
+    };
+  }
+
+  function readDetachedWindowState() {
+    if (typeof invoke !== "function") {
+      return Promise.resolve(readDetachedWindowStateHint());
+    }
+    return callNativeWindow("__velo/window/state").then(
+      function (resp) {
+        if (!resp || resp.success === false || resp.width <= 0 || resp.height <= 0) {
+          return readDetachedWindowStateHint();
+        }
+        return {
+          x: Math.round(Number(resp.x || 0)),
+          y: Math.round(Number(resp.y || 0)),
+          width: Math.round(Number(resp.width || 0)),
+          height: Math.round(Number(resp.height || 0)),
+        };
+      },
+      function () {
+        return readDetachedWindowStateHint();
+      },
+    );
+  }
+
+  function readDetachedWindowStateHint() {
+    return {
+      x: Math.round(Number(window.screenX ?? window.screenLeft ?? 0)),
+      y: Math.round(Number(window.screenY ?? window.screenTop ?? 0)),
+      width: Math.round(Number(window.outerWidth ?? window.innerWidth ?? 0)),
+      height: Math.round(Number(window.outerHeight ?? window.innerHeight ?? 0)),
+    };
+  }
+
+  function isSameDetachedWindowStateHint(a, b) {
+    return Boolean(a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
   }
 
   function setDetachedPayload(memo, memos) {
@@ -2965,8 +3124,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
   function runWindowControl(control) {
     switch (control) {
       case "close":
-        callNativeWindow("__velo/window/close").catch(function () {
-          window.close();
+        snapshotDetachedWindowState().finally(function () {
+          callNativeWindow("__velo/window/close").catch(function () {
+            window.close();
+          });
         });
         break;
       case "minimize":
