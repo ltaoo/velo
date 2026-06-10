@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Command</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --launcher-bg: rgba(252, 252, 250, 0.96);
+      --launcher-text: #18181b;
+      --launcher-muted: #6b7280;
+      --launcher-faint: #e4e4e7;
+      --launcher-row: rgba(244, 244, 245, 0.88);
+      --launcher-row-active: #10231d;
+      --launcher-row-active-text: #f8fafc;
+      --launcher-accent: #0f766e;
+      --launcher-code-bg: #111827;
+      --launcher-code-text: #d1fae5;
+      --launcher-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --launcher-bg: rgba(24, 24, 27, 0.96);
+        --launcher-text: #f4f4f5;
+        --launcher-muted: #a1a1aa;
+        --launcher-faint: rgba(255, 255, 255, 0.1);
+        --launcher-row: rgba(39, 39, 42, 0.88);
+        --launcher-row-active: #d6f8ec;
+        --launcher-row-active-text: #0b1412;
+        --launcher-accent: #5eead4;
+        --launcher-code-bg: #09090b;
+        --launcher-code-text: #bbf7d0;
+        --launcher-shadow: 0 18px 55px rgba(0, 0, 0, 0.32);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    body {
+      padding: 0;
+    }
+
+    .snippet-launcher {
+      display: grid;
+      grid-template-rows: 60px 0 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: var(--launcher-text);
+      background: var(--launcher-bg);
+      border: 0;
+      border-radius: 10px;
+      box-shadow: var(--launcher-shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .snippet-launcher.is-expanded {
+      grid-template-rows: 60px 1fr 26px;
+    }
+
+    .snippet-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      color: var(--launcher-muted);
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .snippet-close:hover,
+    .snippet-close:focus-visible {
+      color: var(--launcher-text);
+      background: var(--launcher-row);
+      outline: none;
+    }
+
+    .snippet-search {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) 32px;
+      align-items: center;
+      min-width: 0;
+      padding: 10px 10px 10px 14px;
+      border-bottom: 1px solid var(--launcher-faint);
+      user-select: none;
+    }
+
+    .snippet-prompt {
+      color: var(--launcher-accent);
+      font-size: 24px;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .snippet-input {
+      width: 100%;
+      min-width: 0;
+      height: 38px;
+      padding: 0;
+      color: var(--launcher-text);
+      background: transparent;
+      border: 0;
+      outline: none;
+      font: inherit;
+      font-size: 21px;
+      line-height: 38px;
+      user-select: text;
+    }
+
+    .snippet-input::placeholder {
+      color: var(--launcher-muted);
+    }
+
+    .snippet-results {
+      min-height: 0;
+      max-height: 344px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .snippet-results[hidden],
+    .snippet-status[hidden] {
+      display: none;
+    }
+
+    .snippet-result {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(180px, 42%);
+      gap: 10px;
+      width: 100%;
+      min-height: 72px;
+      margin: 0 0 6px;
+      padding: 10px;
+      color: var(--launcher-text);
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .snippet-result:hover,
+    .snippet-result.is-active {
+      color: var(--launcher-row-active-text);
+      background: var(--launcher-row-active);
+      border-color: transparent;
+      outline: none;
+    }
+
+    .snippet-result-main {
+      display: grid;
+      min-width: 0;
+      align-content: start;
+      gap: 5px;
+    }
+
+    .snippet-result-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+
+    .snippet-kind {
+      flex: 0 0 auto;
+      min-width: 42px;
+      padding: 2px 6px;
+      color: #0f172a;
+      background: #a7f3d0;
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .snippet-result:not(.is-active):not(:hover) .snippet-kind.is-code {
+      color: #172554;
+      background: #bfdbfe;
+    }
+
+    .snippet-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .snippet-meta {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--launcher-muted);
+      font-size: 12px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .snippet-result:hover .snippet-meta,
+    .snippet-result.is-active .snippet-meta {
+      color: rgba(255, 255, 255, 0.74);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .snippet-result:hover .snippet-meta,
+      .snippet-result.is-active .snippet-meta {
+        color: rgba(10, 20, 18, 0.7);
+      }
+    }
+
+    .snippet-code {
+      min-width: 0;
+      max-height: 52px;
+      margin: 0;
+      overflow: hidden;
+      padding: 8px;
+      color: var(--launcher-code-text);
+      background: var(--launcher-code-bg);
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .snippet-status {
+      min-width: 0;
+      overflow: hidden;
+      padding: 0 14px 8px;
+      color: var(--launcher-muted);
+      font-size: 12px;
+      line-height: 18px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .snippet-empty {
+      display: grid;
+      place-items: center;
+      height: 100%;
+      color: var(--launcher-muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 560px) {
+      body {
+        padding: 0;
+      }
+
+      .snippet-launcher {
+        grid-template-rows: 56px 0 0;
+      }
+
+      .snippet-launcher.is-expanded {
+        grid-template-rows: 56px 1fr 24px;
+      }
+
+      .snippet-result {
+        grid-template-columns: 1fr;
+      }
+
+      .snippet-code {
+        max-height: 64px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="snippet-launcher" data-snippet-launcher>
+    <section class="snippet-search" data-velo-drag>
+      <div class="snippet-prompt">›</div>
+      <input class="snippet-input" data-snippet-input data-velo-no-drag autocomplete="off" spellcheck="false" placeholder="输入命令" />
+      <button class="snippet-close" type="button" title="关闭" data-velo-no-drag data-action="close">×</button>
+    </section>
+
+    <section class="snippet-results" data-snippet-results role="listbox" hidden></section>
+    <div class="snippet-status" data-snippet-status hidden></div>
+  </main>
+
+  <script type="module" src="/src/snippet-launcher.js"></script>
+</body>
+
+</html>

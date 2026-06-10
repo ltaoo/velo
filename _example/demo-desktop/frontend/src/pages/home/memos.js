@@ -259,6 +259,7 @@ export function mountMemosHome(root) {
       memoItems() {
         return state.memos;
       },
+      tagItems: editorTagItems,
       onChange(nextValue) {
         renderComposerStatus(nextValue);
       },
@@ -285,6 +286,10 @@ export function mountMemosHome(root) {
       vim: editorVimEnabled(),
       vimStatusHost: els.composerVimStatus,
     });
+  }
+
+  function editorTagItems() {
+    return collectTags(scopedMemos().filter((memo) => !memo.archived));
   }
 
   function editorVimEnabled() {
@@ -2000,9 +2005,15 @@ export function mountMemosHome(root) {
       ? pinned
           .map(
             (memo) => `
-              <article class="memo-pinned-item">
+              <article class="memo-pinned-item" data-memo-id="${escapeAttr(memo.id)}">
+                <header class="memo-pinned-head">
+                  <small>${formatShortDate(memo.createdAt)}</small>
+                  <div class="memo-pinned-actions">
+                    <button class="memo-action-button" type="button" data-action="togglePin" title="取消置顶" aria-label="取消置顶">${SVG.pin}</button>
+                    <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口" aria-label="分离为窗口">${SVG.external}</button>
+                  </div>
+                </header>
                 <div class="memo-pinned-content memo-content">${renderMemoMarkdown(memo.content, memoRenderContext(memo.id, { readonly: true }))}</div>
-                <small>${formatShortDate(memo.createdAt)}</small>
               </article>
             `,
           )
@@ -2035,6 +2046,7 @@ export function mountMemosHome(root) {
           memoItems() {
             return state.memos;
           },
+          tagItems: editorTagItems,
           onChange(value) {
             state.editDraft = value;
           },
@@ -2383,7 +2395,6 @@ export function mountMemosHome(root) {
         return `${memo.content} ${memo.visibility}`.toLowerCase().includes(query);
       })
       .sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         const result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
         return state.sortDesc ? -result : result;
       });

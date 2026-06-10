@@ -89,3 +89,58 @@
 
 - Change: Ex `:w` now calls the editor's draft-write callback, while `:wq`/`:x` call commit and `:q`/`:q!` call quit/discard callbacks. The editor callback layer now returns async results so Vim messages can reflect draft, commit, and quit outcomes.
 - Cache note: updated `vim.js` script query keys to `20260609-vim-ex-drafts` and `prosemirror-editor.umd.js` query keys to `20260609-editor-draft-events`.
+
+## 2026-06-10: normal `~` toggles character case
+
+- Symptom: `shift+~`/`~` was not mapped in normal mode. Expected standard Vim behavior: toggle the case of the character under the cursor.
+- Fix: added `toggleCaseAtCursor` for normal mode. It supports counts such as `3~`, advances the cursor after the toggled range, and is repeatable with `.`.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-toggle-case`.
+
+## 2026-06-10: first `l` in visual mode does not extend selection
+
+- Symptom: after pressing `v`, the first `l` appeared to do nothing; only the second `l` moved the visual selection to the right.
+- Root cause: char visual mode entered with `anchor === head`, so the initial selection was empty. The first `l` only selected the current character instead of extending past it.
+- Fix: char visual mode now normalizes the current cursor position and initializes `head` to the position after the current cursor target. This makes the current character selected immediately on `v`, so the first `l` extends one character to the right.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-visual-initial-head`.
+
+## 2026-06-10: visual motions used selection boundaries as Vim cursor positions
+
+- Symptom: after `v`, pressing `h` had the same first-key no-op behavior, and the original cursor character could fall out of the selected range. Other visual motions had the same risk because they used ProseMirror's half-open `selection.head` as if it were the Vim cursor character.
+- Root cause: char visual selections need inclusive Vim semantics, but ProseMirror ranges are half-open. When selecting forward, `selection.head` is after the visible cursor character; when selecting backward, the range must end after the original anchor character.
+- Fix: added a single visual cursor/range conversion path. Visual motions now compute from `visualCursorDisplayPos()` and convert the target character back through `visualSelectionRangeForCursor()`, so `h/l/j/k/w/b/e/0/^/$/G`, arrow keys, and visual `f`/`;` keep both the anchor character and target character selected. Visual `o` was updated to swap Vim endpoints rather than raw ProseMirror boundaries.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-visual-motion-inclusive`.
+
+## 2026-06-10: `Esc` from visual mode lands after the final character
+
+- Symptom: with `abc`, starting visual mode on `a`, pressing `l`, then `Esc` left the normal cursor on `c`. Expected behavior: the cursor should stay on the final visual cursor character, `b`.
+- Root cause: `leaveVisual(view)` defaulted to `state.selection.to`. In a forward char visual selection, ProseMirror's `to` is the position after the final selected character.
+- Fix: when visual mode exits without an explicit cursor override, `leaveVisual` now uses `visualCursorDisplayPos()`. Explicit exits such as visual yank still pass their own cursor target and keep their existing behavior.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-visual-esc-cursor`.
+
+## 2026-06-10: cross-line char visual selection paints to the row edge
+
+- Symptom: with two paragraphs `abc` and `123`, starting char visual on `a` and pressing `j` visually painted the whole first row to the container edge. Native Vim char visual semantics should select `abc`, the line break, and `1`, not a full linewise row.
+- Root cause: the actual ProseMirror selection was already `abc\n1`, but the browser native cross-paragraph selection background and a single cross-block visual decoration made the row-edge gap look selected.
+- Fix: char visual range rendering is now split per textblock, so only real text content receives `.vim-visual-range`. The editor also exposes `data-vim-visual-line`, and CSS hides the browser native `::selection` background only for char visual mode; linewise `V` remains unaffected.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html`, and `index.css` query keys in `index.html`, `memo-window.html`, and `memo-slim.html`, to `20260610-vim-visual-cross-line-render`.
+
+## 2026-06-10: paste cursor can miss the last inserted character
+
+- Symptom: after `p`, the normal cursor could land before the final inserted character instead of on it.
+- Root cause: paste cursor placement was implemented differently in normal and visual paste paths. Normal paste used a hand-rolled `length - 1` offset, while visual paste used `insertAt + register.length`, which is the position after the inserted text rather than the final inserted character.
+- Fix: added `lastInsertedTextCursorPos`, which computes the cursor from the post-insert document by stepping back from the inserted range end to the actual character position. Both normal charwise paste and visual paste now use this shared helper.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-paste-last-cursor`.
+
+## 2026-06-10: `p` on an empty line lands on the penultimate pasted character
+
+- Symptom: when the normal cursor was on an empty line at line start, `p` pasted text but left the cursor on the penultimate character.
+- Root cause: `pasteInsertPos` always moved one position to the right for `p`. On an empty paragraph there is no current character, so that moved the insertion point outside the empty textblock. The pasted text was inserted after the empty paragraph, and cursor recovery from the inserted end resolved against the wrong block boundary.
+- Fix: if `normalCursorRange` is empty, charwise `p` now inserts at the empty textblock start, same as `P`, and still uses `lastInsertedTextCursorPos` to land on the final pasted character.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-empty-line-paste-cursor`.
+
+## 2026-06-10: empty-line paste still fails when selection is on the paragraph boundary
+
+- Symptom: after yanking `abc` with `v e y`, moving to a new empty line and pressing `p` could still create a blank line below and leave the cursor on `b`.
+- Root cause: the previous empty-line paste fix only handled the exact `emptyBlock.start` cursor position. In the real editor, an empty paragraph cursor can resolve to the paragraph boundary (`before`/`after`) after creating or moving to a new line, so `pasteInsertPos` still treated it as a normal non-empty cursor and inserted outside the empty paragraph.
+- Fix: added `emptyTextblockAtCursor`, which recognizes an empty textblock across its full `before..after` boundary span. Charwise `p` and `P` now normalize any such cursor position to the empty textblock start before inserting.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-empty-line-paste-boundary`.

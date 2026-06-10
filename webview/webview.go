@@ -28,6 +28,9 @@ type BoxWebviewOptions struct {
 	QuitOnLastWindowClosed bool
 	Frameless              bool
 	Hidden                 bool
+	HideTrafficLights      bool
+	NonActivating          bool
+	PreserveStateOnFocus   bool
 }
 
 type Webview struct{}

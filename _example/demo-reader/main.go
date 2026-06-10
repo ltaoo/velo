@@ -239,20 +239,7 @@ func main() {
 		},
 	})
 
-	// Register global shortcuts
 	sm := shortcut.NewManager()
-	sm.Register("MetaLeft+ShiftLeft+KeyS", func() {
-		b.Webview.Show()
-	})
-	sm.Register("MetaLeft+ShiftLeft+KeyH", func() {
-		b.Webview.Hide()
-	})
-	sm.Register("MetaLeft+ShiftLeft+KeyJ", func() {
-		b.SendMessage(velo.H{"type": "startAutoScroll"})
-	})
-	sm.Register("MetaLeft+ShiftLeft+KeyK", func() {
-		b.SendMessage(velo.H{"type": "stopAutoScroll"})
-	})
 	_ = sm
 
 	b.NewWebview(&velo.VeloWebviewOpt{
@@ -300,6 +287,28 @@ func main() {
 			}
 		},
 	})
+
+	// Register global shortcuts after AppKit has started.
+	go func() {
+		time.Sleep(800 * time.Millisecond)
+		registerShortcut := func(keys string, handler func()) {
+			if err := sm.Register(keys, handler); err != nil {
+				logger.Warn().Err(err).Str("shortcut", keys).Msg("failed to register global shortcut")
+			}
+		}
+		registerShortcut("MetaLeft+ShiftLeft+KeyS", func() {
+			b.Webview.Show()
+		})
+		registerShortcut("MetaLeft+ShiftLeft+KeyH", func() {
+			b.Webview.Hide()
+		})
+		registerShortcut("MetaLeft+ShiftLeft+KeyJ", func() {
+			b.SendMessage(velo.H{"type": "startAutoScroll"})
+		})
+		registerShortcut("MetaLeft+ShiftLeft+KeyK", func() {
+			b.SendMessage(velo.H{"type": "stopAutoScroll"})
+		})
+	}()
 
 	b.Run()
 }

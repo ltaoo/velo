@@ -272,15 +272,16 @@ type veloRuntimeConfig struct {
 }
 
 type veloRuntimeWindowInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Pathname  string `json:"pathname"`
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	Frameless bool   `json:"frameless"`
-	Hidden    bool   `json:"hidden"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Pathname          string `json:"pathname"`
+	URL               string `json:"url"`
+	Title             string `json:"title"`
+	Width             int    `json:"width"`
+	Height            int    `json:"height"`
+	Frameless         bool   `json:"frameless"`
+	Hidden            bool   `json:"hidden"`
+	HideTrafficLights bool   `json:"hideTrafficLights"`
 }
 
 type veloRuntimeInfo struct {
@@ -480,15 +481,16 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	windowURL := b.webviewURL(opt.URL, pathname)
 	windowInfo := &veloRuntimeWindowInfo{
-		ID:        id,
-		Name:      opt.Name,
-		Pathname:  pathname,
-		URL:       windowURL,
-		Title:     title,
-		Width:     opt.Width,
-		Height:    opt.Height,
-		Frameless: opt.Frameless,
-		Hidden:    opt.Hidden,
+		ID:                id,
+		Name:              opt.Name,
+		Pathname:          pathname,
+		URL:               windowURL,
+		Title:             title,
+		Width:             opt.Width,
+		Height:            opt.Height,
+		Frameless:         opt.Frameless,
+		Hidden:            opt.Hidden,
+		HideTrafficLights: opt.HideTrafficLights,
 	}
 
 	opts := &webview.BoxWebviewOptions{
@@ -508,6 +510,9 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
+		HideTrafficLights:      opt.HideTrafficLights,
+		NonActivating:          opt.NonActivating,
+		PreserveStateOnFocus:   opt.PreserveStateOnFocus,
 		URL:                    windowURL,
 	}
 	return webview.OpenWindow(opts)
@@ -775,18 +780,21 @@ func (box *Box) Run() {
 }
 
 type VeloWebviewOpt struct {
-	Name        string // window name used as storage key for position/size persistence
-	Pathname    string
-	Title       string
-	Width       int
-	Height      int
-	Frameless   bool
-	Hidden      bool
-	FrontendDir string
-	FrontendFS  fs.FS
-	EntryPage   string
-	OnDragDrop  func(event string, payload string)
-	URL         string
+	Name                 string // window name used as storage key for position/size persistence
+	Pathname             string
+	Title                string
+	Width                int
+	Height               int
+	Frameless            bool
+	Hidden               bool
+	HideTrafficLights    bool
+	NonActivating        bool
+	PreserveStateOnFocus bool
+	FrontendDir          string
+	FrontendFS           fs.FS
+	EntryPage            string
+	OnDragDrop           func(event string, payload string)
+	URL                  string
 }
 
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
@@ -823,15 +831,16 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	windowURL := b.webviewURL(opt.URL, pathname)
 	windowInfo := &veloRuntimeWindowInfo{
-		ID:        id,
-		Name:      windowName,
-		Pathname:  pathname,
-		URL:       windowURL,
-		Title:     title,
-		Width:     width,
-		Height:    height,
-		Frameless: opt.Frameless,
-		Hidden:    opt.Hidden,
+		ID:                id,
+		Name:              windowName,
+		Pathname:          pathname,
+		URL:               windowURL,
+		Title:             title,
+		Width:             width,
+		Height:            height,
+		Frameless:         opt.Frameless,
+		Hidden:            opt.Hidden,
+		HideTrafficLights: opt.HideTrafficLights,
 	}
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
@@ -850,6 +859,9 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
+		HideTrafficLights:      opt.HideTrafficLights,
+		NonActivating:          opt.NonActivating,
+		PreserveStateOnFocus:   opt.PreserveStateOnFocus,
 		URL:                    windowURL,
 	}
 	b.webviews = append(b.webviews, opts)

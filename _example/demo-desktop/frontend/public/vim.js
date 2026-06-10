@@ -14,7 +14,7 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260609-vim-ex-drafts";
+  const VIM_PLUGIN_VERSION = "20260610-vim-empty-line-paste-boundary";
   const REGISTER_TYPES = {
     CHAR: "char",
     LINE: "line",
@@ -183,6 +183,17 @@
       if (blocks[i].start > pos) return Math.max(0, i - 1);
     }
     return Math.max(0, blocks.length - 1);
+  }
+
+  function emptyTextblockAtCursor(state, pos) {
+    const cursorPos = pos == null ? state.selection.from : pos;
+    const blocks = textblockList(state);
+    for (let i = 0; i < blocks.length; i += 1) {
+      const block = blocks[i];
+      if (block.node.content.size !== 0) continue;
+      if (block.before <= cursorPos && cursorPos <= block.after) return block;
+    }
+    return null;
   }
 
   function firstNonBlankInBlock(state, pos) {
@@ -473,9 +484,9 @@
     return clamp(pos + delta, 0, state.doc.content.size);
   }
 
-  function moveVerticalPos(view, direction, count) {
+  function moveVerticalPos(view, direction, count, posOverride) {
     const { state } = view;
-    const pos = state.selection.head;
+    const pos = posOverride == null ? state.selection.head : posOverride;
     const blocks = textblockList(state);
     if (!blocks.length) return pos;
 
@@ -501,9 +512,9 @@
     return blocks.length ? blocks[blocks.length - 1].start : docStart(state);
   }
 
-  function motionTarget(view, key, count) {
+  function motionTarget(view, key, count, posOverride) {
     const { state } = view;
-    const pos = state.selection.head;
+    const pos = posOverride == null ? state.selection.head : posOverride;
     const block = textblockInfo(state, pos);
 
     switch (key) {
@@ -516,15 +527,15 @@
       case "j":
       case "J":
       case "ArrowDown":
-        return moveVerticalPos(view, 1, count);
+        return moveVerticalPos(view, 1, count, pos);
       case "k":
       case "K":
       case "ArrowUp":
-        return moveVerticalPos(view, -1, count);
+        return moveVerticalPos(view, -1, count, pos);
       case "D":
-        return moveVerticalPos(view, 1, count * LINE_JUMP_COUNT);
+        return moveVerticalPos(view, 1, count * LINE_JUMP_COUNT, pos);
       case "U":
-        return moveVerticalPos(view, -1, count * LINE_JUMP_COUNT);
+        return moveVerticalPos(view, -1, count * LINE_JUMP_COUNT, pos);
       case "w":
         return wordForwardPos(state, pos, count);
       case "b":
@@ -678,9 +689,11 @@
   function enterVisual(view, linewise) {
     const { state } = view;
     const line = currentLineRange(state);
-    const anchor = linewise ? line.from : state.selection.from;
-    const head = linewise ? line.to : state.selection.to;
-    return setRange(state, view.dispatch, anchor, head, {
+    const anchor = linewise ? line.from : normalCursorPos(state);
+    const range = linewise
+      ? { anchor, head: line.to }
+      : visualSelectionRangeForCursor(state, anchor, anchor);
+    return setRange(state, view.dispatch, range.anchor, range.head, {
       mode: MODES.VISUAL,
       visualAnchor: anchor,
       visualLine: !!linewise,
@@ -692,7 +705,14 @@
 
   function leaveVisual(view, cursorPos) {
     const { state } = view;
-    const pos = cursorPos == null ? state.selection.to : cursorPos;
+    const pluginState = getPluginState(state);
+    let pos = cursorPos;
+    if (pos == null) {
+      pos =
+        pluginState && pluginState.mode === MODES.VISUAL
+          ? visualCursorDisplayPos(state, pluginState)
+          : state.selection.to;
+    }
     return setCursor(state, view.dispatch, pos, {
       mode: MODES.NORMAL,
       visualAnchor: null,
@@ -824,6 +844,51 @@
     const repeatAction = { type: "change", operator: "c", motion: "l", count, text: "" };
     if (from === to) return enterInsertAt(view, from);
     return deleteRange(state, view.dispatch, from, to, true, repeatAction);
+  }
+
+  function toggleCaseText(text) {
+    if (!text) return text;
+    const upper = text.toLocaleUpperCase();
+    const lower = text.toLocaleLowerCase();
+    if (text === upper && text !== lower) return lower;
+    if (text === lower && text !== upper) return upper;
+    return upper;
+  }
+
+  function toggleCaseAtCursor(view, count, repeatAction) {
+    const { state } = view;
+    const block = textblockInfo(state, state.selection.from);
+    if (!block.node.isTextblock || block.node.content.size === 0) {
+      view.dispatch(setVimMeta(state.tr, clearTransient({ message: "empty line" })));
+      return true;
+    }
+
+    const repeatTimes = Math.max(1, count || 1);
+    let tr = state.tr;
+    let pos = normalCursorPos(state);
+    let changed = 0;
+
+    for (let i = 0; i < repeatTimes && pos < block.end; i += 1) {
+      const current = tr.doc.textBetween(pos, pos + 1, "");
+      const toggled = toggleCaseText(current);
+      if (current && toggled !== current) tr = tr.insertText(toggled, pos, pos + 1);
+      pos += Math.max(1, toggled ? toggled.length : 1);
+      changed += 1;
+    }
+
+    if (!changed) {
+      view.dispatch(setVimMeta(state.tr, clearTransient({ message: "no character" })));
+      return true;
+    }
+
+    const cursorPos = clamp(pos, block.start, Math.max(block.start, block.end - 1));
+    tr = tr.setSelection(textSelection(tr.doc, cursorPos, cursorPos));
+    tr = setVimMeta(
+      tr,
+      withRepeat(clearTransient({ message: "case toggled" }), repeatAction),
+    );
+    view.dispatch(tr.scrollIntoView());
+    return true;
   }
 
   function leadingBlankEndInBlock(block) {
@@ -972,8 +1037,8 @@
 
     const pos = pasteInsertPos(state, before);
     const text = pluginState.register.repeat(Math.max(1, count || 1));
-    const cursorPos = clamp(pos + text.length - 1, 0, state.doc.content.size + text.length);
     let tr = state.tr.insertText(text, pos, pos);
+    const cursorPos = lastInsertedTextCursorPos(tr.doc, pos, text);
     tr = tr.setSelection(textSelection(tr.doc, cursorPos, cursorPos));
     tr = setVimMeta(
       tr,
@@ -1126,6 +1191,7 @@
       if (action.key === "p") return pasteRegister(view, false, { ...action, count }, count);
       if (action.key === "P") return pasteRegister(view, true, { ...action, count }, count);
       if (action.key === "J") return joinLines(view, count, { ...action, count });
+      if (action.key === "~") return toggleCaseAtCursor(view, count, { ...action, count });
     }
 
     view.dispatch(setVimMeta(view.state.tr, { message: "repeat unsupported" }));
@@ -1417,7 +1483,8 @@
   function visualFindChar(view, query, count) {
     const { state } = view;
     const pluginState = getPluginState(state);
-    const target = findCharForwardPos(state, state.selection.head, query, count);
+    const cursorPos = visualCursorDisplayPos(state, pluginState);
+    const target = findCharForwardPos(state, cursorPos, query, count);
     if (target == null) {
       view.dispatch(
         setVimMeta(state.tr, {
@@ -1429,10 +1496,8 @@
       return true;
     }
 
-    const head = target >= pluginState.visualAnchor
-      ? positionAfterCursorTarget(state, target)
-      : target;
-    return setRange(state, view.dispatch, pluginState.visualAnchor, head, {
+    const range = visualSelectionRangeForCursor(state, pluginState.visualAnchor, target);
+    return setRange(state, view.dispatch, range.anchor, range.head, {
       mode: MODES.VISUAL,
       visualAnchor: pluginState.visualAnchor,
       pending: null,
@@ -1570,6 +1635,7 @@
     if (key === "x" || key === "Delete") {
       return deleteCharacter(view, count, { type: "command", key: "x", count });
     }
+    if (key === "~") return toggleCaseAtCursor(view, count, { type: "command", key: "~", count });
     if (key === "s") return substituteCharacter(view, count);
     if (key === "p") return pasteRegister(view, false, { type: "command", key: "p", count }, count);
     if (key === "P") return pasteRegister(view, true, { type: "command", key: "P", count }, count);
@@ -1608,21 +1674,21 @@
     }
 
     if (key === "o") {
-      const anchor = state.selection.head;
-      const head = state.selection.anchor;
-      return setRange(state, view.dispatch, anchor, head, {
+      const anchor = visualCursorDisplayPos(state, pluginState);
+      const range = visualSelectionRangeForCursor(state, anchor, pluginState.visualAnchor);
+      return setRange(state, view.dispatch, range.anchor, range.head, {
+        mode: MODES.VISUAL,
         visualAnchor: anchor,
         message: "swapped visual anchor",
       });
     }
 
     if ("hjklJKDUweb0^$G".includes(key) || key.startsWith("Arrow")) {
-      const target = motionTarget(view, key, count);
+      const cursorPos = visualCursorDisplayPos(state, pluginState);
+      const target = motionTarget(view, key, count, cursorPos);
       if (target == null) return true;
-      const head = key === "e" && target >= pluginState.visualAnchor
-        ? positionAfterCursorTarget(state, target)
-        : target;
-      return setRange(state, view.dispatch, pluginState.visualAnchor, head, {
+      const range = visualSelectionRangeForCursor(state, pluginState.visualAnchor, target);
+      return setRange(state, view.dispatch, range.anchor, range.head, {
         mode: MODES.VISUAL,
         visualAnchor: pluginState.visualAnchor,
         count: "",
@@ -1672,7 +1738,7 @@
       if (!register) return true;
       const insertAt = visualPasteInsertPos(state, pluginState);
       let tr = state.tr.insertText(register, insertAt, insertAt);
-      const selectionPos = clamp(insertAt + register.length, 0, tr.doc.content.size);
+      const selectionPos = lastInsertedTextCursorPos(tr.doc, insertAt, register);
       tr = tr.setSelection(textSelection(tr.doc, selectionPos, selectionPos));
       tr = setVimMeta(tr, {
         mode: MODES.NORMAL,
@@ -1850,14 +1916,76 @@
     return head;
   }
 
+  function visualSelectionRangeForCursor(state, anchor, cursorPos) {
+    if (cursorPos < anchor) {
+      return {
+        anchor: positionAfterCursorTarget(state, anchor),
+        head: cursorPos,
+      };
+    }
+
+    return {
+      anchor,
+      head: positionAfterCursorTarget(state, cursorPos),
+    };
+  }
+
+  function pushVisualRangeDecorations(decorations, state, pluginState) {
+    if (state.selection.empty) return;
+
+    if (pluginState.visualLine) {
+      decorations.push(
+        PM.Decoration.inline(state.selection.from, state.selection.to, {
+          class: "vim-visual-range",
+        }),
+      );
+      return;
+    }
+
+    const from = state.selection.from;
+    const to = state.selection.to;
+    const blocks = textblockList(state);
+    if (!blocks.length) {
+      decorations.push(
+        PM.Decoration.inline(from, to, {
+          class: "vim-visual-range",
+        }),
+      );
+      return;
+    }
+
+    blocks.forEach((block) => {
+      const rangeFrom = Math.max(from, block.start);
+      const rangeTo = Math.min(to, block.end);
+      if (rangeFrom >= rangeTo) return;
+      decorations.push(
+        PM.Decoration.inline(rangeFrom, rangeTo, {
+          class: "vim-visual-range",
+        }),
+      );
+    });
+  }
+
   function visualPasteInsertPos(state, pluginState) {
     return moveHorizontalPos(state, visualCursorDisplayPos(state, pluginState), 1);
   }
 
+  function lastInsertedTextCursorPos(doc, insertAt, text) {
+    const insertedEnd = clamp(
+      insertAt + String(text == null ? "" : text).length,
+      0,
+      doc.content.size,
+    );
+    return charBeforePositionInBlock({ doc }, insertedEnd);
+  }
+
   function pasteInsertPos(state, before) {
+    const emptyBlock = emptyTextblockAtCursor(state);
+    if (emptyBlock) return emptyBlock.start;
     if (before) return state.selection.from;
     if (!state.selection.empty) return state.selection.to;
-    return moveHorizontalPos(state, normalCursorPos(state), 1);
+    const cursor = normalCursorRange(state);
+    return moveHorizontalPos(state, cursor ? cursor.from : normalCursorPos(state), 1);
   }
 
   function decorationsFor(state) {
@@ -1873,12 +2001,8 @@
       pushImeFeedbackDecoration(decorations, state, pluginState.imeFeedback);
     }
 
-    if (pluginState.mode === MODES.VISUAL && !state.selection.empty) {
-      decorations.push(
-        PM.Decoration.inline(state.selection.from, state.selection.to, {
-          class: "vim-visual-range",
-        }),
-      );
+    if (pluginState.mode === MODES.VISUAL) {
+      pushVisualRangeDecorations(decorations, state, pluginState);
     }
 
     if (pluginState.mode === MODES.VISUAL) {
@@ -2000,6 +2124,7 @@
             const pluginState = getPluginState(state);
             return {
               "data-vim-mode": pluginState.mode,
+              "data-vim-visual-line": pluginState.visualLine ? "true" : "false",
               class: "vim-enabled vim-mode-" + pluginState.mode,
             };
           },

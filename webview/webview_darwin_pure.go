@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -73,6 +74,14 @@ func init() {
 	cocoa.RegisterClassPair(windowDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloWindowDelegate registered")
 
+	// Register VeloPanel class for transient launchers that need keyboard focus
+	// without activating the whole application.
+	panelClass := cocoa.AllocateClassPair(cocoa.GetClass("NSPanel"), "VeloPanel", 0)
+	cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeKeyWindow"), veloPanelCanBecomeKeyWindow, "B@:")
+	cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeMainWindow"), veloPanelCanBecomeMainWindow, "B@:")
+	cocoa.RegisterClassPair(panelClass)
+	fmt.Fprintln(os.Stderr, "DEBUG: VeloPanel registered")
+
 	// Register VeloWebView class (subclass of WKWebView with drag-drop support)
 	webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
 	cocoa.AddMethod(webViewClass, cocoa.RegisterName("acceptsFirstMouse:"), veloWebViewAcceptsFirstMouse, "B@:@")
@@ -98,6 +107,14 @@ func windowWillClose(self, _cmd, notification uintptr) {
 }
 
 func veloWebViewAcceptsFirstMouse(self, _cmd, event uintptr) uintptr {
+	return 1
+}
+
+func veloPanelCanBecomeKeyWindow(self, _cmd uintptr) uintptr {
+	return 1
+}
+
+func veloPanelCanBecomeMainWindow(self, _cmd uintptr) uintptr {
 	return 1
 }
 
@@ -239,6 +256,14 @@ func handleWindowControlMessage(webView cocoa.ID, id string, method string, args
 		return true
 	case "__velo/window/minimize":
 		nsWindow.Send(cocoa.RegisterName("miniaturize:"), 0)
+	case "__velo/window/hide":
+		nsWindow.Send(cocoa.RegisterName("orderOut:"), 0)
+	case "__velo/window/set_size":
+		width := intArg(args, "width")
+		height := intArg(args, "height")
+		if width > 0 && height > 0 {
+			setWindowFrameSizeKeepingTop(nsWindow, width, height)
+		}
 	case "__velo/window/toggle_maximize":
 		nsWindow.Send(cocoa.RegisterName("zoom:"), 0)
 	case "__velo/window/maximize":
@@ -266,6 +291,55 @@ func handleWindowControlMessage(webView cocoa.ID, id string, method string, args
 		sendCallbackTo(webView, id, `{"success":true}`)
 	}
 	return true
+}
+
+func intArg(args interface{}, key string) int {
+	values, ok := args.(map[string]interface{})
+	if !ok || values == nil {
+		return 0
+	}
+	v, ok := values[key]
+	if !ok {
+		return 0
+	}
+	switch value := v.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func setWindowFrameSizeKeepingTop(nsWindow cocoa.ID, width int, height int) {
+	if nsWindow == 0 || width <= 0 || height <= 0 {
+		return
+	}
+
+	frame := cocoa.CGRect{
+		X:      0,
+		Y:      0,
+		Width:  cocoa.CGFloat(width),
+		Height: cocoa.CGFloat(height),
+	}
+	value := nsWindow.Send(cocoa.RegisterName("valueForKey:"), cocoa.StringToNSString("frame"))
+	if value != 0 {
+		var current cocoa.CGRect
+		value.Send(cocoa.RegisterName("getValue:"), unsafe.Pointer(&current))
+		frame.X = current.X
+		frame.Y = current.Y + current.Height - cocoa.CGFloat(height)
+	}
+
+	nsWindow.SendRect(cocoa.RegisterName("setFrame:display:"), frame, 1)
 }
 
 func boolArg(args interface{}, key string) bool {
@@ -533,11 +607,16 @@ func focus_window(opts *BoxWebviewOptions) bool {
 		if opts.Title != "" {
 			nsWindow.Send(cocoa.RegisterName("setTitle:"), cocoa.StringToNSString(opts.Title))
 		}
-		if opts.URL != "" {
+		if opts.URL != "" && !opts.PreserveStateOnFocus {
 			loadURLInWebView(wkWebView, opts.URL)
 		}
 		if nsWindow.Send(cocoa.RegisterName("isMiniaturized")) != 0 {
 			nsWindow.Send(cocoa.RegisterName("deminiaturize:"), 0)
+		}
+		if opts.NonActivating {
+			nsWindow.Send(cocoa.RegisterName("orderFrontRegardless"))
+			nsWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+			return
 		}
 		nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
 		nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
@@ -683,14 +762,27 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	if opts.Frameless {
 		styleMask |= cocoa.NSWindowStyleMaskFullSizeContentView
 	}
+	if opts.NonActivating {
+		styleMask |= cocoa.NSWindowStyleMaskNonactivatingPanel
+	}
 
-	nsWindow := cocoa.GetClass("NSWindow").Send(cocoa.RegisterName("alloc")).SendRectStyle(
+	windowClass := cocoa.GetClass("NSWindow")
+	if opts.NonActivating {
+		windowClass = cocoa.GetClass("VeloPanel")
+	}
+	nsWindow := windowClass.Send(cocoa.RegisterName("alloc")).SendRectStyle(
 		cocoa.RegisterName("initWithContentRect:styleMask:backing:defer:"),
 		rect,
 		uintptr(styleMask),
 		cocoa.NSBackingStoreBuffered,
 		false, // defer
 	)
+	if opts.NonActivating {
+		nsWindow.Send(cocoa.RegisterName("setFloatingPanel:"), true)
+		nsWindow.Send(cocoa.RegisterName("setHidesOnDeactivate:"), false)
+		nsWindow.Send(cocoa.RegisterName("setBecomesKeyOnlyIfNeeded:"), false)
+		nsWindow.Send(cocoa.RegisterName("setLevel:"), cocoa.NSFloatingWindowLevel)
+	}
 
 	if opts.Frameless {
 		nsWindow.Send(cocoa.RegisterName("setTitlebarAppearsTransparent:"), true)
@@ -700,6 +792,9 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"),
 			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
 		nsWindow.Send(cocoa.RegisterName("setOpaque:"), false)
+	}
+	if opts.HideTrafficLights {
+		hideTrafficLights(nsWindow)
 	}
 
 	// Set Title
@@ -712,6 +807,9 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 
 	// Make Key and Order Front (unless hidden)
 	if !opts.Hidden {
+		if opts.NonActivating {
+			nsWindow.Send(cocoa.RegisterName("orderFrontRegardless"))
+		}
 		nsWindow.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
 	}
 
@@ -821,6 +919,15 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	fmt.Fprintf(os.Stderr, "DEBUG: Loading URL: %s\n", opts.URL)
 	loadURLInWebView(wkWebView, opts.URL)
 	fmt.Fprintln(os.Stderr, "DEBUG: URL request loaded (sent)")
+}
+
+func hideTrafficLights(nsWindow cocoa.ID) {
+	for _, button := range []int{0, 1, 2} {
+		standardButton := nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), button)
+		if standardButton != 0 {
+			standardButton.Send(cocoa.RegisterName("setHidden:"), true)
+		}
+	}
 }
 
 func loadURLInWebView(wkWebView cocoa.ID, rawURL string) {

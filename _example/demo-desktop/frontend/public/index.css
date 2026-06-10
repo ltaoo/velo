@@ -524,6 +524,11 @@ ol {
   background: rgba(15, 159, 110, 0.24);
 }
 
+.ProseMirror.vim-enabled.vim-mode-visual[data-vim-visual-line="false"] ::selection {
+  background: transparent;
+  color: inherit;
+}
+
 .vim-search-range {
   background: #ffe38a;
   box-shadow: inset 0 -2px 0 #b47600;
@@ -531,6 +536,7 @@ ol {
 
 .file-picker-menu,
 .memo-ref-menu,
+.tag-picker-menu,
 .time-picker-menu,
 .slash-command-menu {
   background: var(--BG-0);
@@ -552,6 +558,7 @@ ol {
 
 .file-picker-option,
 .memo-ref-option,
+.tag-picker-option,
 .time-picker-option,
 .slash-command-option {
   border-radius: 6px;
@@ -564,8 +571,17 @@ ol {
 
 .file-picker-option,
 .memo-ref-option,
+.tag-picker-option,
 .time-picker-option {
   flex-direction: column;
+}
+
+.tag-picker-option {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-height: 46px;
 }
 
 .memo-ref-option {
@@ -588,6 +604,8 @@ ol {
 .file-picker-option.active,
 .memo-ref-option:hover,
 .memo-ref-option.active,
+.tag-picker-option:hover,
+.tag-picker-option.active,
 .time-picker-option:hover,
 .time-picker-option.active,
 .slash-command-option:hover,
@@ -596,6 +614,7 @@ ol {
 }
 
 .memo-ref-option-kind,
+.tag-picker-mark,
 .slash-command-icon {
   align-items: center;
   background: var(--BG-1);
@@ -616,6 +635,7 @@ ol {
 }
 
 .memo-ref-option-copy,
+.tag-picker-copy,
 .slash-command-copy {
   display: flex;
   flex-direction: column;
@@ -627,6 +647,8 @@ ol {
 .file-picker-detail,
 .memo-ref-option-label,
 .memo-ref-option-detail,
+.tag-picker-label,
+.tag-picker-detail,
 .time-picker-label,
 .time-picker-detail,
 .slash-command-label,
@@ -638,6 +660,7 @@ ol {
 
 .file-picker-label,
 .memo-ref-option-label,
+.tag-picker-label,
 .time-picker-label,
 .slash-command-label {
   color: var(--FG-0);
@@ -647,10 +670,12 @@ ol {
 
 .file-picker-detail,
 .memo-ref-option-detail,
+.tag-picker-detail,
 .time-picker-detail,
 .slash-command-detail,
 .file-picker-empty,
 .memo-ref-empty,
+.tag-picker-empty,
 .time-picker-empty,
 .slash-command-empty {
   color: var(--FG-1);
@@ -659,18 +684,24 @@ ol {
 
 .file-picker-empty,
 .memo-ref-empty,
+.tag-picker-empty,
 .time-picker-empty,
 .slash-command-empty {
   padding: 9px 10px;
 }
 
 .ProseMirror .memo-ref-query-range,
+.ProseMirror .tag-query-range,
 .ProseMirror .time-query-range,
 .ProseMirror .slash-command-range {
   border-radius: 4px;
 }
 
 .ProseMirror .memo-ref-query-range {
+  background: var(--memo-accent-soft);
+}
+
+.ProseMirror .tag-query-range {
   background: var(--memo-accent-soft);
 }
 
@@ -1224,6 +1255,26 @@ body.is-fixed-window .memo-window-shell {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.memo-pinned-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.memo-pinned-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.memo-pinned-actions .memo-action-button {
+  height: 26px;
+  width: 26px;
 }
 
 .memo-pinned-item small {
