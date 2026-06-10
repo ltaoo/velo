@@ -144,14 +144,7 @@ func Run(assets Assets) {
 
 	fmt.Println("starting server...")
 
-	// 注册全局快捷键: Cmd+Shift+M (macOS) / Win+Shift+M (Windows) 显示/隐藏主窗口
 	sm := shortcut.NewManager()
-	sm.Register("MetaLeft+ShiftLeft+KeyM", func() {
-		b.Webview.Show()
-	})
-	sm.Register("MetaLeft+ShiftLeft+KeyH", func() {
-		b.Webview.Hide()
-	})
 	_ = sm
 
 	b.NewWebview(&velo.VeloWebviewOpt{
@@ -175,5 +168,33 @@ func Run(assets Assets) {
 			})
 		},
 	})
+
+	// 注册全局快捷键: Cmd+Shift+M/H 显示/隐藏主窗口，Ctrl/Cmd+Shift+Space 打开 snippet 启动器。
+	// Carbon hotkeys need the AppKit application/run loop to be ready. Register
+	// shortly after b.Run starts instead of racing NSApplication initialization.
+	go func() {
+		time.Sleep(800 * time.Millisecond)
+		registerShortcut := func(keys string, handler func()) {
+			if err := sm.Register(keys, func() {
+				logger.Info().Str("shortcut", keys).Msg("global shortcut triggered")
+				handler()
+			}); err != nil {
+				logger.Warn().Err(err).Str("shortcut", keys).Msg("failed to register global shortcut")
+			} else {
+				logger.Info().Str("shortcut", keys).Msg("registered global shortcut")
+			}
+		}
+		registerShortcut("MetaLeft+ShiftLeft+KeyM", func() {
+			b.Webview.Show()
+		})
+		registerShortcut("MetaLeft+ShiftLeft+KeyH", func() {
+			b.Webview.Hide()
+		})
+		for _, keys := range snippetLauncherShortcuts {
+			registerShortcut(keys, func() {
+				openSnippetLauncher(b)
+			})
+		}
+	}()
 	b.Run()
 }

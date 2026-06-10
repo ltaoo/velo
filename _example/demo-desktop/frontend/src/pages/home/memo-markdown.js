@@ -94,10 +94,10 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
       html += memoLineTemplate(
         lineNumber + lineNumberOffset,
         `
-        <label class="memo-task-line">
+        <div class="memo-task-line">
           <input type="checkbox" ${context.readonly ? "disabled" : `data-task-line="${sourceLineIndex}"`} ${task.checked ? "checked" : ""} />
           <span>${inlineMarkdown(task.text, context)}</span>
-        </label>
+        </div>
       `,
         "is-task",
       );

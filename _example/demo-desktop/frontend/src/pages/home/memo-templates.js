@@ -166,13 +166,6 @@ function shellTemplate() {
         </div>
         <div class="memo-sidebar-section">
           <div class="memo-sidebar-heading">
-            <span>标签</span>
-            <span data-tag-summary></span>
-          </div>
-          <div class="memo-tag-list" data-tag-list></div>
-        </div>
-        <div class="memo-sidebar-section">
-          <div class="memo-sidebar-heading">
             <span>聚合</span>
           </div>
           <nav class="memo-nav memo-collection-nav" aria-label="Memo collections">
@@ -183,6 +176,13 @@ function shellTemplate() {
             ${viewNavButtonTemplate("codeblocks", "代码片段", SVG.code, "data-code-nav-count")}
             ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
           </nav>
+        </div>
+        <div class="memo-sidebar-section">
+          <div class="memo-sidebar-heading">
+            <span>标签</span>
+            <span data-tag-summary></span>
+          </div>
+          <div class="memo-tag-list" data-tag-list></div>
         </div>
         <div class="memo-sidebar-footer">
           <button class="memo-nav-button memo-settings-button" type="button" data-action="openSettings">
@@ -273,12 +273,12 @@ function shellTemplate() {
           <div class="memo-calendar" data-calendar></div>
         </section>
         <section class="memo-inspector-section">
-          <div class="memo-inspector-title">概览</div>
-          <div class="memo-stats" data-stats></div>
-        </section>
-        <section class="memo-inspector-section">
           <div class="memo-inspector-title">置顶</div>
           <div class="memo-pinned-list" data-pinned-list></div>
+        </section>
+        <section class="memo-inspector-section">
+          <div class="memo-inspector-title">概览</div>
+          <div class="memo-stats" data-stats></div>
         </section>
       </aside>
       <div class="memo-command-palette" data-memo-search-palette hidden>
@@ -498,10 +498,10 @@ function todoTemplate(todo, renderContext, projects = []) {
   const projectBadge = projectBadgeTemplate(todo.memo.projectId, projects);
   return `
     <article class="memo-todo-card ${todo.checked ? "is-complete" : ""}" data-memo-id="${escapeAttr(todo.memoId)}">
-      <label class="memo-todo-check">
+      <div class="memo-todo-check">
         <input type="checkbox" data-task-line="${todo.lineIndex}" ${todo.checked ? "checked" : ""} />
         <span>${inlineMarkdown(todo.text, renderContext)}</span>
-      </label>
+      </div>
       <div class="memo-todo-source">
         ${sourceMemoMarkerTemplate(todo.memoId)}
         <div class="memo-todo-meta">

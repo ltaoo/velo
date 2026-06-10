@@ -1,4 +1,4 @@
-import { DEFAULT_VISIBILITY, VISIBILITY, isMemoFenceLine, memoReferenceAlias, memoTitle } from "../../domain/memos.js";
+import { DEFAULT_VISIBILITY, VISIBILITY, collectTags, isMemoFenceLine, memoReferenceAlias, memoTitle } from "../../domain/memos.js";
 import {
   CLOUD_STORAGE_KEY,
   activeCloudStorageConfig,
@@ -382,6 +382,7 @@ function installMemoEditorPlugins(editor, options) {
   const plugins = [
     createMemoReferencePlugin(editor, options || {}),
     createMemoSlashCommandPlugin(editor, options || {}),
+    createMemoTagPickerPlugin(editor, options || {}),
     createMemoTimeSyntaxHighlightPlugin(editor),
     createMemoTimePickerPlugin(editor),
   ];
@@ -811,6 +812,165 @@ function unquoteMemoFenceLine(line) {
   return value;
 }
 
+function createMemoTagPickerPlugin(editor, options) {
+  const PM = window.ProsemirrorMod;
+  const key = new PM.PluginKey(editor.id + "-memoTagPicker");
+
+  function empty(dismissedKey) {
+    return {
+      active: false,
+      dismissedKey: dismissedKey || null,
+      from: null,
+      items: [],
+      query: "",
+      selectedIndex: 0,
+      to: null,
+    };
+  }
+
+  function findTrigger(state) {
+    const selection = state.selection;
+    if (!selection.empty) return null;
+
+    const $from = selection.$from;
+    if (!$from.parent.isTextblock) return null;
+    if (isSelectionInsideMemoFence(state)) return null;
+
+    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const match = /(^|\s)#([\w\u4e00-\u9fa5-]*)$/u.exec(before);
+    if (!match) return null;
+
+    const query = match[2] || "";
+    const from = selection.from - query.length - 1;
+    if (from < $from.start()) return null;
+
+    return {
+      from,
+      key: from + ":" + selection.from + ":" + query,
+      query,
+      to: selection.from,
+    };
+  }
+
+  function selectItem(view, item) {
+    const state = key.getState(view.state);
+    if (!state || !state.active || !item) return false;
+
+    const tag = String(item.tag || item.label || "").replace(/^#/, "").trim();
+    if (!tag) return false;
+
+    view.dispatch(
+      view.state.tr
+        .insertText("#" + tag + " ", state.from, state.to)
+        .setMeta(key, { type: "close" })
+        .scrollIntoView(),
+    );
+    view.focus();
+    return true;
+  }
+
+  return new PM.Plugin({
+    key,
+    state: {
+      init: empty,
+      apply(transaction, value, oldState, newState) {
+        const meta = transaction.getMeta(key);
+        if (meta && meta.type === "close") {
+          const trigger = findTrigger(newState);
+          return empty(trigger ? trigger.key : null);
+        }
+
+        const trigger = findTrigger(newState);
+        if (!trigger) return empty();
+        if (trigger.key === value.dismissedKey && !transaction.docChanged) {
+          return {
+            ...empty(value.dismissedKey),
+            from: trigger.from,
+            query: trigger.query,
+            to: trigger.to,
+          };
+        }
+
+        const items = memoTagItems(options, trigger.query);
+        let selectedIndex = value.selectedIndex || 0;
+        if (meta && meta.type === "setSelectedIndex") selectedIndex = meta.selectedIndex || 0;
+        selectedIndex = items.length ? Math.max(0, Math.min(selectedIndex, items.length - 1)) : 0;
+
+        return {
+          active: true,
+          dismissedKey: null,
+          from: trigger.from,
+          items,
+          query: trigger.query,
+          selectedIndex,
+          to: trigger.to,
+        };
+      },
+    },
+    props: {
+      decorations(state) {
+        const pluginState = key.getState(state);
+        if (!pluginState || !pluginState.active || pluginState.from >= pluginState.to) {
+          return PM.DecorationSet.empty;
+        }
+        return PM.DecorationSet.create(state.doc, [
+          PM.Decoration.inline(pluginState.from, pluginState.to, {
+            class: "tag-query-range",
+          }),
+        ]);
+      },
+      handleKeyDown(view, event) {
+        const pluginState = key.getState(view.state);
+        if (!pluginState || !pluginState.active) return false;
+
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          const length = pluginState.items.length;
+          const selectedIndex = length
+            ? (pluginState.selectedIndex + direction + length) % length
+            : 0;
+          event.preventDefault();
+          view.dispatch(
+            view.state.tr.setMeta(key, { type: "setSelectedIndex", selectedIndex }),
+          );
+          return true;
+        }
+
+        if (event.key === "Enter" || event.key === "Tab") {
+          if (!pluginState.items.length) return false;
+          event.preventDefault();
+          return selectItem(view, pluginState.items[pluginState.selectedIndex]);
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          view.dispatch(view.state.tr.setMeta(key, { type: "close" }));
+          return true;
+        }
+
+        return false;
+      },
+    },
+    view(view) {
+      return createFloatingMenuView({
+        className: "tag-picker-menu hidden",
+        key,
+        render(menu, pluginState) {
+          renderTagPickerMenu(menu, pluginState);
+        },
+        onMouseDown(event, pluginState) {
+          const option = closestElement(event.target, "[data-tag-picker-index]");
+          if (!option) return false;
+          event.preventDefault();
+          const item = pluginState.items[Number(option.dataset.tagPickerIndex)];
+          return selectItem(view, item);
+        },
+        view,
+      });
+    },
+  });
+}
+
 function createMemoTimePickerPlugin(editor) {
   const PM = window.ProsemirrorMod;
   const key = new PM.PluginKey(editor.id + "-memoTimePicker");
@@ -1202,6 +1362,78 @@ function memoReferenceInsertText(item, embed) {
   return (embed ? "![[" : "[[") + target + "]]";
 }
 
+function memoTagItems(options, query) {
+  const rawQuery = String(query || "").replace(/^#/, "").trim();
+  const keyword = rawQuery.toLowerCase();
+  const source = memoTagSource(options);
+  const seen = new Set();
+  const items = [];
+
+  source.forEach(function (entry) {
+    const item = normalizeMemoTagItem(entry);
+    if (!item || seen.has(item.key)) return;
+    if (keyword && !item.key.includes(keyword)) return;
+    seen.add(item.key);
+    items.push(item);
+  });
+
+  if (rawQuery && isMemoTagName(rawQuery) && !items.length && !seen.has(rawQuery.toLowerCase())) {
+    items.push({
+      count: 0,
+      detail: "新标签",
+      key: rawQuery.toLowerCase(),
+      label: "#" + rawQuery,
+      tag: rawQuery,
+    });
+  }
+
+  return items.slice(0, 8);
+}
+
+function memoTagSource(options) {
+  const explicit = typeof options.tagItems === "function"
+    ? options.tagItems()
+    : options.tagItems;
+  if (Array.isArray(explicit)) return explicit;
+
+  const memos = typeof options.memoItems === "function"
+    ? options.memoItems()
+    : options.memoItems;
+  return collectTags(Array.isArray(memos) ? memos : []);
+}
+
+function normalizeMemoTagItem(entry) {
+  let tag = "";
+  let count = 0;
+  let detail = "";
+
+  if (Array.isArray(entry)) {
+    tag = entry[0];
+    count = Number(entry[1] || 0) || 0;
+  } else if (entry && typeof entry === "object") {
+    tag = entry.tag || entry.label || entry.value || entry.name || "";
+    count = Number(entry.count || entry.total || 0) || 0;
+    detail = entry.detail || "";
+  } else {
+    tag = entry;
+  }
+
+  tag = String(tag || "").replace(/^#/, "").trim();
+  if (!isMemoTagName(tag)) return null;
+
+  return {
+    count,
+    detail: detail || (count ? count + " 条 memo" : "标签"),
+    key: tag.toLowerCase(),
+    label: "#" + tag,
+    tag,
+  };
+}
+
+function isMemoTagName(value) {
+  return /^[\w\u4e00-\u9fa5-]+$/u.test(String(value || ""));
+}
+
 function renderMemoReferenceMenu(menu, pluginState) {
   if (!pluginState.items.length) {
     menu.innerHTML = '<div class="memo-ref-empty">没有匹配的 memo</div>';
@@ -1216,6 +1448,27 @@ function renderMemoReferenceMenu(menu, pluginState) {
           <span class="memo-ref-option-copy">
             <span class="memo-ref-option-label">${escapeHTML(item.label)}</span>
             <span class="memo-ref-option-detail">${escapeHTML(item.detail)}</span>
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderTagPickerMenu(menu, pluginState) {
+  if (!pluginState.items.length) {
+    menu.innerHTML = '<div class="tag-picker-empty">没有匹配的标签</div>';
+    return;
+  }
+
+  menu.innerHTML = pluginState.items
+    .map(function (item, index) {
+      return `
+        <div class="tag-picker-option ${index === pluginState.selectedIndex ? "active" : ""}" data-tag-picker-index="${index}">
+          <span class="tag-picker-mark">#</span>
+          <span class="tag-picker-copy">
+            <span class="tag-picker-label">${escapeHTML(item.label)}</span>
+            <span class="tag-picker-detail">${escapeHTML(item.detail)}</span>
           </span>
         </div>
       `;
