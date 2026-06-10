@@ -318,12 +318,13 @@ type CGRect struct {
 
 // Constants
 const (
-	NSWindowStyleMaskTitled         = 1 << 0
-	NSWindowStyleMaskClosable       = 1 << 1
-	NSWindowStyleMaskMiniaturizable = 1 << 2
-	NSWindowStyleMaskResizable      = 1 << 3
-	NSWindowStyleMaskFullScreen            = 1 << 14
-	NSWindowStyleMaskFullSizeContentView   = 1 << 15
+	NSWindowStyleMaskTitled              = 1 << 0
+	NSWindowStyleMaskClosable            = 1 << 1
+	NSWindowStyleMaskMiniaturizable      = 1 << 2
+	NSWindowStyleMaskResizable           = 1 << 3
+	NSWindowStyleMaskNonactivatingPanel  = 1 << 7
+	NSWindowStyleMaskFullScreen          = 1 << 14
+	NSWindowStyleMaskFullSizeContentView = 1 << 15
 
 	NSBackingStoreBuffered = 2
 

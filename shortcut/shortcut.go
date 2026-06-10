@@ -76,22 +76,29 @@ func (m *Manager) Register(shortcut string, handler func()) error {
 	m.mu.Lock()
 	if old, ok := m.hotkeys[shortcut]; ok {
 		old.Unregister()
+		delete(m.hotkeys, shortcut)
 	}
+	m.mu.Unlock()
+
+	if err := hk.Register(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
 	m.hotkeys[shortcut] = hk
 	m.mu.Unlock()
 
-	var listen func()
-	listen = func() {
-		if err := hk.Register(); err != nil {
-			return
+	go func() {
+		for {
+			if _, ok := <-hk.Keydown(); !ok {
+				return
+			}
+			if _, ok := <-hk.Keyup(); !ok {
+				return
+			}
+			handler()
 		}
-		<-hk.Keydown()
-		<-hk.Keyup()
-		hk.Unregister()
-		handler()
-		listen()
-	}
-	go listen()
+	}()
 	return nil
 }
 
