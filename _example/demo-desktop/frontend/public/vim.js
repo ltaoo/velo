@@ -14,7 +14,7 @@
 
   const vimPluginKey = new PM.PluginKey("vanillaVim");
   const LINE_JUMP_COUNT = 10;
-  const VIM_PLUGIN_VERSION = "20260610-vim-empty-line-paste-boundary";
+  const VIM_PLUGIN_VERSION = "20260611-vim-visual-exit-selection-flush";
   const REGISTER_TYPES = {
     CHAR: "char",
     LINE: "line",
@@ -71,6 +71,8 @@
     if (event.key === "ArrowDown") return "ArrowDown";
     if (event.ctrlKey && event.key === "[") return "Ctrl-[";
     if (event.ctrlKey && event.key.toLowerCase() === "a") return "Ctrl-a";
+    if (event.ctrlKey && event.key.toLowerCase() === "d") return "Ctrl-d";
+    if (event.ctrlKey && event.key.toLowerCase() === "u") return "Ctrl-u";
     if (event.ctrlKey && event.key.toLowerCase() === "r") return "Ctrl-r";
     if (event.metaKey || event.altKey || event.ctrlKey) return null;
     if (event.shiftKey && (event.code === "KeyD" || event.key.toLowerCase() === "d")) return "D";
@@ -114,6 +116,56 @@
     if (meta) tr = setVimMeta(tr, meta);
     dispatch(tr);
     return true;
+  }
+
+  function selectionTouchesEditor(view, selection) {
+    if (!view || !view.dom || !selection) return false;
+    const contains = (node) => {
+      if (!node) return false;
+      const element = node.nodeType === 1 ? node : node.parentNode;
+      return !!(element && view.dom.contains(element));
+    };
+    return contains(selection.anchorNode) || contains(selection.focusNode);
+  }
+
+  function collapseDomSelectionToEditorCursor(view) {
+    if (!view || !view.state || !view.state.selection.empty) return;
+
+    try {
+      if (typeof view.focus === "function") view.focus();
+    } catch (_) {}
+
+    try {
+      if (!view.domAtPos) return;
+      const root = view.root || (view.dom && view.dom.ownerDocument) || document;
+      const selection = root && typeof root.getSelection === "function" ? root.getSelection() : null;
+      if (!selection) return;
+      if (
+        !selectionTouchesEditor(view, selection) &&
+        typeof view.hasFocus === "function" &&
+        !view.hasFocus()
+      ) {
+        return;
+      }
+
+      const cursor = view.domAtPos(view.state.selection.from, 0);
+      selection.removeAllRanges();
+      selection.collapse(cursor.node, cursor.offset);
+    } catch (_) {}
+  }
+
+  function syncDomSelectionAfterVisualExit(view) {
+    collapseDomSelectionToEditorCursor(view);
+    const scheduleMicrotask =
+      typeof window.queueMicrotask === "function"
+        ? window.queueMicrotask.bind(window)
+        : (callback) => window.setTimeout(callback, 0);
+    scheduleMicrotask(() => collapseDomSelectionToEditorCursor(view));
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => collapseDomSelectionToEditorCursor(view));
+    } else {
+      window.setTimeout(() => collapseDomSelectionToEditorCursor(view), 16);
+    }
   }
 
   function textblockInfo(state, pos) {
@@ -533,8 +585,10 @@
       case "ArrowUp":
         return moveVerticalPos(view, -1, count, pos);
       case "D":
+      case "Ctrl-d":
         return moveVerticalPos(view, 1, count * LINE_JUMP_COUNT, pos);
       case "U":
+      case "Ctrl-u":
         return moveVerticalPos(view, -1, count * LINE_JUMP_COUNT, pos);
       case "w":
         return wordForwardPos(state, pos, count);
@@ -553,6 +607,16 @@
       default:
         return null;
     }
+  }
+
+  function isMotionKey(key, options) {
+    const includeG = !!(options && options.includeG);
+    return (
+      key === "Ctrl-d" ||
+      key === "Ctrl-u" ||
+      key.startsWith("Arrow") ||
+      (includeG ? "hjklJKDUweb0^$G" : "hjklJKDUweb0^$").includes(key)
+    );
   }
 
   function positionAfterCursorTarget(state, pos) {
@@ -713,7 +777,7 @@
           ? visualCursorDisplayPos(state, pluginState)
           : state.selection.to;
     }
-    return setCursor(state, view.dispatch, pos, {
+    const handled = setCursor(state, view.dispatch, pos, {
       mode: MODES.NORMAL,
       visualAnchor: null,
       visualLine: false,
@@ -721,6 +785,8 @@
       count: "",
       message: "",
     });
+    if (handled) syncDomSelectionAfterVisualExit(view);
+    return handled;
   }
 
   function yankRange(state, dispatch, from, to, message, registerType) {
@@ -1603,7 +1669,7 @@
       return joinLines(view, count, { type: "command", key: "J", count });
     }
 
-    if ("hjklJKDUweb0^$".includes(key) || key.startsWith("Arrow")) {
+    if (isMotionKey(key)) {
       const target = motionTarget(view, key, count);
       if (target != null) {
         const cursorTarget = key === "$" ? charBeforePositionInBlock(state, target) : target;
@@ -1673,6 +1739,20 @@
       return visualFindChar(view, key, count);
     }
 
+    if (pluginState.pending === "g") {
+      if (key === "g") {
+        const range = visualSelectionRangeForCursor(state, pluginState.visualAnchor, docStart(state));
+        return setRange(state, view.dispatch, range.anchor, range.head, {
+          mode: MODES.VISUAL,
+          visualAnchor: pluginState.visualAnchor,
+          pending: null,
+          count: "",
+          message: "",
+        });
+      }
+      return dispatchPending(state, view.dispatch, null, "unknown g" + key);
+    }
+
     if (key === "o") {
       const anchor = visualCursorDisplayPos(state, pluginState);
       const range = visualSelectionRangeForCursor(state, anchor, pluginState.visualAnchor);
@@ -1683,7 +1763,7 @@
       });
     }
 
-    if ("hjklJKDUweb0^$G".includes(key) || key.startsWith("Arrow")) {
+    if (isMotionKey(key, { includeG: true })) {
       const cursorPos = visualCursorDisplayPos(state, pluginState);
       const target = motionTarget(view, key, count, cursorPos);
       if (target == null) return true;
@@ -1695,6 +1775,8 @@
         message: "",
       });
     }
+
+    if (key === "g") return dispatchPending(state, view.dispatch, "g", "g");
 
     if (key === "f") return dispatchFindPending(state, view.dispatch, "visual", null);
     if (key === ";") return repeatFindChar(view, count, true);
@@ -1955,6 +2037,23 @@
     }
 
     blocks.forEach((block) => {
+      if (block.node.content.size === 0) {
+        if (from <= block.start && block.start <= to) {
+          decorations.push(
+            PM.Decoration.widget(
+              block.start,
+              () => {
+                const marker = document.createElement("span");
+                marker.className = "vim-visual-empty-line";
+                return marker;
+              },
+              { side: 1 },
+            ),
+          );
+        }
+        return;
+      }
+
       const rangeFrom = Math.max(from, block.start);
       const rangeTo = Math.min(to, block.end);
       if (rangeFrom >= rangeTo) return;

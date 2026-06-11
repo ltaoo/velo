@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -27,6 +28,20 @@ type InputSourceAppRule struct {
 	Enabled  bool   `json:"enabled"`
 }
 
+type InputSourceLockMissingRule struct {
+	AppID    string `json:"appId"`
+	AppName  string `json:"appName"`
+	SourceID string `json:"sourceId"`
+}
+
+type InputSourceLockAvailability struct {
+	HasMissingSources      bool                         `json:"hasMissingSources"`
+	MissingDefaultSourceID string                       `json:"missingDefaultSourceId"`
+	MissingSourceIDs       []string                     `json:"missingSourceIds"`
+	MissingAppRules        []InputSourceLockMissingRule `json:"missingAppRules"`
+	RuntimeEnabled         bool                         `json:"runtimeEnabled"`
+}
+
 type InputSourceLockService struct {
 	mu      sync.Mutex
 	manager *inputsource.Manager
@@ -40,7 +55,7 @@ func NewInputSourceLockService(logger *zerolog.Logger) *InputSourceLockService {
 
 func (s *InputSourceLockService) Apply(settings InputSourceLockSettings) {
 	settings = normalizeInputSourceLockSettings(settings)
-	config := inputSourceManagerConfig(settings)
+	config := inputSourceManagerConfigForCurrentMachine(settings, s.logger)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,10 +144,38 @@ func normalizeInputSourceLockSettings(settings InputSourceLockSettings) InputSou
 }
 
 func inputSourceManagerConfig(settings InputSourceLockSettings) inputsource.Config {
+	return inputSourceManagerConfigForAvailable(settings, nil)
+}
+
+func inputSourceManagerConfigForCurrentMachine(settings InputSourceLockSettings, logger *zerolog.Logger) inputsource.Config {
+	sources, err := inputsource.List()
+	if err != nil {
+		if logger != nil {
+			logger.Warn().Err(err).Msg("failed to list input sources for lock settings")
+		}
+		return inputSourceManagerConfigForAvailable(settings, map[string]bool{})
+	}
+	return inputSourceManagerConfigForAvailable(settings, inputSourceIDSet(sources))
+}
+
+func inputSourceManagerConfigForAvailable(settings InputSourceLockSettings, availableSourceIDs map[string]bool) inputsource.Config {
 	settings = normalizeInputSourceLockSettings(settings)
+	defaultSourceID := settings.DefaultSourceID
+	if defaultSourceID != "" && availableSourceIDs != nil && !availableSourceIDs[defaultSourceID] {
+		defaultSourceID = ""
+	}
+
 	rules := make([]inputsource.AppRule, 0, len(settings.AppRules))
+	hasLockTarget := defaultSourceID != ""
 	for _, rule := range settings.AppRules {
 		if !rule.Enabled || rule.SourceID == "" {
+			continue
+		}
+		if availableSourceIDs != nil && !availableSourceIDs[rule.SourceID] {
+			rules = append(rules, inputsource.AppRule{
+				AppID: rule.AppID,
+				Mode:  inputsource.RuleIgnore,
+			})
 			continue
 		}
 		rules = append(rules, inputsource.AppRule{
@@ -140,12 +183,75 @@ func inputSourceManagerConfig(settings InputSourceLockSettings) inputsource.Conf
 			Mode:     inputsource.RuleLock,
 			SourceID: rule.SourceID,
 		})
+		hasLockTarget = true
+	}
+
+	enabled := settings.Enabled
+	if availableSourceIDs != nil {
+		enabled = enabled && hasLockTarget
 	}
 	return inputsource.Config{
-		Enabled:         settings.Enabled,
-		DefaultSourceID: settings.DefaultSourceID,
+		Enabled:         enabled,
+		DefaultSourceID: defaultSourceID,
 		AppRules:        rules,
 	}
+}
+
+func inputSourceIDSet(sources []inputsource.Source) map[string]bool {
+	ids := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		id := strings.TrimSpace(source.ID)
+		if id == "" {
+			continue
+		}
+		ids[id] = true
+	}
+	return ids
+}
+
+func inputSourceLockAvailability(settings InputSourceLockSettings, availableSourceIDs map[string]bool) InputSourceLockAvailability {
+	settings = normalizeInputSourceLockSettings(settings)
+	availability := InputSourceLockAvailability{
+		MissingSourceIDs: []string{},
+		MissingAppRules:  []InputSourceLockMissingRule{},
+	}
+	if !settings.Enabled {
+		return availability
+	}
+	if availableSourceIDs == nil {
+		availability.RuntimeEnabled = inputSourceManagerConfig(settings).Enabled
+		return availability
+	}
+
+	missingIDs := make(map[string]bool)
+	addMissingID := func(sourceID string) {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" || missingIDs[sourceID] {
+			return
+		}
+		missingIDs[sourceID] = true
+		availability.MissingSourceIDs = append(availability.MissingSourceIDs, sourceID)
+	}
+
+	if settings.DefaultSourceID != "" && !availableSourceIDs[settings.DefaultSourceID] {
+		availability.MissingDefaultSourceID = settings.DefaultSourceID
+		addMissingID(settings.DefaultSourceID)
+	}
+	for _, rule := range settings.AppRules {
+		if !rule.Enabled || rule.SourceID == "" || availableSourceIDs[rule.SourceID] {
+			continue
+		}
+		availability.MissingAppRules = append(availability.MissingAppRules, InputSourceLockMissingRule{
+			AppID:    rule.AppID,
+			AppName:  rule.AppName,
+			SourceID: rule.SourceID,
+		})
+		addMissingID(rule.SourceID)
+	}
+	sort.Strings(availability.MissingSourceIDs)
+	availability.HasMissingSources = len(availability.MissingSourceIDs) > 0
+	availability.RuntimeEnabled = inputSourceManagerConfigForAvailable(settings, availableSourceIDs).Enabled
+	return availability
 }
 
 func applyStoredInputSourceLockSettings(st *store.Store, service *InputSourceLockService, logger *zerolog.Logger) {

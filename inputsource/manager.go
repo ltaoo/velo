@@ -40,6 +40,9 @@ type Config struct {
 	// SuppressionWindow avoids re-selecting repeatedly while the OS is still
 	// settling a switch we requested. Zero uses DefaultSuppressionWindow.
 	SuppressionWindow time.Duration
+	// FailureRetryInterval controls when the same failed source switch or error
+	// may be retried/reported. Zero disables automatic retry until SetConfig.
+	FailureRetryInterval time.Duration
 }
 
 // ActivationReason explains why a Manager selected a source.
@@ -66,15 +69,24 @@ const (
 	DefaultSuppressionWindow = 300 * time.Millisecond
 )
 
+type selectFailure struct {
+	Active   bool
+	AppID    string
+	SourceID string
+	RetryAt  time.Time
+}
+
 // Manager keeps the active input source pinned to the rule matching the
 // foreground app.
 type Manager struct {
-	mu       sync.RWMutex
-	config   Config
-	cancel   context.CancelFunc
-	done     chan struct{}
-	running  bool
-	settleTo time.Time
+	mu                sync.RWMutex
+	config            Config
+	cancel            context.CancelFunc
+	done              chan struct{}
+	running           bool
+	settleTo          time.Time
+	lastSelectFailure selectFailure
+	reportedErrors    map[string]time.Time
 
 	// OnActivation is called after a successful forced switch.
 	OnActivation func(ActivationEvent)
@@ -93,6 +105,8 @@ func (m *Manager) SetConfig(config Config) {
 	m.mu.Lock()
 	m.config = normalizeConfig(config)
 	m.settleTo = time.Time{}
+	m.lastSelectFailure = selectFailure{}
+	m.reportedErrors = nil
 	m.mu.Unlock()
 }
 
@@ -194,15 +208,20 @@ func (m *Manager) enforce(reason ActivationReason, lastAppID *string, lastSource
 		return nil
 	}
 
+	now := time.Now()
 	m.mu.RLock()
-	settling := time.Now().Before(m.settleTo)
+	settling := now.Before(m.settleTo)
 	m.mu.RUnlock()
 	if settling {
+		return nil
+	}
+	if m.selectFailureActive(app.ID, target, now) {
 		return nil
 	}
 
 	start := time.Now()
 	if err := Select(target); err != nil {
+		m.rememberSelectFailure(app.ID, target, config.FailureRetryInterval, time.Now())
 		m.reportError(err)
 		return err
 	}
@@ -227,12 +246,56 @@ func (m *Manager) enforce(reason ActivationReason, lastAppID *string, lastSource
 }
 
 func (m *Manager) reportError(err error) {
-	m.mu.RLock()
+	if err == nil {
+		return
+	}
+	signature := err.Error()
+	now := time.Now()
+
+	m.mu.Lock()
 	onError := m.OnError
-	m.mu.RUnlock()
+	if m.reportedErrors == nil {
+		m.reportedErrors = make(map[string]time.Time)
+	}
+	if retryAt, ok := m.reportedErrors[signature]; ok && (retryAt.IsZero() || now.Before(retryAt)) {
+		m.mu.Unlock()
+		return
+	}
+	retryAt := time.Time{}
+	if m.config.FailureRetryInterval > 0 {
+		retryAt = now.Add(m.config.FailureRetryInterval)
+	}
+	m.reportedErrors[signature] = retryAt
+	m.mu.Unlock()
+
 	if onError != nil {
 		onError(err)
 	}
+}
+
+func (m *Manager) selectFailureActive(appID string, sourceID string, now time.Time) bool {
+	m.mu.RLock()
+	failure := m.lastSelectFailure
+	m.mu.RUnlock()
+	if !failure.Active || failure.AppID != appID || failure.SourceID != sourceID {
+		return false
+	}
+	return failure.RetryAt.IsZero() || now.Before(failure.RetryAt)
+}
+
+func (m *Manager) rememberSelectFailure(appID string, sourceID string, retryInterval time.Duration, now time.Time) {
+	retryAt := time.Time{}
+	if retryInterval > 0 {
+		retryAt = now.Add(retryInterval)
+	}
+	m.mu.Lock()
+	m.lastSelectFailure = selectFailure{
+		Active:   true,
+		AppID:    appID,
+		SourceID: sourceID,
+		RetryAt:  retryAt,
+	}
+	m.mu.Unlock()
 }
 
 func normalizeConfig(config Config) Config {
@@ -241,6 +304,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if config.SuppressionWindow <= 0 {
 		config.SuppressionWindow = DefaultSuppressionWindow
+	}
+	if config.FailureRetryInterval < 0 {
+		config.FailureRetryInterval = 0
 	}
 	config.AppRules = append([]AppRule(nil), config.AppRules...)
 	return config

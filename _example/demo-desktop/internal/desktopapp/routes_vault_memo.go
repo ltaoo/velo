@@ -215,6 +215,80 @@ func registerVaultProjectMemoRoutes(b *velo.Box) {
 		})
 	})
 
+	b.Get("/api/memo-comments", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		comments, err := listVaultMemoComments(ctx, c.Query("memoId"))
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"comments": comments})
+	})
+
+	b.Post("/api/memo-comments/create", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoCommentCreateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		comment, err := createVaultMemoComment(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"comment": comment})
+	})
+
+	b.Post("/api/memo-comments/update", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoCommentUpdateRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		comment, err := updateVaultMemoComment(ctx, req)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"comment": comment})
+	})
+
+	b.Post("/api/memo-comments/delete", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req MemoCommentDeleteRequest
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		cleanupAssets := true
+		if req.CleanupAssets != nil {
+			cleanupAssets = *req.CleanupAssets
+		}
+		result, err := deleteVaultMemoCommentWithOptions(ctx, req.ID, MemoDeleteOptions{
+			CleanupAssets:   cleanupAssets,
+			Parent:          c.Context(),
+			StorageSettings: b.Store.Get(cloudStorageSettingsKey),
+			StorePath:       b.Store.Path(),
+		})
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{
+			"assetErrors":   result.AssetErrors,
+			"assetsDeleted": result.AssetsDeleted,
+			"assetsSkipped": result.AssetsSkipped,
+			"success":       true,
+		})
+	})
+
 	b.Get("/api/memo-drafts", func(c *velo.BoxContext) interface{} {
 		ctx, err := requireActiveVault()
 		if err != nil {

@@ -206,12 +206,23 @@ func deleteVaultMemoWithOptions(ctx *VaultContext, id string, options MemoDelete
 	if err != nil {
 		return result, err
 	}
+	comments, err := listVaultMemoComments(ctx, memo.ID)
+	if err != nil {
+		return result, err
+	}
 
 	assetsToDelete := []memoAssetReference{}
 	if options.CleanupAssets {
 		assets := extractMemoAssetReferences(memo.Content)
+		for _, comment := range comments {
+			assets = append(assets, extractMemoAssetReferences(comment.Content)...)
+		}
 		if len(assets) > 0 {
-			shared, err := memoAssetReferencesInOtherMemos(ctx, memo.ID)
+			excludedComments := map[string]bool{}
+			for _, comment := range comments {
+				excludedComments[comment.ID] = true
+			}
+			shared, err := memoAssetReferencesOutside(ctx, map[string]bool{memo.ID: true}, excludedComments)
 			if err != nil {
 				return result, err
 			}
@@ -220,7 +231,7 @@ func deleteVaultMemoWithOptions(ctx *VaultContext, id string, options MemoDelete
 					result.AssetsSkipped++
 					continue
 				}
-				assetsToDelete = append(assetsToDelete, asset)
+				assetsToDelete = appendMemoAssetReference(assetsToDelete, asset)
 			}
 		}
 	}
@@ -235,6 +246,15 @@ func deleteVaultMemoWithOptions(ctx *VaultContext, id string, options MemoDelete
 
 	if err := os.Remove(path); err != nil {
 		return result, err
+	}
+	for _, comment := range comments {
+		commentPath, err := safeVaultRelativePath(ctx.RootDir, comment.Path)
+		if err != nil {
+			return result, err
+		}
+		if err := os.Remove(commentPath); err != nil && !os.IsNotExist(err) {
+			return result, err
+		}
 	}
 
 	if len(assetsToDelete) > 0 {

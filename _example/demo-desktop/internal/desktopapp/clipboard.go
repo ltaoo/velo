@@ -1,7 +1,6 @@
 package desktopapp
 
 import (
-	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
@@ -29,111 +28,72 @@ type ClipboardSnapshot struct {
 	CapturedAt    string `json:"capturedAt"`
 }
 
-var recentClipboard = struct {
-	sync.RWMutex
-	item *ClipboardSnapshot
-}{}
+var clipboardReadMu sync.Mutex
 
 func registerClipboardRoutes(b *velo.Box, logger *zerolog.Logger) {
 	b.Get("/api/clipboard/latest", func(c *velo.BoxContext) interface{} {
-		item := latestClipboardSnapshot()
-		if item == nil {
+		item, ok := readCurrentClipboardSnapshot(logger)
+		if !ok {
 			return c.Ok(velo.H{"found": false})
 		}
 		return c.Ok(velo.H{"found": true, "item": item})
 	})
 }
 
-func startClipboardWatcher(b *velo.Box, logger *zerolog.Logger) {
+func initClipboardReader(logger *zerolog.Logger) {
 	if err := clipboard.Init(); err != nil {
 		logger.Warn().Err(err).Msg("clipboard unavailable")
 		return
 	}
-
-	go func() {
-		ch := clipboard.Watch(context.Background())
-		for data := range ch {
-			if data.Error != nil {
-				logger.Debug().Err(data.Error).Str("type", data.Type).Msg("clipboard read failed")
-				continue
-			}
-			item, ok := normalizeClipboardContent(data)
-			if !ok {
-				continue
-			}
-			if storeClipboardSnapshot(item) {
-				b.SendMessage(velo.H{
-					"type": "clipboard_update",
-					"item": item,
-				})
-			}
-		}
-	}()
 }
 
-func latestClipboardSnapshot() *ClipboardSnapshot {
-	recentClipboard.RLock()
-	defer recentClipboard.RUnlock()
-	if recentClipboard.item == nil {
-		return nil
-	}
-	item := *recentClipboard.item
-	return &item
-}
+func readCurrentClipboardSnapshot(logger *zerolog.Logger) (ClipboardSnapshot, bool) {
+	clipboardReadMu.Lock()
+	defer clipboardReadMu.Unlock()
 
-func storeClipboardSnapshot(item ClipboardSnapshot) bool {
-	recentClipboard.Lock()
-	defer recentClipboard.Unlock()
-	if recentClipboard.item != nil && recentClipboard.item.ID == item.ID {
-		return false
-	}
-	recentClipboard.item = &item
-	return true
-}
-
-func normalizeClipboardContent(data clipboard.ClipboardContent) (ClipboardSnapshot, bool) {
-	rawType := strings.TrimSpace(data.Type)
-	capturedAt := time.Now().Format(time.RFC3339Nano)
-
-	switch rawType {
-	case "public.utf8-plain-text":
-		text, ok := data.Data.(string)
-		if !ok || strings.TrimSpace(text) == "" {
-			return ClipboardSnapshot{}, false
-		}
-		return textClipboardSnapshot(rawType, text, capturedAt), true
-	case "public.html":
-		text, _ := clipboard.ReadText()
-		if strings.TrimSpace(text) == "" {
-			text, _ = data.Data.(string)
-		}
-		if strings.TrimSpace(text) == "" {
-			return ClipboardSnapshot{}, false
-		}
-		return textClipboardSnapshot(rawType, text, capturedAt), true
-	case "public.png":
-		imageData, ok := data.Data.([]byte)
-		if !ok || len(imageData) == 0 {
-			return ClipboardSnapshot{}, false
-		}
-		encoded := base64.StdEncoding.EncodeToString(imageData)
-		name := "clipboard-" + time.Now().Format("20060102-150405") + ".png"
-		content := fmt.Sprintf("PNG image, %s", humanBytes(len(imageData)))
-		return ClipboardSnapshot{
-			ID:            clipboardSnapshotID("image", encoded),
-			Type:          "image",
-			RawType:       rawType,
-			Content:       content,
-			ContentBase64: encoded,
-			DataURL:       "data:image/png;base64," + encoded,
-			MimeType:      "image/png",
-			Name:          name,
-			Size:          len(imageData),
-			CapturedAt:    capturedAt,
-		}, true
-	default:
+	if err := clipboard.Init(); err != nil {
+		logger.Debug().Err(err).Msg("clipboard unavailable")
 		return ClipboardSnapshot{}, false
 	}
+
+	capturedAt := time.Now().Format(time.RFC3339Nano)
+	for _, rawType := range clipboard.GetContentTypes(clipboard.ContentTypeParams{IsEnabled: false}) {
+		switch rawType {
+		case "public.html":
+			if item, ok := readClipboardText(rawType, capturedAt, true); ok {
+				return item, true
+			}
+		case "public.utf8-plain-text":
+			if item, ok := readClipboardText(rawType, capturedAt, false); ok {
+				return item, true
+			}
+		case "public.png":
+			if item, ok := readClipboardImage(rawType, capturedAt); ok {
+				return item, true
+			}
+		}
+	}
+
+	return ClipboardSnapshot{}, false
+}
+
+func readClipboardText(rawType string, capturedAt string, allowHTMLFallback bool) (ClipboardSnapshot, bool) {
+	text, _ := clipboard.ReadText()
+	if strings.TrimSpace(text) == "" && allowHTMLFallback {
+		text, _ = clipboard.ReadHTML()
+	}
+	if strings.TrimSpace(text) == "" {
+		return ClipboardSnapshot{}, false
+	}
+	return textClipboardSnapshot(rawType, text, capturedAt), true
+}
+
+func readClipboardImage(rawType string, capturedAt string) (ClipboardSnapshot, bool) {
+	imageData, err := clipboard.ReadImage()
+	if err != nil || len(imageData) == 0 {
+		return ClipboardSnapshot{}, false
+	}
+	return imageClipboardSnapshot(rawType, imageData, capturedAt), true
 }
 
 func textClipboardSnapshot(rawType string, text string, capturedAt string) ClipboardSnapshot {
@@ -148,6 +108,24 @@ func textClipboardSnapshot(rawType string, text string, capturedAt string) Clipb
 		RawType:    rawType,
 		Content:    content,
 		CapturedAt: capturedAt,
+	}
+}
+
+func imageClipboardSnapshot(rawType string, imageData []byte, capturedAt string) ClipboardSnapshot {
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	name := "clipboard-" + time.Now().Format("20060102-150405") + ".png"
+	content := fmt.Sprintf("PNG image, %s", humanBytes(len(imageData)))
+	return ClipboardSnapshot{
+		ID:            clipboardSnapshotID("image", encoded),
+		Type:          "image",
+		RawType:       rawType,
+		Content:       content,
+		ContentBase64: encoded,
+		DataURL:       "data:image/png;base64," + encoded,
+		MimeType:      "image/png",
+		Name:          name,
+		Size:          len(imageData),
+		CapturedAt:    capturedAt,
 	}
 }
 

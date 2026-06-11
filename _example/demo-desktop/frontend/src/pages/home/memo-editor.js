@@ -20,16 +20,123 @@ let cloudStorageSettingsCache = null;
 function defaultEditorSettings() {
   return {
     calendarWeekStart: "monday",
+    fileEditor: defaultFileEditor(),
+    fileEditorRules: defaultFileEditorRules(),
     vimMode: false,
   };
 }
 
 function normalizeEditorSettings(value) {
   const raw = value && typeof value === "object" ? value : {};
+  const rules = Array.isArray(raw.fileEditorRules) ? normalizeFileEditorRules(raw.fileEditorRules) : defaultFileEditorRules();
   return {
     calendarWeekStart: raw.calendarWeekStart === "sunday" ? "sunday" : "monday",
+    fileEditor: normalizeFileEditor(raw.fileEditor),
+    fileEditorRules: rules,
     vimMode: raw.vimMode === true,
   };
+}
+
+function defaultFileEditor() {
+  return {
+    id: "code",
+    name: "VS Code",
+    path: "",
+  };
+}
+
+function noneFileEditor() {
+  return {
+    id: "none",
+    name: "不打开",
+    path: "",
+  };
+}
+
+function defaultFileEditorRules() {
+  const code = defaultFileEditor();
+  const none = noneFileEditor();
+  return [
+    { extension: ".js", editor: code },
+    { extension: ".ts", editor: code },
+    { extension: ".tsx", editor: code },
+    { extension: ".jsx", editor: code },
+    { extension: ".mp4", editor: none },
+    { extension: ".mp3", editor: none },
+  ];
+}
+
+function normalizeFileEditor(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const defaults = defaultFileEditor();
+  const path = String(raw.path || "").trim();
+  let id = String(raw.id || "").trim();
+  if (!id && path) id = "app:" + path;
+  if (!id && !path && !String(raw.name || "").trim()) return defaults;
+  const name = String(raw.name || "").trim() || fileEditorNameFromPath(path) || editorNameFromID(id) || defaults.name;
+  return {
+    id: id || defaults.id,
+    name,
+    path,
+  };
+}
+
+function normalizeFileEditorRules(value) {
+  const seen = new Set();
+  const rules = Array.isArray(value) ? value : [];
+  return rules
+    .map((rule) => {
+      const extension = normalizeFileExtension(rule && rule.extension);
+      if (!extension || seen.has(extension)) return null;
+      seen.add(extension);
+      return {
+        extension,
+        editor: normalizeFileEditor(rule && rule.editor),
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeFileExtension(value) {
+  const text = String(value || "").trim().toLowerCase().replace(/^\.+/, "");
+  if (!text || !/^[a-z0-9_-]+$/.test(text)) return "";
+  return "." + text;
+}
+
+function editorNameFromID(id) {
+  switch (String(id || "").trim()) {
+    case "code":
+      return "VS Code";
+    case "code-insiders":
+      return "VS Code Insiders";
+    case "cursor":
+      return "Cursor";
+    case "trae":
+      return "Trae";
+    case "webstorm":
+      return "WebStorm";
+    case "idea":
+      return "IntelliJ IDEA";
+    case "nvim":
+      return "Neovim";
+    case "vim":
+      return "Vim";
+    case "emacs":
+      return "Emacs";
+    case "none":
+      return "不打开";
+    case "system":
+      return "系统默认应用";
+    default:
+      return "";
+  }
+}
+
+function fileEditorNameFromPath(path) {
+  const value = String(path || "").trim();
+  if (!value) return "";
+  const parts = value.split(/[\\/]/);
+  return (parts[parts.length - 1] || value).replace(/\.app$/i, "");
 }
 
 function loadEditorSettings() {
@@ -382,6 +489,7 @@ function installMemoEditorPlugins(editor, options) {
   }
 
   const plugins = [
+    createMemoClipboardPlugin(editor),
     createMemoReferencePlugin(editor, options || {}),
     createMemoSlashCommandPlugin(editor, options || {}),
     createMemoTagPickerPlugin(editor, options || {}),
@@ -395,6 +503,29 @@ function installMemoEditorPlugins(editor, options) {
   );
 
   return function () {};
+}
+
+function createMemoClipboardPlugin(editor) {
+  const PM = window.ProsemirrorMod;
+  const key = new PM.PluginKey(editor.id + "-memoClipboard");
+
+  return new PM.Plugin({
+    key,
+    props: {
+      handleDOMEvents: {
+        copy(view, event) {
+          if (!event.clipboardData) return false;
+          const selection = view.state.selection;
+          if (!selection || selection.empty) return false;
+
+          const text = view.state.doc.textBetween(selection.from, selection.to, "\n");
+          event.preventDefault();
+          event.clipboardData.setData("text/plain", text);
+          return true;
+        },
+      },
+    },
+  });
 }
 
 function createMemoTimeSyntaxHighlightPlugin(editor) {
@@ -1944,6 +2075,8 @@ export {
   insertPlainTextIntoEditor,
   loadEditorSettingsFromVault,
   loadEditorSettings,
+  normalizeFileEditor,
+  normalizeFileEditorRules,
   normalizeEditorSettings,
   refreshCloudStorageSettings,
   resolveAssetUrl,

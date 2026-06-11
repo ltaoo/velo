@@ -123,7 +123,8 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			return c.Error(err.Error())
 		}
 
-		if err := openFileInEditor(resolvedFile, line, col, c.Query("app")); err != nil {
+		editorSelection := editorSelectionForOpen(resolvedFile, c.Query("app"), c.Query("appName"), c.Query("appPath"), b.Store.Get(editorSettingsKey))
+		if err := openFileInEditor(resolvedFile, line, col, editorSelection); err != nil {
 			logger.Error().Err(err).Str("file", resolvedFile).Msg("failed to open file in editor")
 			return c.Error(fmt.Sprintf("Failed to open editor: %v", err))
 		}
@@ -133,6 +134,15 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			"file":    resolvedFile,
 			"line":    line,
 			"col":     col,
+			"editor":  normalizeEditorAppSelection(editorSelection),
+		})
+	})
+
+	b.Get("/api/editor/apps", func(c *velo.BoxContext) interface{} {
+		settings, _ := loadStoredEditorSettings(b.Store.Get(editorSettingsKey))
+		return c.Ok(velo.H{
+			"apps":     listEditorApplications(c.Query("q")),
+			"selected": normalizeEditorAppSelection(settings.FileEditor),
 		})
 	})
 
