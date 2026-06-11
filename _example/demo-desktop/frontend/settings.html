@@ -584,6 +584,11 @@
       padding: 14px;
     }
 
+    .settings-shortcut-card.is-vertical {
+      align-items: stretch;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
     .settings-shortcut-title {
       font-weight: 700;
       line-height: 1.3;
@@ -620,6 +625,150 @@
       gap: 8px;
     }
 
+    .settings-editor-picker {
+      display: grid;
+      gap: 8px;
+      min-width: min(380px, 100%);
+    }
+
+    .settings-editor-current {
+      align-items: center;
+      background: var(--BG-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: grid;
+      gap: 3px;
+      min-height: 42px;
+      padding: 7px 10px;
+    }
+
+    .settings-editor-current-name {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-editor-current-path {
+      color: var(--FG-1);
+      font-size: var(--font-sm);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-editor-search {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .settings-editor-list {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: grid;
+      max-height: 220px;
+      min-height: 42px;
+      overflow: auto;
+    }
+
+    .settings-editor-item {
+      align-items: center;
+      background: var(--BG-0);
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--FG-0);
+      display: grid;
+      gap: 4px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      min-height: 46px;
+      padding: 8px 10px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .settings-editor-item:last-child {
+      border-bottom: 0;
+    }
+
+    .settings-editor-item:hover,
+    .settings-editor-item.is-selected {
+      background: var(--accent-soft);
+    }
+
+    .settings-editor-item-main {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .settings-editor-item-name {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-editor-item-meta {
+      color: var(--FG-1);
+      font-size: var(--font-sm);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-editor-item-badge {
+      background: var(--BG-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--FG-1);
+      font-size: var(--font-sm);
+      padding: 2px 7px;
+      white-space: nowrap;
+    }
+
+    .settings-editor-rules {
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+      padding-top: 10px;
+    }
+
+    .settings-editor-rules-title {
+      color: var(--FG-1);
+      font-size: var(--font-sm);
+      font-weight: 700;
+    }
+
+    .settings-editor-rule-add {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(88px, 130px) minmax(0, 1fr) auto;
+    }
+
+    .settings-editor-rule-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .settings-editor-rule {
+      align-items: center;
+      background: var(--BG-0);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(74px, 110px) minmax(0, 1fr) auto;
+      padding: 8px;
+    }
+
+    .settings-editor-rule-extension {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-weight: 700;
+    }
+
     .settings-inputsource-list {
       display: grid;
       gap: 8px;
@@ -636,6 +785,10 @@
       padding: 10px;
     }
 
+    .settings-inputsource-rule.is-warning {
+      border-color: var(--danger);
+    }
+
     .settings-inputsource-rule-main {
       display: grid;
       gap: 3px;
@@ -644,6 +797,14 @@
 
     .settings-inputsource-rule-title {
       font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-inputsource-rule-warning {
+      color: var(--danger);
+      font-size: var(--font-sm);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -735,7 +896,10 @@
       }
 
       .settings-inputsource-rule,
-      .settings-inputsource-add {
+      .settings-inputsource-add,
+      .settings-editor-search,
+      .settings-editor-rule-add,
+      .settings-editor-rule {
         grid-template-columns: minmax(0, 1fr);
       }
     }
@@ -834,6 +998,35 @@
               <input type="checkbox" data-editor-vim-enabled />
               <span>启用</span>
             </label>
+          </div>
+          <div class="settings-shortcut-card is-vertical">
+            <div>
+              <div class="settings-shortcut-title">本地文件打开应用</div>
+              <div class="settings-shortcut-description">控制 memo 本地文件链接 hover 时的打开按钮和点击后使用的应用。</div>
+            </div>
+            <div class="settings-editor-picker">
+              <div class="settings-editor-current" data-editor-app-current></div>
+              <div class="settings-editor-search">
+                <input class="settings-input" data-editor-app-search placeholder="搜索本机应用或编辑器" />
+                <button class="settings-button is-secondary" type="button" data-action="editor-app-refresh">刷新</button>
+              </div>
+              <div class="settings-editor-list" data-editor-app-list></div>
+              <div class="settings-editor-rules">
+                <div class="settings-editor-rules-title">按后缀打开</div>
+                <div class="settings-editor-rule-add">
+                  <label class="settings-field">
+                    <span class="settings-label-row">后缀</span>
+                    <input class="settings-input" data-editor-rule-extension placeholder=".mp4" />
+                  </label>
+                  <label class="settings-field">
+                    <span class="settings-label-row">打开应用</span>
+                    <select class="settings-select" data-editor-rule-app></select>
+                  </label>
+                  <button class="settings-button is-primary" type="button" data-action="editor-rule-add">添加</button>
+                </div>
+                <div class="settings-editor-rule-list" data-editor-rule-list></div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1000,6 +1193,7 @@
       var INPUT_SOURCE_LOCK_KEY = "demo-desktop:settings:input-source-lock:v1";
       var EDITOR_SETTINGS_API = "/api/settings/editor";
       var EDITOR_SETTINGS_SAVE_API = "/api/settings/editor/save";
+      var EDITOR_APPS_API = "/api/editor/apps";
       var INPUT_SOURCE_LOCK_API = "/api/settings/input-source-lock";
       var INPUT_SOURCE_LOCK_SAVE_API = "/api/settings/input-source-lock/save";
       var STORAGE_API = "/api/settings/cloud-storage";
@@ -1020,6 +1214,12 @@
       var shortcutEnabled = document.querySelector('[data-shortcut-enabled="openMemoSearch"]');
       var shortcutMessage = document.querySelector("[data-shortcut-message]");
       var editorVimEnabled = document.querySelector("[data-editor-vim-enabled]");
+      var editorAppCurrent = document.querySelector("[data-editor-app-current]");
+      var editorAppSearch = document.querySelector("[data-editor-app-search]");
+      var editorAppList = document.querySelector("[data-editor-app-list]");
+      var editorRuleExtension = document.querySelector("[data-editor-rule-extension]");
+      var editorRuleApp = document.querySelector("[data-editor-rule-app]");
+      var editorRuleList = document.querySelector("[data-editor-rule-list]");
       var calendarWeekStartInputs = Array.prototype.slice.call(document.querySelectorAll("[data-calendar-week-start]"));
       var calendarMessage = document.querySelector("[data-calendar-message]");
       var inputSourceEnabled = document.querySelector("[data-inputsource-enabled]");
@@ -1051,11 +1251,16 @@
       };
       var state = normalizeSettings(null);
       var editorSettings = loadEditorSettings();
+      var editorApps = [];
+      var editorAppsLoaded = false;
+      var editorAppsLoading = false;
+      var editorAppSearchTimer = null;
       var shortcuts = loadShortcutSettings();
       var inputSourceLock = loadInputSourceLockSettings();
       var inputSourceStatus = defaultInputSourceStatus();
       var inputSourceStatusLoaded = false;
       var INPUT_SOURCE_UNSUPPORTED_MESSAGE = "当前平台不支持输入法锁定，或无法读取系统输入源。";
+      var INPUT_SOURCE_MISSING_PREFIX = "当前设备缺少已保存的输入法";
 
       render();
       loadAppInfo();
@@ -1063,6 +1268,7 @@
       loadEditorConfig().then(function (settings) {
         editorSettings = normalizeEditorSettings(settings);
         renderEditorSettings();
+        if (activePanel === "shortcuts") ensureEditorAppsLoaded();
       }, function (err) {
         setShortcutMessage("读取编辑器设置失败: " + errorMessage(err), "warning");
       });
@@ -1126,10 +1332,40 @@
           saveShortcutSettings(shortcuts);
           renderShortcuts();
           setShortcutMessage("已恢复默认快捷键", "ready");
+          return;
+        }
+        if (action.dataset.action === "editor-app-refresh") {
+          loadEditorApps(editorAppSearch ? editorAppSearch.value : "", { force: true });
+          return;
+        }
+        if (action.dataset.action === "select-editor-app") {
+          selectEditorApp(action.dataset.editorAppId || "");
+          return;
+        }
+        if (action.dataset.action === "editor-rule-add") {
+          addEditorFileRule();
+          return;
+        }
+        if (action.dataset.action === "editor-rule-remove") {
+          removeEditorFileRule(action.dataset.extension || "");
         }
       });
 
+      shortcutsPanel.addEventListener("input", function (event) {
+        if (!event.target.matches("[data-editor-app-search]")) return;
+        if (editorAppSearchTimer) window.clearTimeout(editorAppSearchTimer);
+        editorAppSearchTimer = window.setTimeout(function () {
+          editorAppSearchTimer = null;
+          loadEditorApps(event.target.value || "", { force: true });
+        }, 180);
+      });
+
       shortcutsPanel.addEventListener("change", function (event) {
+        if (event.target.matches("[data-editor-rule-app-select]")) {
+          updateEditorFileRule(event.target.dataset.extension || "", event.target.value || "");
+          return;
+        }
+
         if (event.target.matches("[data-editor-vim-enabled]")) {
           var previousEditorSettings = editorSettings;
           editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
@@ -1254,6 +1490,7 @@
         loadEditorConfig().then(function (settings) {
           editorSettings = normalizeEditorSettings(settings);
           renderEditorSettings();
+          if (activePanel === "shortcuts") ensureEditorAppsLoaded();
         }, function (_) { });
         shortcuts = loadShortcutSettings();
         render();
@@ -1481,6 +1718,7 @@
       function setActivePanel(panelName) {
         activePanel = panelName === "about" || panelName === "shortcuts" || panelName === "input-source" || panelName === "calendar" ? panelName : "cloud-storage";
         render();
+        if (activePanel === "shortcuts") ensureEditorAppsLoaded();
         replacePanelQuery();
       }
 
@@ -1496,7 +1734,7 @@
           panel.hidden = panel.dataset.settingsPanel !== activePanel;
         });
         headerTitle.textContent = isAbout ? "关于" : isShortcuts ? "键盘" : isInputSource ? "输入法" : isCalendar ? "日历" : "云存储";
-        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "编辑器模式与快速入口" : isInputSource ? "按前台应用锁定键盘输入法" : isCalendar ? "周起始日与日历偏好" : "S3/OSS 兼容对象存储配置";
+        headerSubtitle.textContent = isAbout ? "版本信息与应用更新" : isShortcuts ? "编辑器模式、文件打开应用与快速入口" : isInputSource ? "按前台应用锁定键盘输入法" : isCalendar ? "周起始日与日历偏好" : "S3/OSS 兼容对象存储配置";
         status.hidden = isAbout || isShortcuts || isInputSource || isCalendar;
       }
 
@@ -1584,6 +1822,259 @@
         calendarWeekStartInputs.forEach(function (input) {
           input.checked = input.value === editorSettings.calendarWeekStart;
         });
+        renderEditorAppPicker();
+      }
+
+      function renderEditorAppPicker() {
+        if (!editorAppCurrent || !editorAppList) return;
+        var selected = normalizeFileEditor(editorSettings.fileEditor);
+        editorAppCurrent.innerHTML = [
+          '<div class="settings-editor-current-name">' + escapeHTML(fileEditorLabel(selected)) + '</div>',
+          '<div class="settings-editor-current-path">' + escapeHTML(selected.path || selected.id || "默认") + '</div>',
+        ].join("");
+
+        if (editorAppsLoading) {
+          editorAppList.innerHTML = '<div class="settings-editor-item"><span class="settings-editor-item-main"><span class="settings-editor-item-name">正在读取本机应用...</span><span class="settings-editor-item-meta">请稍候</span></span></div>';
+          renderEditorFileRules();
+          return;
+        }
+        if (!editorApps.length) {
+          editorAppList.innerHTML = '<div class="settings-editor-item"><span class="settings-editor-item-main"><span class="settings-editor-item-name">暂无候选应用</span><span class="settings-editor-item-meta">可尝试搜索应用名称或点击刷新</span></span></div>';
+          renderEditorFileRules();
+          return;
+        }
+
+        editorAppList.innerHTML = editorApps.map(function (app) {
+          var isSelected = editorAppKey(app) === editorAppKey(selected);
+          return [
+            '<button class="settings-editor-item ' + (isSelected ? "is-selected" : "") + '" type="button" data-action="select-editor-app" data-editor-app-id="' + escapeAttr(app.id) + '">',
+            '<span class="settings-editor-item-main">',
+            '<span class="settings-editor-item-name">' + escapeHTML(fileEditorLabel(app)) + '</span>',
+            '<span class="settings-editor-item-meta">' + escapeHTML(app.path || app.id) + '</span>',
+            '</span>',
+            '<span class="settings-editor-item-badge">' + escapeHTML(app.supportsLine ? "支持行号" : (app.kind === "editor" ? "编辑器" : "App")) + '</span>',
+            '</button>',
+          ].join("");
+        }).join("");
+        renderEditorFileRules();
+      }
+
+      function renderEditorFileRules() {
+        if (editorRuleApp) {
+          editorRuleApp.innerHTML = editorAppOptions((editorRuleApp.value || "").trim());
+        }
+        if (!editorRuleList) return;
+        var rules = normalizeFileEditorRules(editorSettings.fileEditorRules);
+        if (!rules.length) {
+          editorRuleList.innerHTML = '<div class="settings-editor-rule"><span class="settings-editor-item-main"><span class="settings-editor-item-name">暂无后缀规则</span><span class="settings-editor-item-meta">例如添加 .mp4 并选择系统默认应用。</span></span></div>';
+          return;
+        }
+        editorRuleList.innerHTML = rules.map(function (rule) {
+          return [
+            '<div class="settings-editor-rule">',
+            '<span class="settings-editor-rule-extension">' + escapeHTML(rule.extension) + '</span>',
+            '<select class="settings-select" data-editor-rule-app-select data-extension="' + escapeAttr(rule.extension) + '">',
+            editorAppOptions(editorAppKey(rule.editor)),
+            '</select>',
+            '<button class="settings-button is-secondary" type="button" data-action="editor-rule-remove" data-extension="' + escapeAttr(rule.extension) + '">移除</button>',
+            '</div>',
+          ].join("");
+        }).join("");
+      }
+
+      function editorAppOptions(selectedKey) {
+        var selected = String(selectedKey || "");
+        var apps = editorAppCandidates();
+        return apps.map(function (app) {
+          var key = editorAppKey(app);
+          return '<option value="' + escapeAttr(key) + '"' + (key === selected ? " selected" : "") + '>' + escapeHTML(fileEditorLabel(app)) + '</option>';
+        }).join("");
+      }
+
+      function editorAppCandidates() {
+        var all = [];
+        defaultEditorApps().forEach(function (app) { all.push(app); });
+        editorApps.forEach(function (app) { all.push(app); });
+        all.push(normalizeEditorApp(editorSettings.fileEditor));
+        normalizeFileEditorRules(editorSettings.fileEditorRules).forEach(function (rule) {
+          all.push(normalizeEditorApp(rule.editor));
+        });
+        var seen = Object.create(null);
+        return all.filter(function (app) {
+          app = normalizeEditorApp(app);
+          var key = editorAppKey(app);
+          if (!key || seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+      }
+
+      function ensureEditorAppsLoaded() {
+        if (editorAppsLoaded || editorAppsLoading) return;
+        loadEditorApps(editorAppSearch ? editorAppSearch.value : "");
+      }
+
+      function loadEditorApps(query, options) {
+        options = options || {};
+        if (!canUseNativeStorage()) {
+          editorApps = defaultEditorApps();
+          editorAppsLoaded = true;
+          editorAppsLoading = false;
+          renderEditorAppPicker();
+          return Promise.resolve(editorApps);
+        }
+        editorAppsLoading = true;
+        renderEditorAppPicker();
+        return callStorage(EDITOR_APPS_API + "?q=" + encodeURIComponent(String(query || "").trim()), "GET").then(function (data) {
+          editorApps = Array.isArray(data && data.apps) ? data.apps.map(normalizeEditorApp).filter(function (app) { return app.id; }) : [];
+          editorAppsLoaded = true;
+          editorAppsLoading = false;
+          renderEditorAppPicker();
+          if (options.force) setShortcutMessage(editorApps.length ? "已刷新本机应用列表" : "未找到匹配应用", editorApps.length ? "ready" : "warning");
+          return editorApps;
+        }, function (err) {
+          editorAppsLoading = false;
+          renderEditorAppPicker();
+          setShortcutMessage("读取本机应用失败: " + errorMessage(err), "warning");
+          return [];
+        });
+      }
+
+      function selectEditorApp(appId) {
+        var id = String(appId || "").trim();
+        var app = editorApps.find(function (item) {
+          return item.id === id;
+        });
+        if (!app) return;
+        var previousEditorSettings = editorSettings;
+        editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
+          fileEditor: app,
+        }));
+        renderEditorSettings();
+        setShortcutMessage("正在保存本地文件打开应用...", "");
+        saveEditorSettings(editorSettings).then(function (saved) {
+          editorSettings = normalizeEditorSettings(saved || editorSettings);
+          renderEditorSettings();
+          setShortcutMessage("已设为在 " + fileEditorLabel(editorSettings.fileEditor) + " 中打开", "ready");
+        }, function (err) {
+          editorSettings = previousEditorSettings;
+          renderEditorSettings();
+          setShortcutMessage("保存打开应用失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function addEditorFileRule() {
+        var extension = normalizeFileExtension(editorRuleExtension && editorRuleExtension.value);
+        if (!extension) {
+          setShortcutMessage("请填写有效后缀，例如 .mp4", "warning");
+          return;
+        }
+        var editor = editorAppByKey(editorRuleApp && editorRuleApp.value);
+        if (!editor) {
+          setShortcutMessage("请选择打开应用", "warning");
+          return;
+        }
+        var previousEditorSettings = editorSettings;
+        var rules = normalizeFileEditorRules(editorSettings.fileEditorRules).filter(function (rule) {
+          return rule.extension !== extension;
+        });
+        rules.push({ extension: extension, editor: editor });
+        editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
+          fileEditorRules: rules,
+        }));
+        if (editorRuleExtension) editorRuleExtension.value = "";
+        renderEditorSettings();
+        setShortcutMessage("正在保存后缀规则...", "");
+        saveEditorSettings(editorSettings).then(function (saved) {
+          editorSettings = normalizeEditorSettings(saved || editorSettings);
+          renderEditorSettings();
+          setShortcutMessage("已保存 " + extension + " 打开规则", "ready");
+        }, function (err) {
+          editorSettings = previousEditorSettings;
+          renderEditorSettings();
+          setShortcutMessage("保存后缀规则失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function updateEditorFileRule(extension, appKey) {
+        var normalizedExtension = normalizeFileExtension(extension);
+        var editor = editorAppByKey(appKey);
+        if (!normalizedExtension || !editor) return;
+        var previousEditorSettings = editorSettings;
+        var rules = normalizeFileEditorRules(editorSettings.fileEditorRules).map(function (rule) {
+          if (rule.extension !== normalizedExtension) return rule;
+          return { extension: normalizedExtension, editor: editor };
+        });
+        editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
+          fileEditorRules: rules,
+        }));
+        renderEditorSettings();
+        setShortcutMessage("正在保存后缀规则...", "");
+        saveEditorSettings(editorSettings).then(function (saved) {
+          editorSettings = normalizeEditorSettings(saved || editorSettings);
+          renderEditorSettings();
+          setShortcutMessage("已更新 " + normalizedExtension + " 打开规则", "ready");
+        }, function (err) {
+          editorSettings = previousEditorSettings;
+          renderEditorSettings();
+          setShortcutMessage("保存后缀规则失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function removeEditorFileRule(extension) {
+        var normalizedExtension = normalizeFileExtension(extension);
+        if (!normalizedExtension) return;
+        var previousEditorSettings = editorSettings;
+        editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
+          fileEditorRules: normalizeFileEditorRules(editorSettings.fileEditorRules).filter(function (rule) {
+            return rule.extension !== normalizedExtension;
+          }),
+        }));
+        renderEditorSettings();
+        setShortcutMessage("正在移除后缀规则...", "");
+        saveEditorSettings(editorSettings).then(function (saved) {
+          editorSettings = normalizeEditorSettings(saved || editorSettings);
+          renderEditorSettings();
+          setShortcutMessage("已移除 " + normalizedExtension + " 打开规则", "ready");
+        }, function (err) {
+          editorSettings = previousEditorSettings;
+          renderEditorSettings();
+          setShortcutMessage("移除后缀规则失败: " + errorMessage(err), "warning");
+        });
+      }
+
+      function editorAppByKey(key) {
+        var selected = String(key || "");
+        var apps = editorAppCandidates();
+        return apps.find(function (app) {
+          return editorAppKey(app) === selected;
+        }) || null;
+      }
+
+      function defaultEditorApps() {
+        return [normalizeEditorApp(defaultFileEditor()), normalizeEditorApp(noneFileEditor()), normalizeEditorApp(systemFileEditor())];
+      }
+
+      function normalizeEditorApp(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var app = normalizeFileEditor(raw);
+        return {
+          id: app.id,
+          name: app.name,
+          path: app.path,
+          kind: String(raw.kind || (raw.supportsLine ? "editor" : "app")),
+          available: raw.available !== false,
+          supportsLine: raw.supportsLine === true,
+        };
+      }
+
+      function editorAppKey(value) {
+        var app = normalizeFileEditor(value);
+        return [app.id || "", app.path || ""].join("\n");
+      }
+
+      function fileEditorLabel(value) {
+        return normalizeFileEditor(value).name || "编辑器";
       }
 
       function renderInputSourceLock() {
@@ -1610,7 +2101,9 @@
         renderInputSourceRuleList();
         if (inputSourceStatusLoaded && !inputSourceStatus.supported) {
           setInputSourceMessage(INPUT_SOURCE_UNSUPPORTED_MESSAGE, "warning");
-        } else if (inputSourceStatus.supported && inputSourceMessage && inputSourceMessage.textContent === INPUT_SOURCE_UNSUPPORTED_MESSAGE) {
+        } else if (inputSourceStatusLoaded && inputSourceMissingMessage()) {
+          setInputSourceMessage(inputSourceMissingMessage(), "warning");
+        } else if (inputSourceStatus.supported && inputSourceMessage && isManagedInputSourceMessage(inputSourceMessage.textContent)) {
           setInputSourceMessage("", "");
         }
       }
@@ -1624,11 +2117,13 @@
         }
         inputSourceRuleList.innerHTML = rules.map(function (rule) {
           var appLabel = rule.appName || rule.appId;
+          var missingRule = missingInputSourceRuleForApp(rule.appId);
           return [
-            '<div class="settings-inputsource-rule">',
+            '<div class="settings-inputsource-rule' + (missingRule ? ' is-warning' : '') + '">',
             '<div class="settings-inputsource-rule-main">',
             '<div class="settings-inputsource-rule-title">' + escapeHTML(appLabel) + '</div>',
             '<div class="settings-inputsource-rule-meta">' + escapeHTML(rule.appId) + '</div>',
+            missingRule ? '<div class="settings-inputsource-rule-warning">本机缺少 ' + escapeHTML(missingRule.sourceId) + '，已跳过锁定</div>' : '',
             '</div>',
             '<select class="settings-select" data-inputsource-rule-source data-app-id="' + escapeAttr(rule.appId) + '">',
             inputSourceOptions(rule.sourceId, false),
@@ -1665,6 +2160,77 @@
         if (source.language) label += " · " + source.language;
         if (source.id && source.id !== source.name) label += " · " + source.id;
         return label;
+      }
+
+      function inputSourceExists(sourceId) {
+        var id = String(sourceId || "").trim();
+        if (!id) return false;
+        return inputSourceStatus.sources.some(function (source) {
+          return source.id === id;
+        });
+      }
+
+      function missingInputSourceIDs() {
+        if (!inputSourceLock.enabled || !inputSourceStatus.supported) return [];
+        var explicit = uniqueStrings(inputSourceStatus.missingSourceIds || []);
+        if (explicit.length) return explicit;
+        var missing = [];
+        if (inputSourceLock.defaultSourceId && !inputSourceExists(inputSourceLock.defaultSourceId)) {
+          missing.push(inputSourceLock.defaultSourceId);
+        }
+        (inputSourceLock.appRules || []).forEach(function (rule) {
+          if (rule.enabled && rule.sourceId && !inputSourceExists(rule.sourceId)) {
+            missing.push(rule.sourceId);
+          }
+        });
+        return uniqueStrings(missing);
+      }
+
+      function missingDefaultInputSourceID() {
+        if (!inputSourceLock.enabled || !inputSourceStatus.supported) return "";
+        if (inputSourceStatus.missingDefaultSourceId) return inputSourceStatus.missingDefaultSourceId;
+        return inputSourceLock.defaultSourceId && !inputSourceExists(inputSourceLock.defaultSourceId) ? inputSourceLock.defaultSourceId : "";
+      }
+
+      function missingInputSourceRuleForApp(appId) {
+        if (!inputSourceLock.enabled || !inputSourceStatus.supported) return null;
+        var id = String(appId || "").trim();
+        if (!id) return null;
+        var explicit = (inputSourceStatus.missingAppRules || []).find(function (rule) {
+          return rule.appId === id;
+        });
+        if (explicit) return explicit;
+        var rule = (inputSourceLock.appRules || []).find(function (item) {
+          return item.appId === id;
+        });
+        if (!rule || !rule.enabled || !rule.sourceId || inputSourceExists(rule.sourceId)) return null;
+        return {
+          appId: rule.appId,
+          appName: rule.appName,
+          sourceId: rule.sourceId,
+        };
+      }
+
+      function inputSourceMissingMessage() {
+        var missingIDs = missingInputSourceIDs();
+        if (!missingIDs.length) return "";
+        var details = [];
+        var missingDefault = missingDefaultInputSourceID();
+        if (missingDefault) details.push("全局默认 " + missingDefault);
+        var missingRules = (inputSourceLock.appRules || []).map(function (rule) {
+          return missingInputSourceRuleForApp(rule.appId);
+        }).filter(Boolean);
+        if (missingRules.length) {
+          details.push("应用规则 " + missingRules.slice(0, 3).map(function (rule) {
+            return (rule.appName || rule.appId) + " -> " + rule.sourceId;
+          }).join("；"));
+        }
+        var suffix = details.length ? "（" + details.join("；") + "）" : "：" + missingIDs.join("、");
+        return INPUT_SOURCE_MISSING_PREFIX + suffix + "。缺失项已在本机跳过，不会锁定。";
+      }
+
+      function isManagedInputSourceMessage(text) {
+        return text === INPUT_SOURCE_UNSUPPORTED_MESSAGE || String(text || "").indexOf(INPUT_SOURCE_MISSING_PREFIX) === 0;
       }
 
       function loadInputSourceLockSettings() {
@@ -1845,6 +2411,7 @@
       function defaultInputSourceStatus() {
         return {
           enabled: false,
+          runtimeEnabled: false,
           supported: false,
           sources: [],
           current: null,
@@ -1852,6 +2419,10 @@
           sourceError: "",
           currentError: "",
           frontmostError: "",
+          hasMissingSources: false,
+          missingDefaultSourceId: "",
+          missingSourceIds: [],
+          missingAppRules: [],
         };
       }
 
@@ -1859,6 +2430,7 @@
         var raw = value && typeof value === "object" ? value : {};
         return {
           enabled: raw.enabled === true,
+          runtimeEnabled: raw.runtimeEnabled === true,
           supported: raw.supported === true,
           sources: Array.isArray(raw.sources) ? raw.sources.map(normalizeInputSource).filter(function (source) { return source.id; }) : [],
           current: normalizeInputSource(raw.current),
@@ -1866,6 +2438,10 @@
           sourceError: String(raw.sourceError || ""),
           currentError: String(raw.currentError || ""),
           frontmostError: String(raw.frontmostError || ""),
+          hasMissingSources: raw.hasMissingSources === true,
+          missingDefaultSourceId: String(raw.missingDefaultSourceId || "").trim(),
+          missingSourceIds: Array.isArray(raw.missingSourceIds) ? uniqueStrings(raw.missingSourceIds) : [],
+          missingAppRules: Array.isArray(raw.missingAppRules) ? raw.missingAppRules.map(normalizeMissingInputSourceRule).filter(function (rule) { return rule.appId && rule.sourceId; }) : [],
         };
       }
 
@@ -1889,6 +2465,27 @@
           name: String(raw.Name || raw.name || id).trim(),
           pid: Number(raw.PID || raw.pid || 0) || 0,
         };
+      }
+
+      function normalizeMissingInputSourceRule(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          appId: String(raw.AppID || raw.appId || "").trim(),
+          appName: String(raw.AppName || raw.appName || "").trim(),
+          sourceId: String(raw.SourceID || raw.sourceId || "").trim(),
+        };
+      }
+
+      function uniqueStrings(values) {
+        var seen = Object.create(null);
+        var result = [];
+        values.forEach(function (value) {
+          var text = String(value || "").trim();
+          if (!text || seen[text]) return;
+          seen[text] = true;
+          result.push(text);
+        });
+        return result.sort();
       }
 
       function setInputSourceMessage(text, tone) {
@@ -1943,6 +2540,8 @@
       function defaultEditorSettings() {
         return {
           calendarWeekStart: "monday",
+          fileEditor: defaultFileEditor(),
+          fileEditorRules: defaultFileEditorRules(),
           vimMode: false,
         };
       }
@@ -1950,10 +2549,121 @@
       function normalizeEditorSettings(value) {
         var raw = value && typeof value === "object" ? value : {};
         var weekStart = raw.calendarWeekStart === "sunday" ? "sunday" : "monday";
+        var rules = Array.isArray(raw.fileEditorRules) ? normalizeFileEditorRules(raw.fileEditorRules) : defaultFileEditorRules();
         return {
           calendarWeekStart: weekStart,
+          fileEditor: normalizeFileEditor(raw.fileEditor),
+          fileEditorRules: rules,
           vimMode: raw.vimMode === true,
         };
+      }
+
+      function defaultFileEditor() {
+        return {
+          id: "code",
+          name: "VS Code",
+          path: "",
+        };
+      }
+
+      function systemFileEditor() {
+        return {
+          id: "system",
+          name: "系统默认应用",
+          path: "",
+        };
+      }
+
+      function noneFileEditor() {
+        return {
+          id: "none",
+          name: "不打开",
+          path: "",
+        };
+      }
+
+      function defaultFileEditorRules() {
+        var code = defaultFileEditor();
+        var none = noneFileEditor();
+        return [
+          { extension: ".js", editor: code },
+          { extension: ".ts", editor: code },
+          { extension: ".tsx", editor: code },
+          { extension: ".jsx", editor: code },
+          { extension: ".mp4", editor: none },
+          { extension: ".mp3", editor: none },
+        ];
+      }
+
+      function normalizeFileEditor(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        var defaults = defaultFileEditor();
+        var path = String(raw.path || "").trim();
+        var id = String(raw.id || "").trim();
+        if (!id && path) id = "app:" + path;
+        if (!id && !path && !String(raw.name || "").trim()) return defaults;
+        var name = String(raw.name || "").trim() || fileEditorNameFromPath(path) || editorNameFromID(id) || defaults.name;
+        return {
+          id: id || defaults.id,
+          name: name,
+          path: path,
+        };
+      }
+
+      function normalizeFileEditorRules(value) {
+        var seen = Object.create(null);
+        var rules = Array.isArray(value) ? value : [];
+        return rules.map(function (rule) {
+          var extension = normalizeFileExtension(rule && rule.extension);
+          if (!extension || seen[extension]) return null;
+          seen[extension] = true;
+          return {
+            extension: extension,
+            editor: normalizeFileEditor(rule && rule.editor),
+          };
+        }).filter(Boolean);
+      }
+
+      function normalizeFileExtension(value) {
+        var text = String(value || "").trim().toLowerCase().replace(/^\.+/, "");
+        if (!text || !/^[a-z0-9_-]+$/.test(text)) return "";
+        return "." + text;
+      }
+
+      function editorNameFromID(id) {
+        switch (String(id || "").trim()) {
+          case "code":
+            return "VS Code";
+          case "code-insiders":
+            return "VS Code Insiders";
+          case "cursor":
+            return "Cursor";
+          case "trae":
+            return "Trae";
+          case "webstorm":
+            return "WebStorm";
+          case "idea":
+            return "IntelliJ IDEA";
+          case "nvim":
+            return "Neovim";
+          case "vim":
+            return "Vim";
+          case "emacs":
+            return "Emacs";
+          case "none":
+            return "不打开";
+          case "system":
+            return "系统默认应用";
+          default:
+            return "";
+        }
+      }
+
+      function fileEditorNameFromPath(path) {
+        var value = String(path || "").trim();
+        if (!value) return "";
+        var parts = value.split(/[\\/]/);
+        return (parts[parts.length - 1] || value).replace(/\.app$/i, "");
       }
 
       function loadShortcutSettings() {

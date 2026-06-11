@@ -927,6 +927,150 @@ func TestDeleteVaultMemoCanKeepManagedAssets(t *testing.T) {
 	}
 }
 
+func TestMemoCommentsPersistAndDeleteWithParent(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "Parent memo",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	comment, err := createVaultMemoComment(ctx, MemoCommentCreateRequest{
+		Content: "Comment body #reply\n\n[[memo:" + memo.ID + "|parent]]",
+		MemoID:  memo.ID,
+	})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if comment.MemoID != memo.ID {
+		t.Fatalf("comment memo id = %q, want %q", comment.MemoID, memo.ID)
+	}
+	if len(comment.Tags) != 1 || comment.Tags[0] != "reply" {
+		t.Fatalf("comment tags = %#v, want reply", comment.Tags)
+	}
+	if len(comment.References) != 1 || comment.References[0] != "memo:"+memo.ID {
+		t.Fatalf("comment references = %#v, want parent memo ref", comment.References)
+	}
+
+	commentPath := filepath.Join(ctx.RootDir, filepath.FromSlash(comment.Path))
+	raw, err := os.ReadFile(commentPath)
+	if err != nil {
+		t.Fatalf("read comment: %v", err)
+	}
+	if !strings.Contains(string(raw), "memoId: \""+memo.ID+"\"") || !strings.Contains(string(raw), "Comment body") {
+		t.Fatalf("comment file missing metadata or content:\n%s", string(raw))
+	}
+
+	listed, err := listVaultMemoComments(ctx, memo.ID)
+	if err != nil {
+		t.Fatalf("list memo comments: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != comment.ID {
+		t.Fatalf("listed comments = %#v, want %s", listed, comment.ID)
+	}
+
+	if _, err := deleteVaultMemoWithOptions(ctx, memo.ID, MemoDeleteOptions{}); err != nil {
+		t.Fatalf("delete memo: %v", err)
+	}
+	if _, err := os.Stat(commentPath); !os.IsNotExist(err) {
+		t.Fatalf("comment should be deleted with parent, stat err = %v", err)
+	}
+	listed, err = listVaultMemoComments(ctx, "")
+	if err != nil {
+		t.Fatalf("list comments after delete: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("listed comments after delete = %#v, want empty", listed)
+	}
+}
+
+func TestDeleteVaultMemoCleansManagedAssetsReferencedByComments(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	storePath := filepath.Join(ctx.VeloDir, "storage.json")
+	cfg := defaultLocalMemoOSSConfig(storePath)
+	settings := CloudStorageSettings{
+		ActiveStorageID:     cfg.ID,
+		DefaultsInitialized: true,
+		Storages:            []OSSConfig{cfg},
+	}
+	rawSettings, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+
+	uniqueKey := "images/comment-unique.png"
+	sharedKey := "images/comment-shared.png"
+	if err := writeLocalOSSObject(context.Background(), cfg, uniqueKey, []byte("unique")); err != nil {
+		t.Fatalf("write unique asset: %v", err)
+	}
+	if err := writeLocalOSSObject(context.Background(), cfg, sharedKey, []byte("shared")); err != nil {
+		t.Fatalf("write shared asset: %v", err)
+	}
+	uniquePath, err := localOSSObjectDiskPath(cfg, uniqueKey)
+	if err != nil {
+		t.Fatalf("unique asset path: %v", err)
+	}
+	sharedPath, err := localOSSObjectDiskPath(cfg, sharedKey)
+	if err != nil {
+		t.Fatalf("shared asset path: %v", err)
+	}
+
+	target, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "Target memo",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create target memo: %v", err)
+	}
+	comment, err := createVaultMemoComment(ctx, MemoCommentCreateRequest{
+		Content: strings.Join([]string{
+			"![unique](@assets/memo-local/" + uniqueKey + ")",
+			"![shared](@assets/memo-local/" + sharedKey + ")",
+		}, "\n"),
+		MemoID: target.ID,
+	})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if _, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "![shared](@assets/memo-local/" + sharedKey + ")",
+		Visibility: "PRIVATE",
+	}); err != nil {
+		t.Fatalf("create other memo: %v", err)
+	}
+
+	result, err := deleteVaultMemoWithOptions(ctx, target.ID, MemoDeleteOptions{
+		CleanupAssets:   true,
+		Parent:          context.Background(),
+		StorageSettings: json.RawMessage(rawSettings),
+		StorePath:       storePath,
+	})
+	if err != nil {
+		t.Fatalf("delete memo: %v", err)
+	}
+	if result.AssetsDeleted != 1 || result.AssetsSkipped != 1 || len(result.AssetErrors) != 0 {
+		t.Fatalf("delete result = %#v, want 1 deleted, 1 skipped, no errors", result)
+	}
+	if _, err := os.Stat(filepath.Join(ctx.RootDir, filepath.FromSlash(comment.Path))); !os.IsNotExist(err) {
+		t.Fatalf("comment should be deleted with parent, stat err = %v", err)
+	}
+	if _, err := os.Stat(uniquePath); !os.IsNotExist(err) {
+		t.Fatalf("unique comment asset still exists or stat failed: %v", err)
+	}
+	if _, err := os.Stat(sharedPath); err != nil {
+		t.Fatalf("shared comment asset was removed: %v", err)
+	}
+}
+
 func TestDefaultLocalStorageRootUsesVaultStorage(t *testing.T) {
 	vaultDir := t.TempDir()
 	storePath := filepath.Join(vaultDir, ".velo", "storage.json")

@@ -182,6 +182,10 @@ func memoAssetReferenceID(ref memoAssetReference) string {
 }
 
 func memoAssetReferencesInOtherMemos(ctx *VaultContext, targetID string) (map[string]bool, error) {
+	return memoAssetReferencesOutside(ctx, map[string]bool{strings.TrimSpace(targetID): true}, nil)
+}
+
+func memoAssetReferencesOutside(ctx *VaultContext, excludedMemoIDs map[string]bool, excludedCommentIDs map[string]bool) (map[string]bool, error) {
 	refs := map[string]bool{}
 	if err := filepath.WalkDir(ctx.MemoDir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -194,7 +198,7 @@ func memoAssetReferencesInOtherMemos(ctx *VaultContext, targetID string) (map[st
 		if err != nil {
 			return err
 		}
-		if memo.ID == targetID {
+		if excludedMemoIDs[memo.ID] {
 			return nil
 		}
 		for _, ref := range extractMemoAssetReferences(memo.Content) {
@@ -204,7 +208,42 @@ func memoAssetReferencesInOtherMemos(ctx *VaultContext, targetID string) (map[st
 	}); err != nil {
 		return nil, err
 	}
+
+	commentDir := memoCommentDir(ctx)
+	if commentDir != "" {
+		if err := filepath.WalkDir(commentDir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+				return nil
+			}
+			comment, err := readMemoCommentFile(ctx, path)
+			if err != nil {
+				return err
+			}
+			if excludedCommentIDs[comment.ID] {
+				return nil
+			}
+			for _, ref := range extractMemoAssetReferences(comment.Content) {
+				refs[memoAssetReferenceID(ref)] = true
+			}
+			return nil
+		}); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
 	return refs, nil
+}
+
+func appendMemoAssetReference(refs []memoAssetReference, ref memoAssetReference) []memoAssetReference {
+	id := memoAssetReferenceID(ref)
+	for _, existing := range refs {
+		if memoAssetReferenceID(existing) == id {
+			return refs
+		}
+	}
+	return append(refs, ref)
 }
 
 func deleteMemoAssetReferences(parent context.Context, rawSettings json.RawMessage, storePath string, refs []memoAssetReference) MemoDeleteResult {

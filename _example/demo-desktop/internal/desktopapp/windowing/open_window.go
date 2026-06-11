@@ -9,6 +9,9 @@ type OpenWindowRequest struct {
 	ObjectPath       string
 	ObjectPathSuffix string
 	Pathname         string
+	PreviewID        string
+	PreviewSrc       string
+	PreviewTitle     string
 	Provider         string
 	StorageID        string
 }
@@ -30,6 +33,9 @@ func BuildOpenWindowSpec(req OpenWindowRequest) WindowSpec {
 
 	storageID := strings.TrimSpace(req.StorageID)
 	objectPath := strings.TrimSpace(req.ObjectPath)
+	previewID := strings.TrimSpace(req.PreviewID)
+	previewSrc := strings.TrimSpace(req.PreviewSrc)
+	previewTitle := strings.TrimSpace(req.PreviewTitle)
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 
 	if pathname == "/oss-manager" && storageID != "" {
@@ -54,6 +60,21 @@ func BuildOpenWindowSpec(req OpenWindowRequest) WindowSpec {
 		}
 		if objectPath != "" {
 			params.Set("objectPath", objectPath)
+		}
+		if encoded := params.Encode(); encoded != "" {
+			pathname += "?" + encoded
+		}
+	}
+	if pathname == "/image-preview" {
+		params := url.Values{}
+		if previewID != "" {
+			params.Set("id", previewID)
+		}
+		if previewSrc != "" {
+			params.Set("src", previewSrc)
+		}
+		if previewTitle != "" {
+			params.Set("title", previewTitle)
 		}
 		if encoded := params.Encode(); encoded != "" {
 			pathname += "?" + encoded
@@ -110,6 +131,15 @@ func BuildOpenWindowSpec(req OpenWindowRequest) WindowSpec {
 		}
 		if objectPath != "" && req.ObjectPathSuffix != "" {
 			spec.Name += "-" + req.ObjectPathSuffix
+		}
+	case "/image-preview":
+		spec.EntryPage = "image-preview.html"
+		spec.Name = "image-preview"
+		spec.Title = "图片预览"
+		spec.Width = 980
+		spec.Height = 760
+		if previewID != "" {
+			spec.Name += "-" + previewID
 		}
 	case "/memo-slim":
 		spec.EntryPage = "memo-slim.html"

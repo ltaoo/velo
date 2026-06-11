@@ -9,10 +9,10 @@ import {
   parseTaskLine,
   resolveMemoReferenceTarget,
 } from "../../domain/memos.js";
-import { fileDisplayName, isFileAttachment, isImageAttachment } from "../../domain/memo-resources.js";
+import { codeBlockFence, fileDisplayName, isFileAttachment, isImageAttachment } from "../../domain/memo-resources.js";
 import { parseAssetReference } from "../../domain/storage.js";
 import { formatRelativeDate } from "./memo-date.js";
-import { cloudStorageById, resolveAssetUrl } from "./memo-editor.js";
+import { cloudStorageById, loadEditorSettings, normalizeFileEditor, normalizeFileEditorRules, resolveAssetUrl } from "./memo-editor.js";
 import { SVG } from "./memo-icons.js";
 import { escapeAttr, escapeHTML } from "./memo-utils.js";
 
@@ -24,13 +24,12 @@ function renderMemoMarkdown(content, context = {}, lineNumberOffset = 0) {
 
 function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
   let html = "";
-  let inCode = false;
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     const lineNumber = index + 1;
 
-    if (!inCode && isQuoteLine(line)) {
+    if (isQuoteLine(line)) {
       const quoteStart = index;
       const quoteLines = [];
       while (index < lines.length && isQuoteLine(lines[index])) {
@@ -47,21 +46,24 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
     }
 
     if (isMemoFenceLine(line)) {
-      const fenceClass = inCode ? "is-code-end" : "is-code-start";
+      const startIndex = index;
+      const codeLines = [];
+      let endIndex = startIndex;
+      index++;
+      while (index < lines.length) {
+        if (isMemoFenceLine(lines[index])) {
+          endIndex = index;
+          break;
+        }
+        codeLines.push(lines[index]);
+        endIndex = index;
+        index++;
+      }
+      if (index >= lines.length) index = lines.length - 1;
       html += memoLineTemplate(
-        lineNumber + lineNumberOffset,
-        `<pre class="memo-code-line is-fence"><code>${escapeHTML(line)}</code></pre>`,
-        `is-code is-code-fence ${fenceClass}`,
-      );
-      inCode = !inCode;
-      continue;
-    }
-
-    if (inCode) {
-      html += memoLineTemplate(
-        lineNumber + lineNumberOffset,
-        `<pre class="memo-code-line"><code>${escapeHTML(line)}</code></pre>`,
-        "is-code is-code-body",
+        memoLineNumberRange(startIndex, endIndex, lineNumberOffset),
+        renderMemoCodeBlock(line, codeLines, context, startIndex + lineNumberOffset, endIndex + lineNumberOffset),
+        "is-code is-code-block",
       );
       continue;
     }
@@ -83,7 +85,7 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
         lineNumber + lineNumberOffset,
         standaloneResource.type === "image"
           ? renderMemoImageBlock(standaloneResource)
-          : renderMemoFileBlock(standaloneResource),
+          : renderMemoFileBlock(standaloneResource, context),
         "is-resource",
       );
       continue;
@@ -141,6 +143,32 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
   return html;
 }
 
+function memoLineNumberRange(startIndex, endIndex, offset) {
+  const start = startIndex + 1 + offset;
+  const end = endIndex + 1 + offset;
+  return start === end ? start : `${start}-${end}`;
+}
+
+function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endLineIndex) {
+  const sourceId = String((context && context.sourceId) || "").trim();
+  const blockId = sourceId ? `${sourceId}:${startLineIndex}:${endLineIndex}:code` : "";
+  const fence = codeBlockFence(fenceLine);
+  const language = fence.language || "";
+  const label = language || "代码";
+  const code = codeLines.join("\n");
+  return `
+    <div class="memo-fenced-code-block" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
+      <div class="memo-fenced-code-toolbar">
+        <span class="memo-fenced-code-label">${escapeHTML(label)}</span>
+        <button class="memo-action-button memo-code-copy-button" type="button" data-action="copyCodeBlock" title="复制代码" aria-label="复制代码">
+          ${SVG.copy}
+        </button>
+      </div>
+      <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+    </div>
+  `;
+}
+
 function isQuoteLine(line) {
   return /^>\s?/.test(String(line || ""));
 }
@@ -153,7 +181,7 @@ function stripQuoteMarker(line) {
 function memoLineTemplate(lineNumber, body, className = "") {
   return `
     <div class="memo-source-line ${className}">
-      <span class="memo-line-number" aria-hidden="true">${lineNumber}</span>
+      <span class="memo-line-number" aria-hidden="true" data-line-number="${escapeAttr(lineNumber)}"></span>
       <div class="memo-line-body">${body}</div>
     </div>
   `;
@@ -172,25 +200,25 @@ function inlineMarkdown(value, context = {}) {
   let match = pattern.exec(text);
 
   while (match) {
-    html += inlineMarkdownBase(text.slice(lastIndex, match.index));
+    html += inlineMarkdownBase(text.slice(lastIndex, match.index), context);
     const ref = parseMemoReferenceInner(match[2], match[1] === "!");
-    html += ref ? renderMemoRefChip(ref, context) : inlineMarkdownBase(match[0]);
+    html += ref ? renderMemoRefChip(ref, context) : inlineMarkdownBase(match[0], context);
     lastIndex = match.index + match[0].length;
     match = pattern.exec(text);
   }
 
-  html += inlineMarkdownBase(text.slice(lastIndex));
+  html += inlineMarkdownBase(text.slice(lastIndex), context);
   return html;
 }
 
-function inlineMarkdownBase(value) {
+function inlineMarkdownBase(value, context = {}) {
   let html = escapeHTML(value);
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
     return renderMemoImageToken({ label: alt, url: src });
   });
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
     if (isFileAttachment(label, url)) {
-      return renderMemoFileToken({ label, url });
+      return renderMemoFileToken({ label, url }, context);
     }
     const href = safeUrl(url);
     return `<a href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${escapeHTML(label)}</a>`;
@@ -398,19 +426,20 @@ function renderMemoImageBlock(resource) {
   if (!src) return `<p>${renderMemoImageToken(resource)}</p>`;
 
   const label = resource.label || fileDisplayName("", resource.url);
+  const previewAttrs = imagePreviewAttrs(src, label, resource.url, label);
   return `
-    <figure class="memo-image-block">
-      <img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" />
+    <figure class="memo-image-block" ${previewAttrs}>
+      <img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" ${previewAttrs} />
       ${label ? `<figcaption>${escapeHTML(label)}</figcaption>` : ""}
     </figure>
   `;
 }
 
-function renderMemoFileBlock(resource) {
+function renderMemoFileBlock(resource, context = {}) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
   const displayUrl = href !== "#" ? href : resource.url;
-  const openButton = renderVSCodeOpenButton(resource.url);
+  const openButton = renderVSCodeOpenButton(resource.url, context);
   const localClass = openButton ? " has-editor-open" : "";
   const body = `
     <span class="memo-file-block-icon">${SVG.paperclip}</span>
@@ -429,8 +458,9 @@ function renderMemoFileBlock(resource) {
 function renderMemoImageToken(resource) {
   const src = safeImageUrl(resource.url);
   const label = resource.label || fileDisplayName("", resource.url);
+  const previewAttrs = src ? imagePreviewAttrs(src, label, resource.url, label) : "";
   return `
-    <span class="memo-image-token">
+    <span class="memo-image-token" ${previewAttrs} ${src ? 'role="button" tabindex="0"' : ""}>
       ${SVG.image}
       <span>${escapeHTML(label || resource.url)}</span>
       ${src ? `<span class="memo-image-token-preview"><img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" /></span>` : ""}
@@ -438,10 +468,21 @@ function renderMemoImageToken(resource) {
   `;
 }
 
-function renderMemoFileToken(resource) {
+function imagePreviewAttrs(src, title, source, caption) {
+  return [
+    `data-image-preview-src="${escapeAttr(src)}"`,
+    `data-image-preview-title="${escapeAttr(title || "图片预览")}"`,
+    `data-image-preview-source="${escapeAttr(source || src)}"`,
+    caption ? `data-image-preview-caption="${escapeAttr(caption)}"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function renderMemoFileToken(resource, context = {}) {
   const href = safeUrl(resource.url);
   const name = fileDisplayName(resource.label, resource.url);
-  const openButton = renderVSCodeOpenButton(resource.url);
+  const openButton = renderVSCodeOpenButton(resource.url, context);
   const localClass = openButton ? " has-editor-open" : "";
   const body = `${SVG.paperclip}<span>${escapeHTML(name)}</span>`;
 
@@ -451,24 +492,59 @@ function renderMemoFileToken(resource) {
   return `<a class="memo-file-token" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
 }
 
-function renderVSCodeOpenButton(url) {
+function renderVSCodeOpenButton(url, context = {}) {
   const target = localEditorTarget(url);
   if (!target) return "";
+  const editor = selectedFileEditor(context, target.file);
+  if (editor.id === "none") return "";
+  const label = editor.name || "编辑器";
+  const actionLabel = "在 " + label + " 中打开";
   return `
     <button
-      class="memo-file-open-vscode"
+      class="memo-file-open-editor memo-file-open-vscode"
       type="button"
-      data-editor-open="vscode"
+      data-editor-open="editor"
       data-editor-file="${escapeAttr(target.file)}"
       data-editor-line="${escapeAttr(target.line)}"
       data-editor-col="${escapeAttr(target.col)}"
-      title="在 VS Code 中打开"
-      aria-label="在 VS Code 中打开"
+      data-editor-app-id="${escapeAttr(editor.id)}"
+      data-editor-app-name="${escapeAttr(label)}"
+      data-editor-app-path="${escapeAttr(editor.path)}"
+      data-editor-label="${escapeAttr(label)}"
+      title="${escapeAttr(actionLabel)}"
+      aria-label="${escapeAttr(actionLabel)}"
     >
       ${SVG.code}
-      <span>在 VS Code 中打开</span>
+      <span>${escapeHTML(actionLabel)}</span>
     </button>
   `;
+}
+
+function selectedFileEditor(context = {}, file = "") {
+  const settings = context && context.editorSettings ? context.editorSettings : loadEditorSettings();
+  const matched = fileEditorRuleForFile(file, settings);
+  if (matched) return normalizeFileEditor(matched.editor);
+  const fromContext = settings ? settings.fileEditor : null;
+  if (fromContext) return normalizeFileEditor(fromContext);
+  try {
+    return normalizeFileEditor(loadEditorSettings().fileEditor);
+  } catch (_) {
+    return normalizeFileEditor(null);
+  }
+}
+
+function fileEditorRuleForFile(file, settings) {
+  const extension = fileExtension(file);
+  if (!extension) return null;
+  return normalizeFileEditorRules(settings && settings.fileEditorRules).find((rule) => rule.extension === extension) || null;
+}
+
+function fileExtension(file) {
+  const path = String(file || "").split(/[?#]/)[0];
+  const name = path.split(/[\\/]/).pop() || "";
+  const index = name.lastIndexOf(".");
+  if (index <= 0 || index === name.length - 1) return "";
+  return "." + name.slice(index + 1).toLowerCase();
 }
 
 function localEditorTarget(value) {

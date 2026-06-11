@@ -41,18 +41,31 @@ function detachedMemoWindowTemplate() {
         </div>
       </header>
       <main class="memo-window-body velo-no-drag" data-window-content></main>
+      <form class="memo-window-comment-form velo-no-drag" data-window-comment-form>
+        <button class="memo-window-comment-tool" type="button" data-window-comment-attach title="添加图片或附件" aria-label="添加图片或附件">
+          ${SVG.plus}
+        </button>
+        <div class="memo-editor-host memo-window-comment-editor" data-window-comment-editor></div>
+        <button class="memo-window-comment-submit" type="submit" data-window-comment-submit title="发送" aria-label="发送评论" disabled>
+          ${SVG.send}
+        </button>
+        <input class="memo-hidden-input" type="file" multiple data-window-comment-file-input />
+      </form>
       <div class="memo-toast" data-toast role="status"></div>
     </div>
   `;
 }
 
-function detachedMemoCardTemplate(memo, renderContext) {
+function detachedMemoCardTemplate(memo, renderContext, options = {}) {
   const tags = extractTags(memo.content);
   const backlinks = memoBacklinkCount(renderContext, memo.id);
+  const comments = Array.isArray(options.comments) ? options.comments : [];
+  const editingCommentId = String(options.editingCommentId || "");
+  const expandedCommentIds = options.expandedCommentIds;
 
   return `
     <article class="memo-card memo-window-card" data-memo-id="${escapeAttr(memo.id)}">
-      <header class="memo-card-head">
+      <header class="memo-card-head memo-window-card-head">
         <div class="memo-author">
           <div class="memo-avatar">U</div>
           <div>
@@ -60,17 +73,77 @@ function detachedMemoCardTemplate(memo, renderContext) {
             <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
           </div>
         </div>
-        <div class="memo-card-meta">
+        <div class="memo-card-meta memo-window-card-meta">
+          <div class="memo-card-head-actions">
+            <button class="memo-action-button" type="button" data-action="copyMemo" title="复制" aria-label="复制">${SVG.copy}</button>
+            <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用" aria-label="复制引用">${SVG.link}</button>
+          </div>
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
       </header>
       <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
       ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}</div>` : ""}
-      <footer class="memo-card-actions">
-        <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
-        <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
-      </footer>
+      ${comments.length ? detachedMemoCommentsTemplate(comments, renderContext, editingCommentId, expandedCommentIds) : ""}
+    </article>
+  `;
+}
+
+function detachedMemoCommentsTemplate(comments, renderContext, editingCommentId = "", expandedCommentIds) {
+  const commentContext = {
+    ...renderContext,
+    showLineNumbers: false,
+  };
+  return `
+    <section class="memo-window-comments" aria-label="评论">
+      <div class="memo-window-comments-title">评论</div>
+      <div class="memo-comment-list">${comments.map((comment) => detachedMemoCommentTemplate(comment, commentContext, editingCommentId, expandedCommentIds)).join("")}</div>
+    </section>
+  `;
+}
+
+function detachedMemoCommentTemplate(comment, renderContext, editingCommentId = "", expandedCommentIds) {
+  const time = comment.updatedAt || comment.createdAt;
+  const editing = comment.id === editingCommentId;
+  const expanded = expandedCommentIds && typeof expandedCommentIds.has === "function" ? expandedCommentIds.has(comment.id) : false;
+  const expandLabel = expanded ? "收起" : "展开";
+  const content = renderMemoCommentContent(comment, renderContext);
+  return `
+    <article class="memo-comment memo-window-comment ${editing ? "is-editing" : ""}" data-comment-id="${escapeAttr(comment.id)}">
+      <header class="memo-comment-head">
+        <div class="memo-avatar memo-comment-avatar">U</div>
+        <div>
+          <div class="memo-comment-author">You</div>
+          <time datetime="${escapeAttr(time)}">${formatRelativeDate(time)}</time>
+        </div>
+      </header>
+      ${
+        editing
+          ? `
+            <div class="memo-window-comment-edit">
+              <div class="memo-editor-host is-inline memo-window-comment-edit-host" data-window-comment-edit-host></div>
+              <div class="memo-window-comment-edit-actions">
+                <button class="memo-secondary-button" type="button" data-window-comment-action="cancel">${SVG.x}<span>取消</span></button>
+                <button class="memo-primary-button" type="button" data-window-comment-action="save">${SVG.check}<span>保存</span></button>
+              </div>
+            </div>
+          `
+          : `
+            <div class="memo-window-comment-bubble">
+              <div class="memo-window-comment-hover-actions" aria-label="评论操作">
+                <button class="memo-action-button" type="button" data-window-comment-action="edit" title="编辑评论" aria-label="编辑评论">${SVG.edit}</button>
+                <button class="memo-action-button is-danger" type="button" data-window-comment-action="delete" title="删除评论" aria-label="删除评论">${SVG.trash}</button>
+              </div>
+              <div class="memo-window-comment-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-window-comment-collapse>
+                <div class="memo-content memo-comment-content">${content}</div>
+                <button class="memo-expand-button memo-window-comment-expand-button" type="button" data-window-comment-action="toggleExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
+                  <span>${expandLabel}</span>
+                  ${SVG.chevronDown}
+                </button>
+              </div>
+            </div>
+          `
+      }
     </article>
   `;
 }
@@ -83,6 +156,7 @@ function detachedMemoRenderContext(state, sourceId, options = {}) {
     index,
     maxDepth: options.maxDepth || 2,
     readonly: Boolean(options.readonly),
+    editorSettings: state.editorSettings,
     showLineNumbers: options.showLineNumbers !== false,
     sourceId: sourceId || "",
     stack: options.stack || (sourceId ? [sourceId] : []),
@@ -108,6 +182,12 @@ function activeViewMeta(view) {
       searchPlaceholder: "搜索链接或来源 memo",
       subtitle: "从所有 memo 中汇总超链接",
       title: "超链接",
+    },
+    clipboard: {
+      hideComposer: true,
+      searchPlaceholder: "搜索当前粘贴板内容",
+      subtitle: "显示当前粘贴板的文本、链接或图片",
+      title: "粘贴板",
     },
     memos: {
       hideComposer: false,
@@ -177,6 +257,7 @@ function shellTemplate() {
             ${viewNavButtonTemplate("links", "超链接", SVG.link, "data-link-nav-count")}
             ${viewNavButtonTemplate("codeblocks", "代码片段", SVG.code, "data-code-nav-count")}
             ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
+            ${viewNavButtonTemplate("clipboard", "粘贴板", SVG.copy, "data-clipboard-nav-count")}
           </nav>
         </div>
         <div class="memo-sidebar-section">
@@ -432,7 +513,7 @@ function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
   `;
 }
 
-function memoTemplate(memo, editingId, renderContext, expanded = false, projects = []) {
+function memoTemplate(memo, editingId, renderContext, expanded = false, projects = [], options = {}) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
   const archived = memo.archived;
@@ -440,6 +521,8 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const backlinks = memoBacklinkCount(renderContext, memo.id);
   const expandLabel = expanded ? "收起" : "展开";
   const projectBadge = projectBadgeTemplate(memo.projectId, projects);
+  const comments = Array.isArray(options.comments) ? options.comments : [];
+  const commenting = options.commenting === true;
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -477,8 +560,13 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`).join("")}</div>` : ""}
           `
       }
+      ${!editing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext) : ""}
       <footer class="memo-card-actions">
         <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
+        <button class="memo-action-button" type="button" data-action="commentMemo" title="评论">
+          ${SVG.comment}
+          ${comments.length ? `<span class="memo-action-count">${comments.length}</span>` : ""}
+        </button>
         <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
         ${
           archived
@@ -489,6 +577,57 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
       </footer>
     </article>
   `;
+}
+
+function memoCommentSectionTemplate(comments, commenting, renderContext) {
+  const commentContext = {
+    ...renderContext,
+    showLineNumbers: false,
+  };
+  return `
+    <section class="memo-comments" aria-label="评论">
+      ${comments.length ? `<div class="memo-comment-list">${comments.map((comment) => memoCommentTemplate(comment, commentContext)).join("")}</div>` : ""}
+      ${
+        commenting
+          ? `
+            <div class="memo-comment-editor">
+              <div class="memo-editor-host is-inline" data-comment-host></div>
+              <div class="memo-inline-actions memo-comment-actions">
+                <div class="memo-inline-status-line" data-comment-vim-status></div>
+                <button class="memo-secondary-button" type="button" data-action="cancelComment">${SVG.x}<span>取消</span></button>
+                <button class="memo-primary-button" type="button" data-action="saveComment">${SVG.check}<span>评论</span></button>
+              </div>
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
+function memoCommentTemplate(comment, renderContext) {
+  const time = comment.updatedAt || comment.createdAt;
+  const content = renderMemoCommentContent(comment, renderContext);
+  return `
+    <article class="memo-comment" data-comment-id="${escapeAttr(comment.id)}">
+      <header class="memo-comment-head">
+        <div class="memo-avatar memo-comment-avatar">U</div>
+        <div>
+          <div class="memo-comment-author">You</div>
+          <time datetime="${escapeAttr(time)}">${formatRelativeDate(time)}</time>
+        </div>
+      </header>
+      <div class="memo-content memo-comment-content">${content}</div>
+    </article>
+  `;
+}
+
+function renderMemoCommentContent(comment, renderContext) {
+  try {
+    return renderMemoMarkdown(comment.content || "", renderContext);
+  } catch (err) {
+    return `<p>${escapeHTML(comment.content || "")}</p>`;
+  }
 }
 
 function todoGroupTemplate(label, todos, renderContextFor, projects = []) {
@@ -962,6 +1101,80 @@ function resourcePreviewTemplate(resource) {
   `;
 }
 
+function clipboardCurrentTemplate(item, options = {}) {
+  const hasItem = item && item.id;
+  if (!hasItem) return emptyClipboardTemplate();
+
+  const typeLabel = options.typeLabel || clipboardFallbackTypeLabel(item.type);
+  const actionLabel = options.actionLabel || "保存";
+  const capturedAt = clipboardCapturedAtLabel(item.capturedAt);
+  const preview = item.type === "image" && item.dataURL
+    ? `<img class="memo-clipboard-current-image" src="${escapeAttr(item.dataURL)}" alt="当前粘贴板图片" />`
+    : `<pre class="memo-clipboard-current-text">${escapeHTML(item.content || "空内容")}</pre>`;
+
+  return `
+    <article class="memo-resource-card memo-clipboard-current is-${escapeAttr(item.type || "text")}">
+      <header class="memo-clipboard-current-head">
+        <div class="memo-resource-target memo-clipboard-current-summary">
+          <span class="memo-resource-icon">${clipboardIcon(item.type)}</span>
+          <span class="memo-resource-body">
+            <span class="memo-resource-title">当前粘贴板的内容</span>
+            <span class="memo-resource-url">
+              ${escapeHTML(typeLabel)}
+              ${capturedAt ? ` / ${escapeHTML(capturedAt)}` : ""}
+              ${item.rawType ? ` / ${escapeHTML(item.rawType)}` : ""}
+            </span>
+          </span>
+        </div>
+        <div class="memo-clipboard-current-actions">
+          <button class="memo-secondary-button" type="button" data-action="clipboardRefresh">${SVG.restore}<span>刷新</span></button>
+          <button class="memo-primary-button" type="button" data-action="clipboardAccept" ${options.working ? "disabled" : ""}>
+            ${SVG.plus}
+            <span>${escapeHTML(actionLabel)}</span>
+          </button>
+        </div>
+      </header>
+      <div class="memo-clipboard-current-preview">
+        ${preview}
+      </div>
+    </article>
+  `;
+}
+
+function emptyClipboardTemplate() {
+  return `
+    <div class="memo-empty-state">
+      <div class="memo-empty-icon">${SVG.copy}</div>
+      <h2>暂无粘贴板内容</h2>
+      <button class="memo-secondary-button" type="button" data-action="clipboardRefresh">刷新</button>
+    </div>
+  `;
+}
+
+function clipboardIcon(type) {
+  if (type === "link") return SVG.link;
+  if (type === "image") return SVG.image;
+  return SVG.copy;
+}
+
+function clipboardFallbackTypeLabel(type) {
+  if (type === "link") return "链接";
+  if (type === "image") return "图片";
+  return "文本";
+}
+
+function clipboardCapturedAtLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "numeric",
+  });
+}
+
 function editTemplate(memo, projects = []) {
   return `
     <div class="memo-inline-editor">
@@ -1046,6 +1259,7 @@ function visibilityOptionsTemplate(selected) {
 export {
   activeViewMeta,
   calendarTemplate,
+  clipboardCurrentTemplate,
   codeBlockTemplate,
   detachedMemoCardTemplate,
   detachedMemoRenderContext,

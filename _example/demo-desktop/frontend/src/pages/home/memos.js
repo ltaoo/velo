@@ -46,6 +46,13 @@ import {
   sortMemoReference,
 } from "../../domain/memo-resources.js";
 import {
+  createMemoCommentInVault,
+  deleteMemoCommentInVault,
+  loadMemoCommentsFromVault,
+  normalizeMemoCommentPayload,
+  updateMemoCommentInVault,
+} from "../../domain/memo-comments.js";
+import {
   createMemoInVault,
   createProjectInVault,
   deleteMemoInVault,
@@ -71,6 +78,7 @@ import { SVG } from "./memo-icons.js";
 import {
   activeViewMeta,
   calendarTemplate,
+  clipboardCurrentTemplate,
   codeBlockTemplate,
   detachedMemoCardTemplate,
   detachedMemoRenderContext,
@@ -107,7 +115,7 @@ import {
   uploadErrorMessage,
 } from "./memo-editor.js";
 import { renderMemoMarkdown } from "./memo-markdown.js";
-import { addMonths, dateFromKey, formatDateKey, formatShortDate, memoDateKey, startOfMonth } from "./memo-date.js";
+import { addMonths, dateFromKey, formatDateKey, memoDateKey, startOfMonth } from "./memo-date.js";
 import {
   closestAnchor,
   closestElement,
@@ -117,6 +125,7 @@ import {
   escapeHTML,
   externalBrowserURLFromAnchor,
 } from "./memo-utils.js";
+import { openImagePreviewFromElement } from "../../components/image-preview.js";
 
 const LAST_PROJECT_STORAGE_KEY = "demo-desktop:memos:last-project:v1";
 const SHORTCUTS_STORAGE_KEY = "demo-desktop:settings:shortcuts:v1";
@@ -141,12 +150,152 @@ function rememberTaskFilter(filter) {
   localStorage.setItem(TASK_FILTER_STORAGE_KEY, normalizeTaskFilter(filter));
 }
 
+function copyCodeBlockFromAction(action, memos, notify) {
+  const blockNode = closestElement(action, "[data-code-block-id]") || closestElement(action, ".memo-fenced-code-block");
+  const blockId = blockNode && blockNode.dataset ? blockNode.dataset.codeBlockId : "";
+  const block = blockId ? collectCodeBlocks(Array.isArray(memos) ? memos : []).find((item) => item.id === blockId) : null;
+  const code = block ? block.code : codeBlockTextFromNode(blockNode);
+  if (code === null) return;
+  copyText(code).then(
+    () => notify("已复制代码片段"),
+    () => notify("复制失败"),
+  );
+}
+
+function codeBlockTextFromNode(blockNode) {
+  if (!blockNode || typeof blockNode.querySelector !== "function") return null;
+  const codeNode = blockNode.querySelector("[data-code-block-code]") || blockNode.querySelector("pre code");
+  if (!codeNode) return null;
+  return codeNode.textContent || "";
+}
+
+function handleMemoRenderedCopy(event) {
+  if (event.defaultPrevented || !event.clipboardData) return;
+
+  const text = selectedMemoRenderedText(event.currentTarget);
+  if (text === null) return;
+
+  event.preventDefault();
+  event.clipboardData.setData("text/plain", text);
+}
+
+function selectedMemoRenderedText(root) {
+  const doc = (root && root.ownerDocument) || document;
+  const selection = doc.getSelection ? doc.getSelection() : null;
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const parts = [];
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const text = selectedMemoRangeText(root, selection.getRangeAt(index));
+    if (text !== null) parts.push(text);
+  }
+
+  return parts.length ? parts.join("\n") : null;
+}
+
+function selectedMemoRangeText(root, range) {
+  if (!root || !range) return null;
+  const selectedLines = Array.from(root.querySelectorAll(".memo-source-line"))
+    .filter(function (line) {
+      const body = memoLineBody(line);
+      return body && rangeIntersectsNode(range, body);
+    })
+    .filter(function (line, _index, lines) {
+      return !hasSelectedSourceLineAncestor(line, lines);
+    });
+
+  if (!selectedLines.length) return null;
+
+  return selectedLines
+    .map(function (line) {
+      return selectedMemoLineText(range, memoLineBody(line));
+    })
+    .join("\n");
+}
+
+function memoLineBody(line) {
+  if (!line || !line.children) return null;
+  return Array.from(line.children).find(function (child) {
+    return child && child.classList && child.classList.contains("memo-line-body");
+  }) || null;
+}
+
+function hasSelectedSourceLineAncestor(line, selectedLines) {
+  let node = line ? line.parentElement : null;
+  while (node) {
+    if (node.classList && node.classList.contains("memo-source-line") && selectedLines.includes(node)) return true;
+    node = node.parentElement;
+  }
+  return false;
+}
+
+function rangeIntersectsNode(range, node) {
+  if (!range || !node || typeof range.intersectsNode !== "function") return false;
+  try {
+    return range.intersectsNode(node);
+  } catch (_) {
+    return false;
+  }
+}
+
+function selectedMemoLineText(range, body) {
+  if (!body) return "";
+  const doc = body.ownerDocument || document;
+  const bodyRange = doc.createRange();
+  bodyRange.selectNodeContents(body);
+
+  const lineRange = range.cloneRange();
+  if (range.compareBoundaryPoints(Range.START_TO_START, bodyRange) < 0) {
+    lineRange.setStart(bodyRange.startContainer, bodyRange.startOffset);
+  }
+  if (range.compareBoundaryPoints(Range.END_TO_END, bodyRange) > 0) {
+    lineRange.setEnd(bodyRange.endContainer, bodyRange.endOffset);
+  }
+
+  const fragment = lineRange.cloneContents();
+  bodyRange.detach();
+  lineRange.detach();
+
+  return cleanMemoClipboardLineText(memoFragmentClipboardText(fragment));
+}
+
+function memoFragmentClipboardText(fragment) {
+  if (!fragment || typeof fragment.querySelectorAll !== "function") return "";
+  fragment.querySelectorAll(".memo-line-number, .memo-fenced-code-toolbar, button, input, style, script").forEach(function (node) {
+    node.remove();
+  });
+  fragment.querySelectorAll("br").forEach(function (node) {
+    node.replaceWith((fragment.ownerDocument || document).createTextNode("\n"));
+  });
+  return fragment.textContent || "";
+}
+
+function cleanMemoClipboardLineText(value) {
+  const lines = String(value || "").replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").split("\n");
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  return lines.join("\n");
+}
+
+function editorFileOpenSettingsKey(settings) {
+  const raw = settings && typeof settings === "object" ? settings : {};
+  return JSON.stringify({
+    fileEditor: raw.fileEditor || null,
+    fileEditorRules: raw.fileEditorRules || [],
+  });
+}
+
 export function mountMemosHome(root) {
   const state = {
     activeFilter: "all",
     activeTag: "",
     activeView: "memos",
     calendarMonth: startOfMonth(new Date()),
+    commentDraft: "",
+    commentingMemoId: "",
+    comments: [],
+    commentsLoaded: false,
+    commentSaving: false,
     editingId: "",
     editDraft: "",
     editProjectId: "",
@@ -193,6 +342,8 @@ export function mountMemosHome(root) {
   };
 
   let composerEditor = null;
+  let commentEditor = null;
+  let commentEditorMemoId = "";
   let editEditor = null;
   let editEditorMemoId = "";
 
@@ -207,6 +358,7 @@ export function mountMemosHome(root) {
     composerVimStatus: root.querySelector("[data-composer-vim-status]"),
     codeNavCount: root.querySelector("[data-code-nav-count]"),
     clipboardCard: root.querySelector("[data-clipboard-card]"),
+    clipboardNavCount: root.querySelector("[data-clipboard-nav-count]"),
     createButton: root.querySelector('[data-action="createMemo"]'),
     feedCount: root.querySelector("[data-feed-count]"),
     fileNavCount: root.querySelector("[data-file-nav-count]"),
@@ -237,9 +389,9 @@ export function mountMemosHome(root) {
   renderAll();
   renderComposerStatus(composerEditor.getText());
   bindGoMessages();
-  requestClipboardLatest();
   refreshProjectsFromVault();
   refreshMemosFromVault();
+  refreshMemoCommentsFromVault();
   refreshMemoDraftsFromVault();
   refreshTasksFromVault();
   refreshGTDFromVault();
@@ -248,6 +400,7 @@ export function mountMemosHome(root) {
 
   window.addEventListener("click", handleExternalLinkClick, true);
   root.addEventListener("click", handleClick);
+  root.addEventListener("copy", handleMemoRenderedCopy);
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
   root.addEventListener("submit", handleSubmit);
@@ -260,6 +413,7 @@ export function mountMemosHome(root) {
     destroy() {
       window.removeEventListener("click", handleExternalLinkClick, true);
       root.removeEventListener("click", handleClick);
+      root.removeEventListener("copy", handleMemoRenderedCopy);
       root.removeEventListener("input", handleInput);
       root.removeEventListener("change", handleChange);
       root.removeEventListener("submit", handleSubmit);
@@ -272,7 +426,9 @@ export function mountMemosHome(root) {
       if (state.clipboardLeaveTimer) window.clearTimeout(state.clipboardLeaveTimer);
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
       if (composerEditor) composerEditor.destroy();
+      if (commentEditor) commentEditor.destroy();
       if (editEditor) editEditor.destroy();
+      commentEditorMemoId = "";
       editEditorMemoId = "";
       root.innerHTML = "";
     },
@@ -357,20 +513,23 @@ export function mountMemosHome(root) {
     const next = normalizeEditorSettings(nextSettings || loadEditorSettings());
     const vimChanged = next.vimMode !== editorVimEnabled();
     const calendarChanged = next.calendarWeekStart !== calendarWeekStart();
-    if (!vimChanged && !calendarChanged) return;
+    const fileEditorChanged = editorFileOpenSettingsKey(next) !== editorFileOpenSettingsKey(state.editorSettings);
+    if (!vimChanged && !calendarChanged && !fileEditorChanged) return;
 
     const composerText = composerEditor ? composerEditor.getText() : "";
     state.editorSettings = next;
 
     if (vimChanged) {
       if (editEditor) syncEditDraftFromEditor();
+      if (commentEditor) syncCommentDraftFromEditor();
       if (composerEditor) composerEditor.destroy();
       els.composerHost.innerHTML = "";
       composerEditor = createComposerEditor(composerText);
       renderComposerStatus(composerEditor.getText());
 
-      if (state.activeView === "memos" && state.editingId) renderFeed();
+      if (state.activeView === "memos" && (state.editingId || state.commentingMemoId)) renderFeed();
       if (calendarChanged) renderCalendar();
+      if (fileEditorChanged) renderAll();
       if (!options.silent) showToast(next.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式");
       return;
     }
@@ -379,6 +538,16 @@ export function mountMemosHome(root) {
       renderCalendar();
       if (!options.silent) showToast(next.calendarWeekStart === "sunday" ? "日历已设为周日开始" : "日历已设为周一开始");
     }
+
+    if (fileEditorChanged) {
+      renderAll();
+      if (!options.silent) showToast("本地文件打开应用已更新为 " + editorFileEditorLabel(next.fileEditor));
+    }
+  }
+
+  function editorFileEditorLabel(fileEditor) {
+    const raw = fileEditor && typeof fileEditor === "object" ? fileEditor : {};
+    return raw.name || raw.id || "编辑器";
   }
 
   function handleExternalLinkClick(event) {
@@ -435,6 +604,8 @@ export function mountMemosHome(root) {
       state.activeFilter = "all";
       state.activeTag = "";
       state.editingId = "";
+      state.commentingMemoId = "";
+      state.commentDraft = "";
       state.query = "";
       state.selectedCalendarDate = "";
       els.searchInput.value = "";
@@ -482,7 +653,15 @@ export function mountMemosHome(root) {
     if (editorOpen && root.contains(editorOpen)) {
       event.preventDefault();
       event.stopPropagation();
-      openFileInVSCode(editorOpen);
+      openFileInSelectedEditor(editorOpen);
+      return;
+    }
+
+    const imagePreview = closestElement(event.target, "[data-image-preview-src]");
+    if (imagePreview && root.contains(imagePreview)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openImagePreview(imagePreview);
       return;
     }
 
@@ -515,11 +694,17 @@ export function mountMemosHome(root) {
       case "cancelEdit":
         cancelEdit();
         break;
+      case "cancelComment":
+        cancelComment();
+        break;
       case "clearFilters":
         state.activeFilter = "all";
         state.activeTag = "";
         state.activeProjectFilter = "all";
         state.composerProjectId = state.lastComposerProjectId || "";
+        state.commentingMemoId = "";
+        state.commentDraft = "";
+        state.editingId = "";
         state.query = "";
         state.selectedCalendarDate = "";
         els.searchInput.value = "";
@@ -530,6 +715,9 @@ export function mountMemosHome(root) {
         break;
       case "copyMemoRef":
         copyMemoRef(memoId);
+        break;
+      case "commentMemo":
+        startComment(memoId);
         break;
       case "copyCodeBlock":
         copyCodeBlock(action);
@@ -561,6 +749,9 @@ export function mountMemosHome(root) {
       case "clipboardDismiss":
         hideClipboardCard({ forceAppeared: true });
         break;
+      case "clipboardRefresh":
+        requestClipboardLatest();
+        break;
       case "createProject":
         createProjectFromPrompt();
         break;
@@ -590,6 +781,9 @@ export function mountMemosHome(root) {
         break;
       case "saveEdit":
         saveEdit(memoId);
+        break;
+      case "saveComment":
+        saveComment(memoId);
         break;
       case "sortMemos":
         state.sortDesc = !state.sortDesc;
@@ -632,10 +826,6 @@ export function mountMemosHome(root) {
       if (payload.type === "memo_file_drop") {
         insertDroppedFiles(payload.files);
       }
-      if (payload.type === "clipboard_update" && payload.item) {
-        state.clipboardItem = normalizeClipboardItem(payload.item);
-        if (isClipboardForeground()) showClipboardCard();
-      }
       if (payload.type === "main_window_focus") {
         state.clipboardForeground = true;
         requestClipboardLatest();
@@ -647,10 +837,18 @@ export function mountMemosHome(root) {
     if (typeof invoke !== "function") return;
     invoke("/api/clipboard/latest", { method: "GET" }).then(
       function (resp) {
-        if (!resp || resp.code !== 0 || !resp.data || !resp.data.found) return;
+        if (!resp || resp.code !== 0 || !resp.data) return;
+        if (!resp.data.found) {
+          state.clipboardItem = null;
+          if (state.activeView === "clipboard") renderMainContent();
+          renderViewButtons();
+          return;
+        }
         const item = normalizeClipboardItem(resp.data.item);
         if (!item || !item.id) return;
         state.clipboardItem = item;
+        if (state.activeView === "clipboard") renderMainContent();
+        renderViewButtons();
         if (isClipboardForeground()) showClipboardCard();
       },
       function () {},
@@ -789,6 +987,7 @@ export function mountMemosHome(root) {
     if (!item || state.clipboardWorking) return;
     state.clipboardWorking = true;
     renderClipboardCard();
+    if (state.activeView === "clipboard") renderClipboardView();
 
     let task;
     if (item.type === "image") {
@@ -809,6 +1008,7 @@ export function mountMemosHome(root) {
     ).finally(function () {
       state.clipboardWorking = false;
       renderClipboardCard();
+      if (state.activeView === "clipboard") renderClipboardView();
     });
   }
 
@@ -848,39 +1048,44 @@ export function mountMemosHome(root) {
     });
   }
 
-  function openFileInVSCode(button) {
+  function openFileInSelectedEditor(button) {
     const file = button.dataset.editorFile || "";
+    const label = button.dataset.editorLabel || button.dataset.editorAppName || "编辑器";
     if (!file) {
       showToast("没有可打开的本地文件");
       return;
     }
     if (typeof invoke !== "function") {
-      showToast("当前环境不支持打开 VS Code");
+      showToast("当前环境不支持打开 " + label);
       return;
     }
 
     const line = button.dataset.editorLine || "1";
     const col = button.dataset.editorCol || "1";
-    button.disabled = true;
-    invoke(
+    const appId = button.dataset.editorAppId || "";
+    const appName = button.dataset.editorAppName || "";
+    const appPath = button.dataset.editorAppPath || "";
+    let url =
       "/api/editor/open?file=" +
-        encodeURIComponent(file) +
-        "&line=" +
-        encodeURIComponent(line) +
-        "&col=" +
-        encodeURIComponent(col) +
-        "&app=code",
-      { method: "GET" },
-    ).then(
+      encodeURIComponent(file) +
+      "&line=" +
+      encodeURIComponent(line) +
+      "&col=" +
+      encodeURIComponent(col);
+    if (appId) url += "&app=" + encodeURIComponent(appId);
+    if (appName) url += "&appName=" + encodeURIComponent(appName);
+    if (appPath) url += "&appPath=" + encodeURIComponent(appPath);
+    button.disabled = true;
+    invoke(url, { method: "GET" }).then(
       function (resp) {
         if (!resp || resp.code !== 0) {
-          showToast((resp && resp.msg) || "打开 VS Code 失败");
+          showToast((resp && resp.msg) || ("打开 " + label + " 失败"));
           return;
         }
-        showToast("已在 VS Code 中打开");
+        showToast("已在 " + label + " 中打开");
       },
       function (err) {
-        showToast("打开 VS Code 失败: " + err);
+        showToast("打开 " + label + " 失败: " + err);
       },
     ).finally(function () {
       button.disabled = false;
@@ -907,6 +1112,12 @@ export function mountMemosHome(root) {
         showToast("打开链接失败: " + err);
       },
     );
+  }
+
+  function openImagePreview(element) {
+    openImagePreviewFromElement(element).catch(function (err) {
+      showToast("打开图片预览失败: " + errorMessage(err));
+    });
   }
 
   function openSettings() {
@@ -1270,6 +1481,15 @@ export function mountMemosHome(root) {
     if (state.memoSearchOpen) {
       handleMemoSearchKeydown(event);
       return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      const imagePreview = closestElement(event.target, "[data-image-preview-src]");
+      if (imagePreview && root.contains(imagePreview)) {
+        event.preventDefault();
+        openImagePreview(imagePreview);
+        return;
+      }
     }
 
     if (!matchesShortcut(event, openMemoSearchShortcut())) return;
@@ -1691,10 +1911,80 @@ export function mountMemosHome(root) {
   }
 
 
+  function startComment(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return;
+    if (commentEditor && state.commentingMemoId === memoId) {
+      commentEditor.focus();
+      return;
+    }
+    if (commentEditor) syncCommentDraftFromEditor();
+    state.commentingMemoId = memoId;
+    state.commentDraft = "";
+    state.editingId = "";
+    state.editDraft = "";
+    if (!state.expandedMemoIds.has(memoId)) state.expandedMemoIds.add(memoId);
+    renderFeed();
+  }
+
+  function cancelComment(options = {}) {
+    state.commentingMemoId = "";
+    state.commentDraft = "";
+    renderFeed();
+    if (options.message) showToast(options.message);
+    return Promise.resolve({ ok: true, message: options.message || "comment cancelled" });
+  }
+
+  function saveComment(memoId, options = {}) {
+    const memo = findMemo(memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    if (state.commentSaving) return Promise.resolve({ ok: false, message: "正在保存" });
+    const content = commentEditor ? commentEditor.getText() : state.commentDraft;
+    if (!content.trim()) {
+      showToast("评论不能为空");
+      if (commentEditor) commentEditor.focus();
+      return Promise.resolve({ ok: false, message: "评论不能为空" });
+    }
+
+    state.commentSaving = true;
+    return createMemoCommentInVault(memoId, content).then(
+      function (comment) {
+        upsertCommentInState(comment);
+        state.commentingMemoId = "";
+        state.commentDraft = "";
+        renderFeed();
+        if (options.source !== "vim-wq") showToast("已添加评论");
+        return { ok: true, message: "已添加评论" };
+      },
+      function (err) {
+        showToast("评论失败: " + errorMessage(err));
+        return { ok: false, message: "评论失败: " + errorMessage(err) };
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+    });
+  }
+
+  function exitComment(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) {
+      state.commentingMemoId = "";
+      state.commentDraft = "";
+      renderFeed();
+      return Promise.resolve({ ok: true, message: "quit" });
+    }
+    syncCommentDraftFromEditor();
+    state.commentingMemoId = "";
+    renderFeed();
+    return Promise.resolve({ ok: true, message: "quit" });
+  }
+
   function startEdit(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
     const draft = findDraft(memoEditDraftId(memoId));
+    state.commentingMemoId = "";
+    state.commentDraft = "";
     state.editingId = memoId;
     state.editDraft = draft ? draft.content : memo.content;
     state.editProjectId = draft ? normalizeProjectID(draft.projectId) : memo.projectId || "";
@@ -1908,6 +2198,11 @@ export function mountMemosHome(root) {
       deleteMemoInVault(memoId, { cleanupAssets: options.deleteFiles, deleteTasks: options.deleteTodos }).then(
         function (result) {
           state.memos = state.memos.filter((item) => item.id !== memoId);
+          state.comments = state.comments.filter((comment) => comment.memoId !== memoId);
+          if (state.commentingMemoId === memoId) {
+            state.commentingMemoId = "";
+            state.commentDraft = "";
+          }
           if (preservedMemo) {
             state.memos = [preservedMemo].concat(state.memos);
           }
@@ -1955,7 +2250,7 @@ export function mountMemosHome(root) {
   }
 
   function confirmDeleteMemo(memo) {
-    const fileCount = collectManagedResources([memo]).length;
+    const fileCount = collectManagedResources([memo].concat(commentsForMemo(memo.id))).length;
     const todoCount = collectTodos([memo]).length;
 
     return new Promise(function (resolve) {
@@ -2084,14 +2379,7 @@ export function mountMemosHome(root) {
   }
 
   function copyCodeBlock(action) {
-    const blockNode = closestElement(action, "[data-code-block-id]");
-    const blockId = blockNode ? blockNode.dataset.codeBlockId : "";
-    const block = collectCodeBlocks(scopedMemos()).find((item) => item.id === blockId);
-    if (!block) return;
-    copyText(block.code).then(
-      () => showToast("已复制代码片段"),
-      () => showToast("复制失败"),
-    );
+    copyCodeBlockFromAction(action, scopedMemos(), showToast);
   }
 
   function insertFiles(files) {
@@ -2152,9 +2440,15 @@ export function mountMemosHome(root) {
     els.searchInput.placeholder = viewMeta.searchPlaceholder;
     els.memoList.classList.toggle("is-todo-list", state.activeView === "todos" || state.activeView === "items" || state.activeView === "milestones");
     els.memoList.classList.toggle("is-resource-list", state.activeView === "links" || state.activeView === "files" || state.activeView === "codeblocks");
+    els.memoList.classList.toggle("is-clipboard-list", state.activeView === "clipboard");
   }
 
   function renderMainContent() {
+    if (state.activeView !== "memos" && commentEditor) {
+      commentEditor.destroy();
+      commentEditor = null;
+      commentEditorMemoId = "";
+    }
     switch (state.activeView) {
       case "todos":
         renderTodos();
@@ -2174,6 +2468,9 @@ export function mountMemosHome(root) {
       case "files":
         renderFiles();
         return;
+      case "clipboard":
+        renderClipboardView();
+        return;
       default:
         renderFeed();
     }
@@ -2182,6 +2479,11 @@ export function mountMemosHome(root) {
   function syncEditDraftFromEditor() {
     if (!editEditor || !state.editingId || editEditorMemoId !== state.editingId) return;
     state.editDraft = editEditor.getText();
+  }
+
+  function syncCommentDraftFromEditor() {
+    if (!commentEditor || !state.commentingMemoId || commentEditorMemoId !== state.commentingMemoId) return;
+    state.commentDraft = commentEditor.getText();
   }
 
   function renderProjects() {
@@ -2223,6 +2525,7 @@ export function mountMemosHome(root) {
     els.linkNavCount.textContent = linkCount ? String(linkCount) : "";
     if (els.codeNavCount) els.codeNavCount.textContent = codeBlockCount ? (codeSnippetCount ? `${codeSnippetCount}/${codeBlockCount}` : String(codeBlockCount)) : "";
     els.fileNavCount.textContent = resourceCount ? String(resourceCount) : "";
+    if (els.clipboardNavCount) els.clipboardNavCount.textContent = state.clipboardItem && state.clipboardItem.id ? "1" : "";
   }
 
   function renderFilterButtons() {
@@ -2294,7 +2597,6 @@ export function mountMemosHome(root) {
             return `
               <article class="memo-pinned-item" data-memo-id="${escapeAttr(memo.id)}">
                 <header class="memo-pinned-head">
-                  <small>${formatShortDate(memo.createdAt)}</small>
                   <div class="memo-pinned-actions">
                     <button class="memo-action-button" type="button" data-action="togglePin" title="取消置顶" aria-label="取消置顶">${SVG.pin}</button>
                     <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口" aria-label="分离为窗口">${SVG.external}</button>
@@ -2316,6 +2618,14 @@ export function mountMemosHome(root) {
   }
 
   function renderFeed() {
+    if (commentEditor) {
+      if (state.commentingMemoId && state.commentingMemoId === commentEditorMemoId) {
+        syncCommentDraftFromEditor();
+      }
+      commentEditor.destroy();
+      commentEditor = null;
+      commentEditorMemoId = "";
+    }
     if (editEditor) {
       syncEditDraftFromEditor();
       editEditor.destroy();
@@ -2327,7 +2637,7 @@ export function mountMemosHome(root) {
     els.feedCount.textContent = `${memos.length} 条`;
     els.memoList.innerHTML = memos.length
       ? memos
-          .map((memo) => memoTemplate(memo, state.editingId, memoRenderContext(memo.id), state.expandedMemoIds.has(memo.id), state.projects))
+          .map((memo) => safeMemoTemplate(memo))
           .join("")
       : emptyFeedTemplate();
 
@@ -2373,7 +2683,65 @@ export function mountMemosHome(root) {
       }
     }
 
+    if (state.commentingMemoId) {
+      const memo = findMemo(state.commentingMemoId);
+      const host = els.memoList.querySelector("[data-comment-host]");
+      const statusHost = els.memoList.querySelector("[data-comment-vim-status]");
+      if (memo && host) {
+        commentEditor = createMiniEditor(host, {
+          memoItems() {
+            return state.memos;
+          },
+          tagItems: editorTagItems,
+          onChange(value) {
+            state.commentDraft = value;
+          },
+          onCommit() {
+            return saveComment(memo.id, { source: "vim-wq" });
+          },
+          onDiscard() {
+            return cancelComment({ message: "评论已取消" });
+          },
+          onQuit() {
+            return exitComment(memo.id);
+          },
+          onSubmit() {
+            return saveComment(memo.id);
+          },
+          placeholder: "添加评论...",
+          sourceMemoId: memo.id,
+          value: state.commentDraft,
+          vim: editorVimEnabled(),
+          vimStatusHost: statusHost,
+        });
+        commentEditorMemoId = memo.id;
+        commentEditor.focus();
+      }
+    }
+
     syncMemoExpandControls();
+  }
+
+  function safeMemoTemplate(memo) {
+    try {
+      return memoTemplate(
+        memo,
+        state.editingId,
+        memoRenderContext(memo.id),
+        state.expandedMemoIds.has(memo.id),
+        state.projects,
+        {
+          comments: commentsForMemo(memo.id),
+          commenting: state.commentingMemoId === memo.id,
+        },
+      );
+    } catch (err) {
+      return `
+        <article class="memo-card is-archived" data-memo-id="${escapeAttr(memo.id)}">
+          <div class="memo-empty-mini">memo 渲染失败: ${escapeHTML(errorMessage(err))}</div>
+        </article>
+      `;
+    }
   }
 
   function syncMemoExpandControls() {
@@ -2525,6 +2893,23 @@ export function mountMemosHome(root) {
       : emptyFilesTemplate();
   }
 
+  function renderClipboardView() {
+    if (editEditor) {
+      syncEditDraftFromEditor();
+      editEditor.destroy();
+      editEditor = null;
+      editEditorMemoId = "";
+    }
+
+    const item = state.clipboardItem;
+    els.feedCount.textContent = item && item.id ? clipboardTypeLabel(item.type) : "0 项";
+    els.memoList.innerHTML = clipboardCurrentTemplate(item, {
+      actionLabel: clipboardActionLabel(item && item.type),
+      typeLabel: clipboardTypeLabel(item && item.type),
+      working: state.clipboardWorking,
+    });
+  }
+
   function renderComposerStatus(value) {
     const text = String(value || "");
     const tagCount = extractTags(text).length;
@@ -2590,6 +2975,21 @@ export function mountMemosHome(root) {
     );
   }
 
+  function refreshMemoCommentsFromVault() {
+    loadMemoCommentsFromVault().then(
+      function (comments) {
+        state.comments = comments.map(normalizeMemoCommentPayload).filter(Boolean);
+        state.commentsLoaded = true;
+        renderAll();
+      },
+      function (err) {
+        if (typeof globalThis.invoke === "function") {
+          showToast("读取评论失败: " + errorMessage(err));
+        }
+      },
+    );
+  }
+
   function refreshMemoDraftsFromVault() {
     loadMemoDraftsFromVault().then(
       function (drafts) {
@@ -2605,6 +3005,29 @@ export function mountMemosHome(root) {
         }
       },
     );
+  }
+
+  function commentsForMemo(memoId) {
+    const id = String(memoId || "").trim();
+    return state.comments
+      .filter((comment) => comment && comment.memoId === id)
+      .sort(function (a, b) {
+        const left = new Date(a.createdAt || 0).getTime() || 0;
+        const right = new Date(b.createdAt || 0).getTime() || 0;
+        if (left === right) return a.id.localeCompare(b.id);
+        return left - right;
+      });
+  }
+
+  function upsertCommentInState(comment) {
+    const normalized = normalizeMemoCommentPayload(comment);
+    if (!normalized) return;
+    const index = state.comments.findIndex((item) => item.id === normalized.id);
+    if (index >= 0) {
+      state.comments[index] = normalized;
+    } else {
+      state.comments.push(normalized);
+    }
   }
 
   function findDraft(draftId) {
@@ -2686,7 +3109,8 @@ export function mountMemosHome(root) {
         if (state.activeTag && !extractTags(memo.content).includes(state.activeTag)) return false;
         if (state.selectedCalendarDate && memoDateKey(memo) !== state.selectedCalendarDate) return false;
         if (!query) return true;
-        return `${memo.content} ${memo.visibility}`.toLowerCase().includes(query);
+        const commentText = commentsForMemo(memo.id).map((comment) => comment.content).join("\n");
+        return `${memo.content} ${commentText} ${memo.visibility}`.toLowerCase().includes(query);
       })
       .sort((a, b) => {
         const result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
@@ -3120,6 +3544,7 @@ export function mountMemosHome(root) {
       index,
       maxDepth: options.maxDepth || 2,
       readonly: Boolean(options.readonly),
+      editorSettings: state.editorSettings,
       showLineNumbers: options.showLineNumbers !== false,
       sourceId: sourceId || "",
       stack: options.stack || (sourceId ? [sourceId] : []),
@@ -3139,11 +3564,18 @@ export function mountMemosHome(root) {
 export function mountDetachedMemoWindow(root, options = {}) {
   const params = new URLSearchParams(window.location.search);
   const state = {
+    commentDraft: "",
+    commentEditDraft: "",
+    commentEditingId: "",
+    commentExpandedIds: new Set(),
+    commentSaving: false,
+    comments: [],
     fixed: params.get("fixed") === "1" || Boolean(options.fixed),
     lastWindowState: null,
     memo: null,
     memoRefIndex: null,
     memos: [],
+    editorSettings: loadEditorSettings(),
     snapshotDebounceTimer: null,
     snapshotInFlight: false,
     snapshotPollTimer: null,
@@ -3154,22 +3586,34 @@ export function mountDetachedMemoWindow(root, options = {}) {
   root.innerHTML = detachedMemoWindowTemplate();
 
   const els = {
+    commentEditorHost: root.querySelector("[data-window-comment-editor]"),
+    commentFileInput: root.querySelector("[data-window-comment-file-input]"),
+    commentForm: root.querySelector("[data-window-comment-form]"),
+    commentSubmit: root.querySelector("[data-window-comment-submit]"),
     content: root.querySelector("[data-window-content]"),
     fixedButton: root.querySelector('[data-window-control="toggleFixed"]'),
     toast: root.querySelector("[data-toast]"),
     visibility: root.querySelector("[data-window-visibility]"),
   };
+  let detachedCommentEditor = createDetachedCommentEditor(state.commentDraft);
+  let detachedCommentEditEditor = null;
 
   renderFixedButton();
   applyFixedState();
   renderDetachedState("正在加载 memo...");
   loadDetachedMemo();
+  refreshDetachedEditorSettings();
 
   window.addEventListener("click", handleExternalLinkClick, true);
   window.addEventListener("beforeunload", handleDetachedBeforeUnload);
   window.addEventListener("resize", scheduleDetachedWindowStateSnapshot);
   root.addEventListener("click", handleClick);
+  root.addEventListener("change", handleChange);
+  root.addEventListener("keydown", handleKeydown, true);
+  root.addEventListener("submit", handleSubmit);
+  root.addEventListener("copy", handleMemoRenderedCopy);
   startDetachedWindowStateSnapshots();
+  syncDetachedCommentForm();
 
   return {
     destroy() {
@@ -3178,10 +3622,127 @@ export function mountDetachedMemoWindow(root, options = {}) {
       window.removeEventListener("beforeunload", handleDetachedBeforeUnload);
       window.removeEventListener("resize", scheduleDetachedWindowStateSnapshot);
       root.removeEventListener("click", handleClick);
+      root.removeEventListener("change", handleChange);
+      root.removeEventListener("keydown", handleKeydown, true);
+      root.removeEventListener("submit", handleSubmit);
+      root.removeEventListener("copy", handleMemoRenderedCopy);
+      if (detachedCommentEditor) detachedCommentEditor.destroy();
+      if (detachedCommentEditEditor) detachedCommentEditEditor.destroy();
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       root.innerHTML = "";
     },
   };
+
+  function createDetachedCommentEditor(value) {
+    if (!els.commentEditorHost) return null;
+    return createMiniEditor(els.commentEditorHost, {
+      memoItems() {
+        return state.memos;
+      },
+      tagItems: detachedEditorTagItems,
+      onChange(nextValue) {
+        state.commentDraft = nextValue;
+        syncDetachedCommentForm();
+      },
+      onCommit() {
+        return submitDetachedComment();
+      },
+      onDiscard() {
+        state.commentDraft = "";
+        syncDetachedCommentForm();
+        showToast("评论已清空");
+      },
+      onRequestFiles(accept) {
+        if (detachedCommentEditor && detachedCommentEditor.requestFiles) {
+          detachedCommentEditor.requestFiles(accept || "");
+        }
+      },
+      onQuit() {
+        if (detachedCommentEditor) detachedCommentEditor.blur();
+      },
+      onSave() {
+        return submitDetachedComment();
+      },
+      onSubmit() {
+        return submitDetachedComment();
+      },
+      onWriteDraft() {
+        return submitDetachedComment();
+      },
+      placeholder: "有想法，直接问，Shift+Enter 换行",
+      sourceMemoId: state.memo && state.memo.id,
+      value: value || "",
+      vim: detachedEditorVimEnabled(),
+    });
+  }
+
+  function recreateDetachedCommentEditor() {
+    const value = detachedCommentEditor ? detachedCommentEditor.getText() : state.commentDraft;
+    if (detachedCommentEditor) detachedCommentEditor.destroy();
+    if (els.commentEditorHost) els.commentEditorHost.innerHTML = "";
+    detachedCommentEditor = createDetachedCommentEditor(value);
+    state.commentDraft = value || "";
+    syncDetachedCommentForm();
+  }
+
+  function detachedEditorTagItems() {
+    return collectTags(state.memos.filter((memo) => memo && !memo.archived));
+  }
+
+  function detachedEditorVimEnabled() {
+    return state.editorSettings && state.editorSettings.vimMode === true;
+  }
+
+  function createDetachedCommentEditEditor(value) {
+    const host = els.content && els.content.querySelector("[data-window-comment-edit-host]");
+    if (!host) return null;
+    return createMiniEditor(host, {
+      memoItems() {
+        return state.memos;
+      },
+      tagItems: detachedEditorTagItems,
+      onChange(nextValue) {
+        state.commentEditDraft = nextValue;
+      },
+      onCommit() {
+        return saveDetachedCommentEdit();
+      },
+      onDiscard() {
+        return cancelDetachedCommentEdit();
+      },
+      onRequestFiles(accept) {
+        if (detachedCommentEditEditor && detachedCommentEditEditor.requestFiles) {
+          detachedCommentEditEditor.requestFiles(accept || "");
+        }
+      },
+      onQuit() {
+        return cancelDetachedCommentEdit();
+      },
+      onSave() {
+        return saveDetachedCommentEdit();
+      },
+      onSubmit() {
+        return saveDetachedCommentEdit();
+      },
+      onWriteDraft() {
+        return saveDetachedCommentEdit();
+      },
+      placeholder: "编辑评论...",
+      sourceMemoId: state.memo && state.memo.id,
+      value: value || "",
+      vim: detachedEditorVimEnabled(),
+    });
+  }
+
+  function destroyDetachedCommentEditEditor(options = {}) {
+    if (detachedCommentEditEditor) {
+      if (options.preserveDraft !== false) {
+        state.commentEditDraft = detachedCommentEditEditor.getText();
+      }
+      detachedCommentEditEditor.destroy();
+      detachedCommentEditEditor = null;
+    }
+  }
 
   function loadDetachedMemo() {
     const memoId = params.get("id") || "";
@@ -3203,6 +3764,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
           if (data.windowName) state.windowName = data.windowName;
           setDetachedPayload(data.memo, data.memos);
           renderDetachedMemo();
+          loadDetachedComments(state.memo && state.memo.id);
           applyFixedState();
           return;
         }
@@ -3223,6 +3785,19 @@ export function mountDetachedMemoWindow(root, options = {}) {
     }
     setDetachedPayload(memo, payload.memos);
     renderDetachedMemo();
+    loadDetachedComments(state.memo && state.memo.id);
+  }
+
+  function refreshDetachedEditorSettings() {
+    loadEditorSettingsFromVault().then(function (settings) {
+      const next = normalizeEditorSettings(settings);
+      const sameFileSettings = editorFileOpenSettingsKey(next) === editorFileOpenSettingsKey(state.editorSettings);
+      const sameVimMode = next.vimMode === state.editorSettings.vimMode;
+      if (sameFileSettings && sameVimMode) return;
+      state.editorSettings = next;
+      recreateDetachedCommentEditor();
+      renderDetachedMemo();
+    }, function () {});
   }
 
   function detachedMemoWindowName(memoId) {
@@ -3372,6 +3947,11 @@ export function mountDetachedMemoWindow(root, options = {}) {
 
   function setDetachedPayload(memo, memos) {
     state.memo = normalizeMemoPayload(memo);
+    state.comments = [];
+    state.commentDraft = "";
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentExpandedIds = new Set();
     state.memos = Array.isArray(memos)
       ? memos.map(normalizeMemoPayload).filter(Boolean)
       : [];
@@ -3379,6 +3959,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
       state.memos.unshift(state.memo);
     }
     state.memoRefIndex = null;
+    if (detachedCommentEditor) recreateDetachedCommentEditor();
   }
 
   function handleExternalLinkClick(event) {
@@ -3401,11 +3982,39 @@ export function mountDetachedMemoWindow(root, options = {}) {
       return;
     }
 
+    const attach = closestElement(event.target, "[data-window-comment-attach]");
+    if (attach && root.contains(attach)) {
+      event.preventDefault();
+      if (detachedCommentEditor && detachedCommentEditor.requestFiles && !state.commentSaving) {
+        detachedCommentEditor.requestFiles("");
+      } else if (els.commentFileInput && !state.commentSaving) {
+        els.commentFileInput.click();
+      }
+      return;
+    }
+
+    const commentAction = closestElement(event.target, "[data-window-comment-action]");
+    if (commentAction && root.contains(commentAction)) {
+      event.preventDefault();
+      const commentNode = closestElement(commentAction, "[data-comment-id]");
+      const commentId = commentNode && commentNode.dataset ? commentNode.dataset.commentId : "";
+      runDetachedCommentAction(commentAction.dataset.windowCommentAction, commentId);
+      return;
+    }
+
     const editorOpen = closestElement(event.target, "[data-editor-open]");
     if (editorOpen && root.contains(editorOpen)) {
       event.preventDefault();
       event.stopPropagation();
-      openFileInVSCode(editorOpen);
+      openFileInSelectedEditor(editorOpen);
+      return;
+    }
+
+    const imagePreview = closestElement(event.target, "[data-image-preview-src]");
+    if (imagePreview && root.contains(imagePreview)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openDetachedImagePreview(imagePreview);
       return;
     }
 
@@ -3426,9 +4035,278 @@ export function mountDetachedMemoWindow(root, options = {}) {
       case "copyMemoRef":
         copyDetachedMemoRef();
         break;
+      case "copyCodeBlock":
+        copyCodeBlockFromAction(action, state.memos, showToast);
+        break;
       default:
         break;
     }
+  }
+
+  function handleChange(event) {
+    if (event.target !== els.commentFileInput) return;
+    const files = Array.from(els.commentFileInput.files || []);
+    els.commentFileInput.value = "";
+    if (!files.length) return;
+    insertDetachedCommentFiles(files);
+  }
+
+  function handleKeydown(event) {
+    if (!isDetachedCommentEditorTarget(event.target)) return;
+    if (event.isComposing) return;
+    if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (hasOpenMemoEditorMenu()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitDetachedComment();
+  }
+
+  function handleSubmit(event) {
+    if (event.target !== els.commentForm) return;
+    event.preventDefault();
+    submitDetachedComment();
+  }
+
+  function runDetachedCommentAction(action, commentId) {
+    switch (action) {
+      case "edit":
+        startDetachedCommentEdit(commentId);
+        break;
+      case "save":
+        saveDetachedCommentEdit();
+        break;
+      case "cancel":
+        cancelDetachedCommentEdit();
+        break;
+      case "delete":
+        deleteDetachedComment(commentId);
+        break;
+      case "toggleExpand":
+        toggleDetachedCommentExpand(commentId);
+        break;
+      default:
+        break;
+    }
+  }
+
+  function toggleDetachedCommentExpand(commentId) {
+    if (!commentId) return;
+    if (state.commentExpandedIds.has(commentId)) {
+      state.commentExpandedIds.delete(commentId);
+    } else {
+      state.commentExpandedIds.add(commentId);
+    }
+    renderDetachedMemo();
+  }
+
+  function startDetachedCommentEdit(commentId) {
+    const comment = state.comments.find((item) => item && item.id === commentId);
+    if (!comment) return;
+    destroyDetachedCommentEditEditor({ preserveDraft: false });
+    state.commentEditingId = comment.id;
+    state.commentEditDraft = comment.content || "";
+    renderDetachedMemo();
+    if (detachedCommentEditEditor) detachedCommentEditEditor.focus();
+  }
+
+  function cancelDetachedCommentEdit() {
+    destroyDetachedCommentEditEditor({ preserveDraft: false });
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    renderDetachedMemo();
+    return Promise.resolve({ ok: true, message: "cancelled" });
+  }
+
+  function saveDetachedCommentEdit() {
+    const commentId = state.commentEditingId;
+    if (!commentId || state.commentSaving) return Promise.resolve({ ok: false, message: "没有正在编辑的评论" });
+    if (detachedCommentEditEditor) state.commentEditDraft = detachedCommentEditEditor.getText();
+    const content = String(state.commentEditDraft || "");
+    if (!content.trim()) {
+      showToast("评论不能为空");
+      if (detachedCommentEditEditor) detachedCommentEditEditor.focus();
+      return Promise.resolve({ ok: false, message: "评论不能为空" });
+    }
+
+    state.commentSaving = true;
+    syncDetachedCommentForm();
+    return updateMemoCommentInVault(commentId, { content }).then(
+      function (comment) {
+        const normalized = normalizeMemoCommentPayload(comment);
+        if (normalized) {
+          state.comments = state.comments.map((item) => item.id === normalized.id ? normalized : item);
+        }
+        destroyDetachedCommentEditEditor({ preserveDraft: false });
+        state.commentEditingId = "";
+        state.commentEditDraft = "";
+        renderDetachedMemo();
+        showToast("已保存评论");
+        return { ok: true, message: "已保存评论" };
+      },
+      function (err) {
+        showToast("保存评论失败: " + errorMessage(err));
+        return { ok: false, message: "保存评论失败: " + errorMessage(err) };
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+      syncDetachedCommentForm();
+    });
+  }
+
+  function deleteDetachedComment(commentId) {
+    const comment = state.comments.find((item) => item && item.id === commentId);
+    if (!comment || state.commentSaving) return;
+    if (!window.confirm("删除这条评论？")) return;
+    state.commentSaving = true;
+    syncDetachedCommentForm();
+    deleteMemoCommentInVault(comment.id, { cleanupAssets: true }).then(
+      function () {
+        state.comments = state.comments.filter((item) => item.id !== comment.id);
+        state.commentExpandedIds.delete(comment.id);
+        if (state.commentEditingId === comment.id) {
+          destroyDetachedCommentEditEditor({ preserveDraft: false });
+          state.commentEditingId = "";
+          state.commentEditDraft = "";
+        }
+        renderDetachedMemo();
+        showToast("已删除评论");
+      },
+      function (err) {
+        showToast("删除评论失败: " + errorMessage(err));
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+      syncDetachedCommentForm();
+    });
+  }
+
+  function insertDetachedCommentFiles(files) {
+    if (!detachedCommentEditor || state.commentSaving) return;
+    filesToMarkdown(files).then(
+      function (markdown) {
+        if (!markdown) return;
+        insertTextIntoDetachedComment(markdown);
+      },
+      function (err) {
+        showToast(uploadErrorMessage(err));
+      },
+    );
+  }
+
+  function insertTextIntoDetachedComment(text) {
+    if (!detachedCommentEditor) return;
+    detachedCommentEditor.insertBlock(String(text || ""));
+    detachedCommentEditor.focus();
+    syncDetachedCommentForm();
+  }
+
+  function isDetachedCommentEditorTarget(target) {
+    return Boolean(els.commentEditorHost && target && (target === els.commentEditorHost || els.commentEditorHost.contains(target)));
+  }
+
+  function hasOpenMemoEditorMenu() {
+    return Boolean(document.querySelector([
+      ".file-picker-menu:not(.hidden)",
+      ".memo-ref-menu:not(.hidden)",
+      ".slash-command-menu:not(.hidden)",
+      ".tag-picker-menu:not(.hidden)",
+      ".time-picker-menu:not(.hidden)",
+    ].join(",")));
+  }
+
+  function loadDetachedComments(memoId) {
+    const id = String(memoId || "").trim();
+    if (!id) {
+      state.comments = [];
+      renderDetachedMemo();
+      return;
+    }
+    loadMemoCommentsFromVault(id).then(
+      function (comments) {
+        state.comments = comments.map(normalizeMemoCommentPayload).filter(Boolean);
+        renderDetachedMemo();
+      },
+      function (err) {
+        state.comments = [];
+        renderDetachedMemo();
+        showToast("读取评论失败: " + errorMessage(err));
+      },
+    );
+  }
+
+  function submitDetachedComment() {
+    const memo = state.memo;
+    if (detachedCommentEditor) state.commentDraft = detachedCommentEditor.getText();
+    if (!memo || state.commentSaving) return Promise.resolve();
+    const content = String(state.commentDraft || "").trim();
+    if (!content) {
+      syncDetachedCommentForm();
+      return Promise.resolve();
+    }
+
+    state.commentSaving = true;
+    syncDetachedCommentForm();
+    return createMemoCommentInVault(memo.id, state.commentDraft).then(
+      function (comment) {
+        const normalized = normalizeMemoCommentPayload(comment);
+        if (normalized) state.comments = commentsForDetachedMemo(memo.id).concat(normalized);
+        state.commentDraft = "";
+        if (detachedCommentEditor) detachedCommentEditor.setText("");
+        renderDetachedMemo();
+        syncDetachedCommentForm();
+        showToast("已评论");
+      },
+      function (err) {
+        showToast("评论失败: " + errorMessage(err));
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+      syncDetachedCommentForm();
+    });
+  }
+
+  function commentsForDetachedMemo(memoId) {
+    const id = String(memoId || "").trim();
+    return state.comments
+      .filter((comment) => comment && comment.memoId === id)
+      .sort(function (a, b) {
+        const left = new Date(a.createdAt || 0).getTime() || 0;
+        const right = new Date(b.createdAt || 0).getTime() || 0;
+        if (left === right) return a.id.localeCompare(b.id);
+        return left - right;
+      });
+  }
+
+  function syncDetachedCommentForm() {
+    if (!els.commentSubmit) return;
+    if (detachedCommentEditor && detachedCommentEditor.getText() !== state.commentDraft) {
+      detachedCommentEditor.setText(state.commentDraft);
+    }
+    els.commentSubmit.disabled = !state.memo || state.commentSaving || !String(state.commentDraft || "").trim();
+    if (els.commentEditorHost) {
+      els.commentEditorHost.classList.toggle("is-disabled", !state.memo || state.commentSaving);
+    }
+  }
+
+  function syncDetachedCommentExpandControls() {
+    if (!els.content) return;
+    const collapsibleItems = els.content.querySelectorAll("[data-window-comment-collapse]");
+    collapsibleItems.forEach(function (item) {
+      const content = item.querySelector(".memo-comment-content");
+      if (!content) return;
+
+      item.classList.remove("is-short");
+      if (item.classList.contains("is-collapsed") && content.scrollHeight <= content.clientHeight + 1) {
+        item.classList.add("is-short");
+      }
+
+      content.querySelectorAll("img").forEach(function (image) {
+        if (image.complete) return;
+        if (image.dataset.memoWindowCommentExpandWatch) return;
+        image.dataset.memoWindowCommentExpandWatch = "true";
+        image.addEventListener("load", syncDetachedCommentExpandControls, { once: true });
+      });
+    });
   }
 
   function runWindowControl(control) {
@@ -3475,16 +4353,32 @@ export function mountDetachedMemoWindow(root, options = {}) {
       return;
     }
 
+    destroyDetachedCommentEditEditor();
     const context = detachedMemoRenderContext(state, memo.id, { readonly: true });
     document.title = memoTitle(memo);
     renderDetachedVisibility(memo);
-    els.content.innerHTML = detachedMemoCardTemplate(memo, context);
+    els.content.innerHTML = detachedMemoCardTemplate(memo, context, {
+      comments: commentsForDetachedMemo(memo.id),
+      editingCommentId: state.commentEditingId,
+      expandedCommentIds: state.commentExpandedIds,
+    });
+    if (state.commentEditingId) {
+      detachedCommentEditEditor = createDetachedCommentEditEditor(state.commentEditDraft);
+      if (detachedCommentEditEditor) detachedCommentEditEditor.focus();
+    }
+    syncDetachedCommentExpandControls();
+    syncDetachedCommentForm();
   }
 
   function renderDetachedState(message) {
     document.title = "Memo";
     renderDetachedVisibility(null);
     els.content.innerHTML = `<div class="memo-window-empty">${escapeHTML(message || "")}</div>`;
+    state.commentDraft = "";
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentExpandedIds = new Set();
+    syncDetachedCommentForm();
   }
 
   function renderDetachedVisibility(memo) {
@@ -3507,7 +4401,14 @@ export function mountDetachedMemoWindow(root, options = {}) {
       return;
     }
     state.memo = target;
+    state.comments = [];
+    state.commentDraft = "";
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentExpandedIds = new Set();
+    recreateDetachedCommentEditor();
     renderDetachedMemo();
+    loadDetachedComments(target.id);
   }
 
   function copyDetachedMemo() {
@@ -3534,39 +4435,44 @@ export function mountDetachedMemoWindow(root, options = {}) {
     );
   }
 
-  function openFileInVSCode(button) {
+  function openFileInSelectedEditor(button) {
     const file = button.dataset.editorFile || "";
+    const label = button.dataset.editorLabel || button.dataset.editorAppName || "编辑器";
     if (!file) {
       showToast("没有可打开的本地文件");
       return;
     }
     if (typeof invoke !== "function") {
-      showToast("当前环境不支持打开 VS Code");
+      showToast("当前环境不支持打开 " + label);
       return;
     }
 
     const line = button.dataset.editorLine || "1";
     const col = button.dataset.editorCol || "1";
-    button.disabled = true;
-    invoke(
+    const appId = button.dataset.editorAppId || "";
+    const appName = button.dataset.editorAppName || "";
+    const appPath = button.dataset.editorAppPath || "";
+    let url =
       "/api/editor/open?file=" +
-        encodeURIComponent(file) +
-        "&line=" +
-        encodeURIComponent(line) +
-        "&col=" +
-        encodeURIComponent(col) +
-        "&app=code",
-      { method: "GET" },
-    ).then(
+      encodeURIComponent(file) +
+      "&line=" +
+      encodeURIComponent(line) +
+      "&col=" +
+      encodeURIComponent(col);
+    if (appId) url += "&app=" + encodeURIComponent(appId);
+    if (appName) url += "&appName=" + encodeURIComponent(appName);
+    if (appPath) url += "&appPath=" + encodeURIComponent(appPath);
+    button.disabled = true;
+    invoke(url, { method: "GET" }).then(
       function (resp) {
         if (!resp || resp.code !== 0) {
-          showToast((resp && resp.msg) || "打开 VS Code 失败");
+          showToast((resp && resp.msg) || ("打开 " + label + " 失败"));
           return;
         }
-        showToast("已在 VS Code 中打开");
+        showToast("已在 " + label + " 中打开");
       },
       function (err) {
-        showToast("打开 VS Code 失败: " + err);
+        showToast("打开 " + label + " 失败: " + err);
       },
     ).finally(function () {
       button.disabled = false;
@@ -3589,6 +4495,12 @@ export function mountDetachedMemoWindow(root, options = {}) {
         showToast("打开链接失败: " + err);
       },
     );
+  }
+
+  function openDetachedImagePreview(element) {
+    openImagePreviewFromElement(element).catch(function (err) {
+      showToast("打开图片预览失败: " + errorMessage(err));
+    });
   }
 
   function callNativeWindow(method, args) {

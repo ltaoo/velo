@@ -144,3 +144,49 @@
 - Root cause: the previous empty-line paste fix only handled the exact `emptyBlock.start` cursor position. In the real editor, an empty paragraph cursor can resolve to the paragraph boundary (`before`/`after`) after creating or moving to a new line, so `pasteInsertPos` still treated it as a normal non-empty cursor and inserted outside the empty paragraph.
 - Fix: added `emptyTextblockAtCursor`, which recognizes an empty textblock across its full `before..after` boundary span. Charwise `p` and `P` now normalize any such cursor position to the empty textblock start before inserting.
 - Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260610-vim-empty-line-paste-boundary`.
+
+## 2026-06-11: visual `gg` does not extend selection to the top
+
+- Symptom: after entering char visual mode with `v`, pressing `gg` did not select from the original cursor position up to the document top. Visual motions should select the content traversed by the motion, same as the already fixed `h/j/k/l/e/G` paths.
+- Root cause: normal mode had a `g` pending state for `gg`, but visual mode only handled single-key motions. The first `g` in visual mode was unmapped instead of waiting for the second `g`.
+- Fix: visual mode now supports a `g` pending state. `v gg` moves the visual cursor to `docStart(state)` and reuses `visualSelectionRangeForCursor`, so the selection keeps Vim's inclusive visual semantics while ProseMirror still receives a half-open range.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260611-vim-visual-gg-motion`.
+
+## 2026-06-11: visual selection is too faint in dark mode
+
+- Symptom: char visual selection was hard to see in dark mode because `.vim-visual-range` used a low-alpha green background that blended into the editor surface.
+- Fix: added dedicated `--vim-visual-*` theme variables. Dark mode now uses a brighter blue selection fill, a subtle inset ring, and high-contrast selected text; light mode keeps a softer blue fill.
+- Cache note: updated `index.css` query keys in `index.html`, `memo-window.html`, and `memo-slim.html` to `20260611-vim-visual-dark-selection`.
+
+## 2026-06-11: support `Ctrl-d` and `Ctrl-u` multi-line motions
+
+- Symptom: `Ctrl-d` and `Ctrl-u` were ignored because `keyName` filtered unmapped Ctrl combinations before they could reach Vim command handling.
+- Fix: mapped `Ctrl-d` and `Ctrl-u` in `keyName`, added them to `motionTarget`, and shared motion-key detection between normal and visual mode. They now move down/up by `LINE_JUMP_COUNT` lines and preserve the current column through the existing vertical motion helper.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260611-vim-ctrl-du-motion`.
+
+## 2026-06-11: char visual selection is invisible on empty lines
+
+- Symptom: with char visual mode, moving vertically onto an empty line selected the newline semantically, but there was no visible highlight because empty paragraphs have no inline content for `.vim-visual-range` to decorate.
+- Fix: char visual rendering now adds a `vim-visual-empty-line` widget when a selected range covers an empty textblock. The widget reuses the visual selection theme variables and acts as a visible newline placeholder without changing document content.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html`, and `index.css` query keys in `index.html`, `memo-window.html`, and `memo-slim.html`, to `20260611-vim-visual-empty-line`.
+
+## 2026-06-11: empty-line visual marker creates an extra blank row
+
+- Symptom: after selecting an empty line in char visual mode, an extra blank row without a line number appeared between lines.
+- Root cause: the empty-line visual marker was an `inline-block`, so inside ProseMirror's empty paragraph it could participate in line layout and combine with the editor's empty-block placeholder behavior.
+- Fix: changed `.vim-visual-empty-line` into a zero-size inline marker and moved the visible highlight into an absolutely positioned `::after`, matching the existing empty-line cursor pattern. The marker no longer contributes layout height.
+- Cache note: updated `index.css` query keys in `index.html`, `memo-window.html`, and `memo-slim.html` to `20260611-vim-visual-empty-line-layout`.
+
+## 2026-06-11: `v gg Esc` leaves native browser selection visible
+
+- Symptom: after entering visual mode, pressing `gg`, then `Esc`, the editor left a native browser selection highlight over the content below the first line.
+- Root cause: ProseMirror state was correctly collapsed to the top cursor position, but the browser DOM selection could remain as the previous backward visual range after the keydown cycle. Once Vim mode returned to normal, the native `::selection` color became visible.
+- Fix: visual exit now explicitly focuses/synchronizes the editor DOM selection to the collapsed ProseMirror cursor, then repeats the sync on a microtask to cover browser selection flush timing.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260611-vim-visual-exit-dom-selection`.
+
+## 2026-06-11: `v gg Esc` native selection still visible after microtask sync
+
+- Symptom: the browser-native blue selection could still remain after `v gg Esc`, even though ProseMirror state was collapsed and a microtask DOM selection sync had run.
+- Root cause: in the desktop WebView, the native DOM selection may be restored later than a microtask after the keydown path. Also, once Vim returns to normal mode, any residual native selection becomes visible unless normal mode suppresses editor `::selection`.
+- Fix: visual exit now also flushes DOM selection on the next animation frame or a 16ms timeout fallback. Normal mode now hides native `::selection` inside the editor, matching Vim behavior where selection feedback should come from Vim decorations rather than browser selection paint.
+- Cache note: updated `vim.js` script query keys in `index.html` and `memo-window.html` to `20260611-vim-visual-exit-selection-flush`, and `index.css` query keys in `index.html`, `memo-window.html`, and `memo-slim.html` to `20260611-vim-normal-native-selection-hide`.

@@ -54,19 +54,33 @@ func inputSourceLockStatus(settings InputSourceLockSettings) velo.H {
 	sources, sourceErr := inputsource.List()
 	current, currentErr := inputsource.Current()
 	frontmost, frontmostErr := inputsource.FrontmostApp()
-	supported := sourceErr == nil || currentErr == nil
+	supported := sourceErr == nil
 	if errors.Is(sourceErr, inputsource.ErrUnsupported) || errors.Is(currentErr, inputsource.ErrUnsupported) {
 		supported = false
 	}
+	var availability InputSourceLockAvailability
+	if sourceErr == nil {
+		availability = inputSourceLockAvailability(settings, inputSourceIDSet(sources))
+	} else {
+		availability = InputSourceLockAvailability{
+			MissingSourceIDs: []string{},
+			MissingAppRules:  []InputSourceLockMissingRule{},
+		}
+	}
 	return velo.H{
-		"enabled":        normalizeInputSourceLockSettings(settings).Enabled,
-		"supported":      supported,
-		"sources":        sources,
-		"current":        current,
-		"frontmostApp":   frontmost,
-		"sourceError":    errorString(sourceErr),
-		"currentError":   errorString(currentErr),
-		"frontmostError": errorString(frontmostErr),
+		"enabled":                normalizeInputSourceLockSettings(settings).Enabled,
+		"runtimeEnabled":         availability.RuntimeEnabled,
+		"supported":              supported,
+		"sources":                sources,
+		"current":                current,
+		"frontmostApp":           frontmost,
+		"sourceError":            errorString(sourceErr),
+		"currentError":           errorString(currentErr),
+		"frontmostError":         errorString(frontmostErr),
+		"hasMissingSources":      availability.HasMissingSources,
+		"missingDefaultSourceId": availability.MissingDefaultSourceID,
+		"missingSourceIds":       availability.MissingSourceIDs,
+		"missingAppRules":        availability.MissingAppRules,
 	}
 }
 

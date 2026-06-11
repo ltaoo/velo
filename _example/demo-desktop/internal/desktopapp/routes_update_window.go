@@ -80,10 +80,14 @@ func registerUpdateAndWindowRoutes(b *velo.Box, appUpdater *updater.AppUpdater) 
 	b.Get("/api/open_window", func(c *velo.BoxContext) interface{} {
 		storageID := sanitizeStorageID(c.Query("storageId"))
 		objectPath := cleanOSSObjectPath(c.Query("objectPath"))
+		previewID := sanitizeStorageID(c.Query("previewId"))
 		spec := windowing.BuildOpenWindowSpec(windowing.OpenWindowRequest{
 			ObjectPath:       objectPath,
 			ObjectPathSuffix: sanitizeStorageID(objectPath),
 			Pathname:         c.Query("pathname"),
+			PreviewID:        previewID,
+			PreviewSrc:       c.Query("previewSrc"),
+			PreviewTitle:     c.Query("previewTitle"),
 			Provider:         c.Query("provider"),
 			StorageID:        storageID,
 		})

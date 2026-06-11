@@ -34,3 +34,16 @@ func TestBuildOpenWindowSpecPreviewIncludesQueryAndStableName(t *testing.T) {
 		t.Fatalf("spec = %#v, want preview window", spec)
 	}
 }
+
+func TestBuildOpenWindowSpecImagePreviewIncludesID(t *testing.T) {
+	spec := BuildOpenWindowSpec(OpenWindowRequest{
+		Pathname:  "/image-preview",
+		PreviewID: "preview-123",
+	})
+	if spec.Pathname != "/image-preview?id=preview-123" {
+		t.Fatalf("pathname = %q, want image preview id query", spec.Pathname)
+	}
+	if spec.Name != "image-preview-preview-123" || spec.EntryPage != "image-preview.html" || spec.Width != 980 || spec.Height != 760 {
+		t.Fatalf("spec = %#v, want image preview window", spec)
+	}
+}

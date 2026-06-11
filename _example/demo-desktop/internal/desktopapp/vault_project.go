@@ -19,6 +19,7 @@ const globalVeloDirName = ".velo"
 const globalVaultDataFileName = "data.json"
 const vaultConfigDirName = ".velo"
 const vaultMemoDirName = "memo"
+const vaultMemoCommentDirName = "memo-comments"
 const vaultProjectsFileName = "projects.json"
 const vaultSchemaVersion = 1
 
@@ -50,10 +51,11 @@ type VaultFile struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 type VaultContext struct {
-	Entry   VaultEntry `json:"entry"`
-	RootDir string     `json:"rootDir"`
-	VeloDir string     `json:"veloDir"`
-	MemoDir string     `json:"memoDir"`
+	Entry          VaultEntry `json:"entry"`
+	RootDir        string     `json:"rootDir"`
+	VeloDir        string     `json:"veloDir"`
+	MemoDir        string     `json:"memoDir"`
+	MemoCommentDir string     `json:"memoCommentDir"`
 }
 
 type VaultOpenRequest struct {
@@ -228,6 +230,10 @@ func openVaultDirectory(value string, createIfMissing bool) (*VaultContext, bool
 	if err := os.MkdirAll(memoDir, 0755); err != nil {
 		return nil, false, fmt.Errorf("create memo directory: %w", err)
 	}
+	memoCommentDir := filepath.Join(rootDir, vaultMemoCommentDirName)
+	if err := os.MkdirAll(memoCommentDir, 0755); err != nil {
+		return nil, false, fmt.Errorf("create memo comment directory: %w", err)
+	}
 
 	vaultFile, err := loadOrCreateVaultFile(rootDir, veloDir)
 	if err != nil {
@@ -241,10 +247,11 @@ func openVaultDirectory(value string, createIfMissing bool) (*VaultContext, bool
 		Path:         rootDir,
 	}
 	return &VaultContext{
-		Entry:   entry,
-		RootDir: rootDir,
-		VeloDir: veloDir,
-		MemoDir: memoDir,
+		Entry:          entry,
+		RootDir:        rootDir,
+		VeloDir:        veloDir,
+		MemoDir:        memoDir,
+		MemoCommentDir: memoCommentDir,
 	}, existingVault, nil
 }
 

@@ -13,6 +13,7 @@ import (
 
 type editorSpec struct {
 	name        string
+	displayName string
 	priority    int
 	appPath     string
 	cmdBuilder  func(executable string, file string, line string, col string) *exec.Cmd
@@ -246,7 +247,7 @@ func editorLocalURLPath(value string) (string, bool, error) {
 	return decoded, true, nil
 }
 
-func openFileInEditor(file string, line string, col string, preferredEditor string) error {
+func openFileInEditor(file string, line string, col string, preferredEditor *EditorAppSelection) error {
 	absoluteFile := expandLocalPath(file)
 	if !filepath.IsAbs(absoluteFile) && !isWindowsDrivePath(absoluteFile) {
 		cwd, err := os.Getwd()
@@ -262,8 +263,22 @@ func openFileInEditor(file string, line string, col string, preferredEditor stri
 		return fmt.Errorf("folder cannot be opened in editor: %s", absoluteFile)
 	}
 
-	spec, executable, err := chooseEditor(preferredEditor)
+	selection := normalizeEditorAppSelection(preferredEditor)
+	if selection.ID == editorNoneAppID {
+		return nil
+	}
+	if selection.ID == editorSystemAppID {
+		return openFileWithSystemDefault(absoluteFile)
+	}
+	if isCustomEditorSelection(selection) {
+		return openFileInSelectedApplication(absoluteFile, selection)
+	}
+
+	spec, executable, err := chooseEditor(selection.ID)
 	if err != nil {
+		if selection.Path != "" {
+			return openFileInSelectedApplication(absoluteFile, selection)
+		}
 		return err
 	}
 
@@ -280,6 +295,58 @@ func openFileInEditor(file string, line string, col string, preferredEditor stri
 		if fallbackErr := fallback.Start(); fallbackErr != nil {
 			return fmt.Errorf("failed to launch editor via URL scheme: %w", fallbackErr)
 		}
+	}
+	return nil
+}
+
+func isCustomEditorSelection(selection *EditorAppSelection) bool {
+	if selection == nil {
+		return false
+	}
+	if isCustomEditorAppID(selection.ID) {
+		return true
+	}
+	if selection.Path == "" {
+		return false
+	}
+	return normalizeEditorName(selection.ID) == ""
+}
+
+func openFileInSelectedApplication(file string, selection *EditorAppSelection) error {
+	path := strings.TrimSpace(selection.Path)
+	if path == "" && isCustomEditorAppID(selection.ID) {
+		path = strings.TrimSpace(strings.TrimPrefix(selection.ID, editorAppIDPrefix))
+	}
+	if path == "" {
+		return fmt.Errorf("editor application is required")
+	}
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" && (strings.HasSuffix(path, ".app") || !strings.ContainsAny(path, `/\`)) {
+		cmd = exec.Command("open", "-a", path, file)
+	} else {
+		cmd = exec.Command(path, file)
+	}
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to launch editor application: %w", err)
+	}
+	return nil
+}
+
+func openFileWithSystemDefault(file string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", file)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", file)
+	default:
+		cmd = exec.Command("xdg-open", file)
+	}
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open file with system default app: %w", err)
 	}
 	return nil
 }
@@ -339,9 +406,10 @@ func chooseEditor(preferredEditor string) (*editorSpec, string, error) {
 func editorSpecs() []editorSpec {
 	return []editorSpec{
 		{
-			name:     "trae",
-			priority: 10,
-			appPath:  "/Applications/Trae.app/Contents/MacOS/trae",
+			name:        "trae",
+			displayName: "Trae",
+			priority:    10,
+			appPath:     "/Applications/Trae.app/Contents/MacOS/trae",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, file)
 			},
@@ -350,9 +418,10 @@ func editorSpecs() []editorSpec {
 			},
 		},
 		{
-			name:     "cursor",
-			priority: 10,
-			appPath:  "/Applications/Cursor.app/Contents/MacOS/cursor",
+			name:        "cursor",
+			displayName: "Cursor",
+			priority:    10,
+			appPath:     "/Applications/Cursor.app/Contents/MacOS/cursor",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "--goto", fmt.Sprintf("%s:%s:%s", file, line, col))
 			},
@@ -361,54 +430,61 @@ func editorSpecs() []editorSpec {
 			},
 		},
 		{
-			name:     "code",
-			priority: 10,
-			appPath:  "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+			name:        "code",
+			displayName: "VS Code",
+			priority:    10,
+			appPath:     "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "-g", fmt.Sprintf("%s:%s:%s", file, line, col))
 			},
 		},
 		{
-			name:     "code-insiders",
-			priority: 10,
-			appPath:  "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
+			name:        "code-insiders",
+			displayName: "VS Code Insiders",
+			priority:    10,
+			appPath:     "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "-g", fmt.Sprintf("%s:%s:%s", file, line, col))
 			},
 		},
 		{
-			name:     "webstorm",
-			priority: 5,
-			appPath:  "/Applications/WebStorm.app/Contents/MacOS/webstorm",
+			name:        "webstorm",
+			displayName: "WebStorm",
+			priority:    5,
+			appPath:     "/Applications/WebStorm.app/Contents/MacOS/webstorm",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "--line", line, file)
 			},
 		},
 		{
-			name:     "idea",
-			priority: 5,
-			appPath:  "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea",
+			name:        "idea",
+			displayName: "IntelliJ IDEA",
+			priority:    5,
+			appPath:     "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea",
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "--line", line, file)
 			},
 		},
 		{
-			name:     "vim",
-			priority: 3,
+			name:        "vim",
+			displayName: "Vim",
+			priority:    3,
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "+"+line, file)
 			},
 		},
 		{
-			name:     "nvim",
-			priority: 3,
+			name:        "nvim",
+			displayName: "Neovim",
+			priority:    3,
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "+"+line, file)
 			},
 		},
 		{
-			name:     "emacs",
-			priority: 2,
+			name:        "emacs",
+			displayName: "Emacs",
+			priority:    2,
 			cmdBuilder: func(executable string, file string, line string, col string) *exec.Cmd {
 				return exec.Command(executable, "+"+line, file)
 			},

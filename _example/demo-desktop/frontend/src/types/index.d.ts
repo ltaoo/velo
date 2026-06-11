@@ -1,3 +1,4 @@
+export * from "./memo-comments";
 export * from "./memo-repository";
 export * from "./memo-drafts";
 export * from "./memo-resources";

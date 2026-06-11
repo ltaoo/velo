@@ -198,7 +198,7 @@ func Run(assets Assets) {
 	defer inputSourceLock.Stop()
 
 	registerRoutes(b, logger, app_updater, inputSourceLock)
-	startClipboardWatcher(b, logger)
+	initClipboardReader(logger)
 
 	fmt.Println("starting server...")
 

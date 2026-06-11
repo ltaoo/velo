@@ -1,3 +1,4 @@
+export * from "./memo-comments.js";
 export * from "./memo-repository.js";
 export * from "./memo-drafts.js";
 export * from "./memo-resources.js";
