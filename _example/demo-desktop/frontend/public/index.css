@@ -4078,11 +4078,43 @@ body.is-fixed-window .memo-window-shell {
   text-overflow: ellipsis;
 }
 
+.memo-card-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.memo-card-stats {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memo-card-stat {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-2);
+  display: inline-flex;
+  font-size: var(--font-sm);
+  line-height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
 .memo-card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
+}
+
+.memo-card-summary .memo-card-tags {
+  margin-top: 0;
 }
 
 .memo-card-tags button,

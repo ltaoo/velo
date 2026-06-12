@@ -2,10 +2,11 @@ import {
   DEFAULT_VISIBILITY,
   VISIBILITY,
   buildMemoReferenceIndex,
+  collectTodos,
   extractTags,
   memoBacklinkCount,
 } from "../../domain/memos.js";
-import { fileDisplayName } from "../../domain/memo-resources.js";
+import { collectCodeBlocks, collectLinks, collectResources, fileDisplayName } from "../../domain/memo-resources.js";
 import { normalizeProjectColor, normalizeProjectFilter, normalizeProjectID } from "../../domain/projects.js";
 import {
   calendarWeekdays,
@@ -64,6 +65,7 @@ function detachedMemoWindowTemplate() {
 
 function detachedMemoCardTemplate(memo, renderContext, options = {}) {
   const tags = extractTags(memo.content);
+  const summary = memoCardSummaryTemplate(memo, tags, { interactiveTags: false });
   const backlinks = memoBacklinkCount(renderContext, memo.id);
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const editingCommentId = String(options.editingCommentId || "");
@@ -89,7 +91,7 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
         </div>
       </header>
       <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
-      ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}</div>` : ""}
+      ${summary}
       ${comments.length ? detachedMemoCommentsTemplate(comments, renderContext, editingCommentId, expandedCommentIds) : ""}
     </article>
   `;
@@ -533,6 +535,7 @@ function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
 function memoTemplate(memo, editingId, renderContext, expanded = false, projects = [], options = {}) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(memo.content);
+  const summary = memoCardSummaryTemplate(memo, tags, { interactiveTags: true });
   const archived = memo.archived;
   const editing = memo.id === editingId;
   const backlinks = memoBacklinkCount(renderContext, memo.id);
@@ -574,7 +577,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
                 ${SVG.chevronDown}
               </button>
             </div>
-            ${tags.length ? `<div class="memo-card-tags">${tags.map((tag) => `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`).join("")}</div>` : ""}
+            ${summary}
           `
       }
       ${!editing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext) : ""}
@@ -594,6 +597,53 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
       </footer>
     </article>
   `;
+}
+
+function memoCardSummaryTemplate(memo, tags, options = {}) {
+  const stats = memoCardStatItems(memo);
+  const tagMarkup = memoCardTagsTemplate(tags, options);
+  if (!stats.length && !tagMarkup) return "";
+
+  return `
+    <div class="memo-card-summary">
+      ${stats.length ? `<div class="memo-card-stats">${stats.map(memoCardStatTemplate).join("")}</div>` : ""}
+      ${tagMarkup}
+    </div>
+  `;
+}
+
+function memoCardStatItems(memo) {
+  const content = String((memo && memo.content) || "");
+  const list = [{ label: `${Array.from(content).length} 字符` }];
+  const resources = collectResources([memo]);
+  const files = resources.filter((resource) => resource.type === "file").length;
+  const images = resources.filter((resource) => resource.type === "image").length;
+  const todos = collectTodos([memo]).length;
+  const codeBlocks = collectCodeBlocks([memo]).length;
+  const links = collectLinks([memo]).length;
+
+  if (files) list.push({ label: `${files} 文件` });
+  if (images) list.push({ label: `${images} 图片` });
+  if (todos) list.push({ label: `${todos} 代办` });
+  if (codeBlocks) list.push({ label: `${codeBlocks} 代码块` });
+  if (links) list.push({ label: `${links} 链接` });
+
+  return list;
+}
+
+function memoCardStatTemplate(item) {
+  return `<span class="memo-card-stat">${escapeHTML(item.label)}</span>`;
+}
+
+function memoCardTagsTemplate(tags, options = {}) {
+  if (!Array.isArray(tags) || !tags.length) return "";
+  const interactive = options.interactiveTags === true;
+  const items = tags.map(function (tag) {
+    return interactive
+      ? `<button type="button" data-tag="${escapeAttr(tag)}">#${escapeHTML(tag)}</button>`
+      : `<span>#${escapeHTML(tag)}</span>`;
+  });
+  return `<div class="memo-card-tags">${items.join("")}</div>`;
 }
 
 function memoCommentSectionTemplate(comments, commenting, renderContext) {
