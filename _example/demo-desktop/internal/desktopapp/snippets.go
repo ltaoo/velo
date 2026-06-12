@@ -42,11 +42,12 @@ type snippetMarker struct {
 }
 
 type activeCodeBlock struct {
-	FenceLine  string
-	Language   string
-	Lines      []string
-	Marker     *snippetMarker
-	StartIndex int
+	FenceLine    string
+	Language     string
+	Lines        []string
+	Marker       *snippetMarker
+	OpeningFence memoCodeFence
+	StartIndex   int
 }
 
 type scoredSnippet struct {
@@ -55,7 +56,7 @@ type scoredSnippet struct {
 }
 
 var (
-	codeFenceLineRe     = regexp.MustCompile("^(```+|~~~+)\\s*(.*)$")
+	codeFenceLineRe     = regexp.MustCompile("^(`{3,}|~{3,})\\s*(.*)$")
 	snippetMarkerTextRe = regexp.MustCompile(`(?i)(?:^|\s)(#?snippet|snip|code[-\s]?snippet|代码片段|片段)(?:\s*[:：-]\s*|\s+|$)(.*)$`)
 	aliasPrefixRe       = regexp.MustCompile(`(?i)^(?:alias|aliases|aka|as|别名|缩写)\s*[:：=]\s*`)
 	memoEmbedImageRe    = regexp.MustCompile(`!\[\[([^\]]+)\]\]`)
@@ -279,7 +280,8 @@ func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 	var active *activeCodeBlock
 
 	for index, line := range lines {
-		if !isMemoCodeFenceLine(line) {
+		fence, hasFence := parseMemoCodeFenceLine(line)
+		if !hasFence {
 			if active != nil {
 				active.Lines = append(active.Lines, line)
 			}
@@ -287,8 +289,12 @@ func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 		}
 
 		if active != nil {
-			items = append(items, codeSnippetView(memo, lines, *active, index))
-			active = nil
+			if memoCodeFenceCloses(fence, active.OpeningFence) {
+				items = append(items, codeSnippetView(memo, lines, *active, index))
+				active = nil
+			} else {
+				active.Lines = append(active.Lines, line)
+			}
 			continue
 		}
 
@@ -297,11 +303,12 @@ func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 			marker = snippetMarkerFromPreviousLines(lines, index)
 		}
 		active = &activeCodeBlock{
-			FenceLine:  line,
-			Language:   language,
-			Lines:      []string{},
-			Marker:     marker,
-			StartIndex: index,
+			FenceLine:    line,
+			Language:     language,
+			Lines:        []string{},
+			Marker:       marker,
+			OpeningFence: fence,
+			StartIndex:   index,
 		}
 	}
 
@@ -360,13 +367,11 @@ func codeSnippetView(memo MemoRecord, lines []string, block activeCodeBlock, end
 }
 
 func parseCodeFence(line string) (string, *snippetMarker) {
-	trimmed := strings.TrimSpace(line)
-	match := codeFenceLineRe.FindStringSubmatch(trimmed)
-	if len(match) == 0 {
+	fence, ok := parseMemoCodeFenceLine(line)
+	if !ok {
 		return "", nil
 	}
-	info := strings.TrimSpace(match[2])
-	return codeBlockLanguageFromInfo(info), snippetMarkerFromText(info, false)
+	return codeBlockLanguageFromInfo(fence.Info), snippetMarkerFromText(fence.Info, false)
 }
 
 func codeBlockLanguageFromInfo(info string) string {

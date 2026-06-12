@@ -22,6 +22,12 @@ type memoAssetReference struct {
 	StorageID string
 }
 
+type memoCodeFence struct {
+	Info   string
+	Length int
+	Marker string
+}
+
 func extractMemoTags(content string) []string {
 	searchText := memoSearchableMarkdown(content)
 	matches := memoTagPattern.FindAllStringSubmatch(searchText, -1)
@@ -86,14 +92,20 @@ func memoSearchableMarkdown(content string) string {
 	lines := strings.Split(normalizeMemoContent(content), "\n")
 	output := make([]string, 0, len(lines))
 	inCode := false
+	var activeFence memoCodeFence
 	for _, line := range lines {
-		if isMemoCodeFenceLine(line) {
-			output = append(output, strings.Repeat(" ", len(line)))
-			inCode = !inCode
-			continue
-		}
+		fence, hasFence := parseMemoCodeFenceLine(line)
 		if inCode {
 			output = append(output, strings.Repeat(" ", len(line)))
+			if hasFence && memoCodeFenceCloses(fence, activeFence) {
+				inCode = false
+			}
+			continue
+		}
+		if hasFence {
+			output = append(output, strings.Repeat(" ", len(line)))
+			activeFence = fence
+			inCode = true
 			continue
 		}
 		output = append(output, maskMemoInlineCode(line))
@@ -103,20 +115,50 @@ func memoSearchableMarkdown(content string) string {
 
 func memoLineIndexInCodeBlock(lines []string, targetIndex int) bool {
 	inCode := false
+	var activeFence memoCodeFence
 	for index, line := range lines {
+		fence, hasFence := parseMemoCodeFenceLine(line)
 		if index == targetIndex {
-			return inCode || isMemoCodeFenceLine(line)
+			return inCode || hasFence
 		}
-		if isMemoCodeFenceLine(line) {
-			inCode = !inCode
+		if inCode {
+			if hasFence && memoCodeFenceCloses(fence, activeFence) {
+				inCode = false
+			}
+			continue
+		}
+		if hasFence {
+			activeFence = fence
+			inCode = true
 		}
 	}
 	return false
 }
 
 func isMemoCodeFenceLine(line string) bool {
+	_, ok := parseMemoCodeFenceLine(line)
+	return ok
+}
+
+func parseMemoCodeFenceLine(line string) (memoCodeFence, bool) {
 	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+	match := codeFenceLineRe.FindStringSubmatch(trimmed)
+	if len(match) == 0 {
+		return memoCodeFence{}, false
+	}
+	run := match[1]
+	if run == "" {
+		return memoCodeFence{}, false
+	}
+	return memoCodeFence{
+		Info:   strings.TrimSpace(match[2]),
+		Length: len(run),
+		Marker: run[:1],
+	}, true
+}
+
+func memoCodeFenceCloses(fence memoCodeFence, opening memoCodeFence) bool {
+	return fence.Marker == opening.Marker && fence.Length >= opening.Length && fence.Info == ""
 }
 
 func maskMemoInlineCode(line string) string {

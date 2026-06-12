@@ -128,10 +128,12 @@ func TestCreateVaultMemoIgnoresCodeWhenExtractingMetadata(t *testing.T) {
 	content := strings.Join([]string{
 		"#real outside [[memo:real]]",
 		"`#inline [[memo:inline]]`",
+		"````markdown",
 		"```",
 		"#code [[memo:code]]",
 		"- [ ] code task #todo",
 		"```",
+		"````",
 		"- [ ] outside task #work",
 	}, "\n")
 	memo, err := createVaultMemo(ctx, MemoCreateRequest{

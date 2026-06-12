@@ -1,4 +1,11 @@
-import { cleanMemoLine, compactText, isMemoFenceLine, maskMemoInlineCode, memoLines } from "./memos.js";
+import {
+  cleanMemoLine,
+  compactText,
+  isMemoFenceClosingLine,
+  maskMemoInlineCode,
+  memoLines,
+  parseMemoFenceLine,
+} from "./memos.js";
 import { parseAssetReference } from "./storage.js";
 
 export function collectLinks(memos) {
@@ -16,23 +23,29 @@ export function collectCodeBlocks(memos) {
     let activeBlock = null;
 
     lines.forEach((line, lineIndex) => {
-      if (!isMemoFenceLine(line)) {
+      const openingFence = parseMemoFenceLine(line);
+      if (!openingFence) {
         if (activeBlock) activeBlock.lines.push(line);
         return;
       }
 
       if (activeBlock) {
-        blocks.push(codeBlockView(memo, lines, activeBlock, lineIndex));
-        activeBlock = null;
+        if (isMemoFenceClosingLine(line, activeBlock.openingFence)) {
+          blocks.push(codeBlockView(memo, lines, activeBlock, lineIndex));
+          activeBlock = null;
+        } else {
+          activeBlock.lines.push(line);
+        }
         return;
       }
 
-      const fence = codeBlockFence(line);
+      const blockFence = codeBlockFence(line);
       activeBlock = {
         fenceLine: line,
-        language: fence.language,
+        language: blockFence.language,
         lines: [],
-        marker: fence.marker || codeBlockMarkerFromPreviousLines(lines, lineIndex),
+        marker: blockFence.marker || codeBlockMarkerFromPreviousLines(lines, lineIndex),
+        openingFence,
         startLineIndex: lineIndex,
       };
     });
@@ -57,13 +70,17 @@ export function collectMemoReferences(memos) {
   const references = [];
   memos.forEach((memo) => {
     const lines = memoLines(memo.content);
-    let inCode = false;
+    let activeFence = null;
     lines.forEach((line, lineIndex) => {
-      if (isMemoFenceLine(line)) {
-        inCode = !inCode;
+      const fence = parseMemoFenceLine(line);
+      if (activeFence) {
+        if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
         return;
       }
-      if (inCode) return;
+      if (fence) {
+        activeFence = fence;
+        return;
+      }
       references.push(...collectLineReferences(memo, lines, line, lineIndex));
     });
   });
@@ -146,9 +163,8 @@ export function codeBlockView(memo, lines, block, endLineIndex) {
 }
 
 export function codeBlockFence(line) {
-  const trimmed = String(line || "").trim();
-  const match = trimmed.match(/^(```+|~~~+)\s*(.*)$/);
-  const info = match ? match[2].trim() : "";
+  const fence = parseMemoFenceLine(line);
+  const info = fence ? fence.info : "";
   return {
     language: codeBlockLanguageFromInfo(info),
     marker: codeBlockMarkerFromText(info),

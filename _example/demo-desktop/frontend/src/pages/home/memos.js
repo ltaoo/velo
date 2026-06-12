@@ -7,10 +7,11 @@ import {
   compactText,
   extractTags,
   getTodoStats,
-  isMemoFenceLine,
+  isMemoFenceClosingLine,
   memoReferenceAlias,
   memoTitle,
   normalizeMemoPayload,
+  parseMemoFenceLine,
   parseTaskLine,
   updateTaskLine,
 } from "../../domain/memos.js";
@@ -2373,13 +2374,17 @@ export function mountMemosHome(root) {
 
   function createMemoFromTodoItems(memo) {
     const lines = String(memo.content || "").replace(/\r\n/g, "\n").split("\n");
-    let inCode = false;
+    let activeFence = null;
     const todoLines = lines.filter(function (line) {
-      if (isMemoFenceLine(line)) {
-        inCode = !inCode;
+      const fence = parseMemoFenceLine(line);
+      if (activeFence) {
+        if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
         return false;
       }
-      if (inCode) return false;
+      if (fence) {
+        activeFence = fence;
+        return false;
+      }
       return parseTaskLine(line);
     });
     const content = todoLines.join("\n").trim();
