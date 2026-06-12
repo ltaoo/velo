@@ -1,4 +1,12 @@
-import { DEFAULT_VISIBILITY, VISIBILITY, collectTags, isMemoFenceLine, memoReferenceAlias, memoTitle } from "../../domain/memos.js";
+import {
+  DEFAULT_VISIBILITY,
+  VISIBILITY,
+  collectTags,
+  isMemoFenceLine,
+  maskMemoInlineCode,
+  memoReferenceAlias,
+  memoTitle,
+} from "../../domain/memos.js";
 import {
   CLOUD_STORAGE_KEY,
   activeCloudStorageConfig,
@@ -612,8 +620,9 @@ function createMemoReferencePlugin(editor, options) {
 
     const $from = selection.$from;
     if (!$from.parent.isTextblock) return null;
+    if (isSelectionInsideMemoCode(state)) return null;
 
-    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const before = maskMemoInlineCode($from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc"));
     const openIndex = before.lastIndexOf("[[");
     if (openIndex < 0) return null;
 
@@ -777,9 +786,9 @@ function createMemoSlashCommandPlugin(editor, options) {
 
     const $from = selection.$from;
     if (!$from.parent.isTextblock) return null;
-    if (isSelectionInsideMemoFence(state)) return null;
+    if (isSelectionInsideMemoCode(state)) return null;
 
-    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const before = maskMemoInlineCode($from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc"));
     const match = /(^|\s)\/([^\s/]*)$/u.exec(before);
     if (!match) return null;
 
@@ -923,18 +932,92 @@ function createMemoSlashCommandPlugin(editor, options) {
   });
 }
 
+function isSelectionInsideMemoCode(state) {
+  return isSelectionInsideMemoCodeNode(state) ||
+    isSelectionInsideMemoFence(state) ||
+    isSelectionInsideMemoInlineCode(state);
+}
+
+function isSelectionInsideMemoCodeNode(state) {
+  const selection = state && state.selection;
+  if (!selection || !selection.empty) return false;
+
+  const $from = selection.$from;
+  for (let depth = $from.depth; depth >= 0; depth -= 1) {
+    const node = $from.node(depth);
+    const type = node && node.type;
+    const typeName = type && type.name;
+    if (
+      (type && type.spec && type.spec.code) ||
+      typeName === "code_block" ||
+      typeName === "codeBlock"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isSelectionInsideMemoFence(state) {
   const selection = state && state.selection;
   if (!selection || !selection.empty) return false;
 
   const textBeforeCursor = state.doc.textBetween(0, selection.from, "\n", "\n");
-  const previousLines = textBeforeCursor.replace(/\r\n/g, "\n").split("\n").slice(0, -1);
+  const lines = textBeforeCursor.replace(/\r\n/g, "\n").split("\n");
+  const previousLines = lines.slice(0, -1);
+  const currentLine = lines[lines.length - 1] || "";
   let inFence = false;
 
   previousLines.forEach(function (line) {
     if (isMemoFenceLine(unquoteMemoFenceLine(line))) inFence = !inFence;
   });
-  return inFence;
+  return inFence || isMemoFenceLine(unquoteMemoFenceLine(currentLine));
+}
+
+function isSelectionInsideMemoInlineCode(state) {
+  const selection = state && state.selection;
+  if (!selection || !selection.empty) return false;
+
+  const $from = selection.$from;
+  if (!$from.parent || !$from.parent.isTextblock) return false;
+
+  const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+  return hasOpenMemoInlineCode(before);
+}
+
+function hasOpenMemoInlineCode(value) {
+  const text = String(value || "");
+  let activeDelimiter = "";
+  let index = 0;
+
+  while (index < text.length) {
+    const tickIndex = text.indexOf("`", index);
+    if (tickIndex < 0) break;
+    if (isEscapedMemoBacktick(text, tickIndex)) {
+      index = tickIndex + 1;
+      continue;
+    }
+
+    let end = tickIndex + 1;
+    while (end < text.length && text.charAt(end) === "`") end += 1;
+    const delimiter = text.slice(tickIndex, end);
+    if (!activeDelimiter) {
+      activeDelimiter = delimiter;
+    } else if (delimiter === activeDelimiter) {
+      activeDelimiter = "";
+    }
+    index = end;
+  }
+
+  return Boolean(activeDelimiter);
+}
+
+function isEscapedMemoBacktick(text, index) {
+  let slashCount = 0;
+  for (let i = index - 1; i >= 0 && text.charAt(i) === "\\"; i -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
 }
 
 function unquoteMemoFenceLine(line) {
@@ -967,9 +1050,9 @@ function createMemoTagPickerPlugin(editor, options) {
 
     const $from = selection.$from;
     if (!$from.parent.isTextblock) return null;
-    if (isSelectionInsideMemoFence(state)) return null;
+    if (isSelectionInsideMemoCode(state)) return null;
 
-    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const before = maskMemoInlineCode($from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc"));
     const match = /(^|\s)#([\w\u4e00-\u9fa5-]*)$/u.exec(before);
     if (!match) return null;
 
@@ -1128,8 +1211,9 @@ function createMemoTimePickerPlugin(editor) {
 
     const $from = selection.$from;
     if (!$from.parent.isTextblock) return null;
+    if (isSelectionInsideMemoCode(state)) return null;
 
-    const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+    const before = maskMemoInlineCode($from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc"));
     const indexes = [
       { trigger: "::", index: before.lastIndexOf("::") },
     ].filter(function (item) {
