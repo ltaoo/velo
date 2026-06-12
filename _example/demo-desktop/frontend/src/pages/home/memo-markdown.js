@@ -1,8 +1,10 @@
 import {
+  isMemoFenceClosingLine,
   isMemoFenceLine,
   memoLines,
   memoSelectorLabel,
   memoTitle,
+  parseMemoFenceLine,
   parseMemoHeadingLine,
   parseMemoReferenceInner,
   parseStandaloneMemoEmbed,
@@ -47,11 +49,12 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
 
     if (isMemoFenceLine(line)) {
       const startIndex = index;
+      const openingFence = parseMemoFenceLine(line);
       const codeLines = [];
       let endIndex = startIndex;
       index++;
       while (index < lines.length) {
-        if (isMemoFenceLine(lines[index])) {
+        if (isMemoFenceClosingLine(lines[index], openingFence)) {
           endIndex = index;
           break;
         }
@@ -433,20 +436,45 @@ function memoReferenceExcerpt(content, selector) {
 
 function wrapPartialCodeFence(lines, startIndex, endIndex, selected) {
   const output = selected.slice();
-  let inCode = false;
+  let activeFence = null;
 
   for (let i = 0; i < startIndex; i += 1) {
-    if (isMemoFenceLine(lines[i])) inCode = !inCode;
+    const fence = parseMemoFenceLine(lines[i]);
+    if (activeFence) {
+      if (fence && isMemoFenceClosingLine(lines[i], activeFence)) activeFence = null;
+    } else if (fence) {
+      activeFence = fence;
+    }
   }
 
-  const startedInsideCode = inCode;
+  const startingFence = activeFence;
+  const openingMarker = startingFence ? safeMemoFenceForLines(output, startingFence) : "";
   for (let i = startIndex; i < endIndex; i += 1) {
-    if (isMemoFenceLine(lines[i])) inCode = !inCode;
+    const fence = parseMemoFenceLine(lines[i]);
+    if (activeFence) {
+      if (fence && isMemoFenceClosingLine(lines[i], activeFence)) activeFence = null;
+    } else if (fence) {
+      activeFence = fence;
+    }
   }
 
-  if (startedInsideCode) output.unshift("```");
-  if (inCode) output.push("```");
+  const closingMarker = activeFence ? safeMemoFenceForLines(output, activeFence) : "";
+  if (startingFence) output.unshift(openingMarker);
+  if (activeFence) output.push(closingMarker);
   return output;
+}
+
+function safeMemoFenceForLines(lines, openingFence) {
+  const marker = openingFence && openingFence.marker === "~" ? "~" : "`";
+  const pattern = marker === "`" ? /`+/g : /~+/g;
+  let length = Math.max(3, (openingFence && openingFence.length) || 0);
+  lines.forEach(function (line) {
+    const matches = String(line || "").match(pattern) || [];
+    matches.forEach(function (match) {
+      if (match.length >= length) length = match.length + 1;
+    });
+  });
+  return marker.repeat(length);
 }
 
 function memoRefTitle(ref, memo) {

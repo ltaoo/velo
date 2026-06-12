@@ -42,13 +42,17 @@ export function collectTodos(memos) {
   const todos = [];
   memos.forEach((memo) => {
     const lines = memoLines(memo.content);
-    let inCode = false;
+    let activeFence = null;
     lines.forEach((line, lineIndex) => {
-      if (isMemoFenceLine(line)) {
-        inCode = !inCode;
+      const fence = parseMemoFenceLine(line);
+      if (activeFence) {
+        if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
         return;
       }
-      if (inCode) return;
+      if (fence) {
+        activeFence = fence;
+        return;
+      }
 
       const task = parseTaskLine(line);
       if (!task) return;
@@ -176,14 +180,18 @@ export function buildMemoReferenceIndex(memos) {
 export function parseMemoReferences(content) {
   const refs = [];
   const lines = memoLines(content);
-  let inCode = false;
+  let activeFence = null;
 
   lines.forEach(function (line, index) {
-    if (isMemoFenceLine(line)) {
-      inCode = !inCode;
+    const fence = parseMemoFenceLine(line);
+    if (activeFence) {
+      if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
       return;
     }
-    if (inCode) return;
+    if (fence) {
+      activeFence = fence;
+      return;
+    }
 
     const searchableLine = maskMemoInlineCode(line);
     const pattern = /(!?)\[\[([^\]\n]+)\]\]/g;
@@ -271,20 +279,47 @@ export function memoLines(content) {
 }
 
 export function isMemoFenceLine(line) {
+  return Boolean(parseMemoFenceLine(line));
+}
+
+export function parseMemoFenceLine(line) {
   const trimmed = String(line || "").trim();
-  return trimmed.startsWith("```") || trimmed.startsWith("~~~");
+  const match = trimmed.match(/^(`{3,}|~{3,})\s*(.*)$/);
+  if (!match) return null;
+  return {
+    marker: match[1][0],
+    length: match[1].length,
+    raw: match[1],
+    info: String(match[2] || "").trim(),
+  };
+}
+
+export function isMemoFenceClosingLine(line, openingFence) {
+  const opening = openingFence && openingFence.marker ? openingFence : parseMemoFenceLine(openingFence);
+  if (!opening) return false;
+  const closing = parseMemoFenceLine(line);
+  return Boolean(
+    closing &&
+      closing.marker === opening.marker &&
+      closing.length >= opening.length &&
+      closing.info === "",
+  );
 }
 
 export function memoSearchableText(content) {
   const lines = memoLines(content);
-  let inCode = false;
+  let activeFence = null;
   return lines
     .map(function (line) {
-      if (isMemoFenceLine(line)) {
-        inCode = !inCode;
+      const fence = parseMemoFenceLine(line);
+      if (activeFence) {
+        if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
         return " ".repeat(line.length);
       }
-      if (inCode) return " ".repeat(line.length);
+      if (fence) {
+        activeFence = fence;
+        return " ".repeat(line.length);
+      }
       return maskMemoInlineCode(line);
     })
     .join("\n");

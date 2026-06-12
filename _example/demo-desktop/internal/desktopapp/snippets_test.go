@@ -62,6 +62,35 @@ func TestCollectMemoCodeSnippetsRecognizesMarkers(t *testing.T) {
 	}
 }
 
+func TestCollectMemoCodeSnippetsKeepsShortFenceInsideLongFence(t *testing.T) {
+	memo := MemoRecord{
+		Content: strings.Join([]string{
+			"````markdown snippet Markdown sample | md-sample",
+			"```js",
+			"console.log('inside markdown fence')",
+			"```",
+			"````",
+		}, "\n"),
+		ID:         "memo_long_fence",
+		Path:       "memos/2026/06/memo_long_fence.md",
+		Visibility: "PRIVATE",
+	}
+
+	items := collectMemoCodeSnippets(memo)
+	if len(items) != 1 {
+		t.Fatalf("snippet count = %d, want 1: %#v", len(items), items)
+	}
+	if !items[0].Marked || items[0].Language != "markdown" || items[0].Command != "md-sample" {
+		t.Fatalf("snippet = %#v, want marked markdown md-sample snippet", items[0])
+	}
+	if want := "```js\nconsole.log('inside markdown fence')\n```"; items[0].Code != want {
+		t.Fatalf("snippet code = %q, want %q", items[0].Code, want)
+	}
+	if items[0].EndLine != 5 {
+		t.Fatalf("end line = %d, want 5", items[0].EndLine)
+	}
+}
+
 func TestSearchVaultSnippetsSupportsSnippetDirective(t *testing.T) {
 	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
 	if err != nil {

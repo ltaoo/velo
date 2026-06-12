@@ -19,13 +19,19 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 	var parentLoaded bool
 	var parentOK bool
 	inCode := false
+	var activeFence memoCodeFence
 
 	for index, line := range lines {
-		if isMemoCodeFenceLine(line) {
-			inCode = !inCode
+		fence, hasFence := parseMemoCodeFenceLine(line)
+		if inCode {
+			if hasFence && memoCodeFenceCloses(fence, activeFence) {
+				inCode = false
+			}
 			continue
 		}
-		if inCode {
+		if hasFence {
+			activeFence = fence
+			inCode = true
 			continue
 		}
 		parsed, ok := parseTaskLineText(line)

@@ -2,10 +2,12 @@ import {
   DEFAULT_VISIBILITY,
   VISIBILITY,
   collectTags,
+  isMemoFenceClosingLine,
   isMemoFenceLine,
   maskMemoInlineCode,
   memoReferenceAlias,
   memoTitle,
+  parseMemoFenceLine,
 } from "../../domain/memos.js";
 import {
   CLOUD_STORAGE_KEY,
@@ -966,12 +968,18 @@ function isSelectionInsideMemoFence(state) {
   const lines = textBeforeCursor.replace(/\r\n/g, "\n").split("\n");
   const previousLines = lines.slice(0, -1);
   const currentLine = lines[lines.length - 1] || "";
-  let inFence = false;
+  let activeFence = null;
 
   previousLines.forEach(function (line) {
-    if (isMemoFenceLine(unquoteMemoFenceLine(line))) inFence = !inFence;
+    const unquoted = unquoteMemoFenceLine(line);
+    const fence = parseMemoFenceLine(unquoted);
+    if (activeFence) {
+      if (fence && isMemoFenceClosingLine(unquoted, activeFence)) activeFence = null;
+    } else if (fence) {
+      activeFence = fence;
+    }
   });
-  return inFence || isMemoFenceLine(unquoteMemoFenceLine(currentLine));
+  return Boolean(activeFence) || isMemoFenceLine(unquoteMemoFenceLine(currentLine));
 }
 
 function isSelectionInsideMemoInlineCode(state) {
