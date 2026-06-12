@@ -17,6 +17,7 @@ package file
 @property (nonatomic, assign) int cancelled;
 @property (nonatomic, assign) int animationType;
 @property (nonatomic, strong) NSArray<NSString*>* allowedTypes;
+@property (nonatomic, strong) NSString* directoryPath;
 @property (nonatomic, strong) dispatch_semaphore_t sem;
 - (void)showPanel;
 @end
@@ -28,6 +29,13 @@ package file
     [panel setCanChooseDirectories:NO];
     [panel setAllowsMultipleSelection:NO];
     [panel setResolvesAliases:YES];
+
+    if (self.directoryPath != nil && self.directoryPath.length > 0) {
+        NSURL* directoryURL = [NSURL fileURLWithPath:self.directoryPath isDirectory:YES];
+        if (directoryURL != nil) {
+            [panel setDirectoryURL:directoryURL];
+        }
+    }
 
     if (self.allowedTypes != nil && self.allowedTypes.count > 0) {
         if (@available(macOS 11.0, *)) {
@@ -96,12 +104,15 @@ package file
 }
 @end
 
-static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType, const char** allowedTypes, int allowedTypesCount) {
+static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType, const char** allowedTypes, int allowedTypesCount, const char* directoryPath) {
     FilePanelHelper* helper = [[FilePanelHelper alloc] init];
     helper.sem = dispatch_semaphore_create(0);
     helper.result = NULL;
     helper.cancelled = 0;
     helper.animationType = animationType;
+    if (directoryPath != NULL && strlen(directoryPath) > 0) {
+        helper.directoryPath = [NSString stringWithUTF8String:directoryPath];
+    }
 
     if (allowedTypes != NULL && allowedTypesCount > 0) {
         NSMutableArray<NSString*>* types = [NSMutableArray arrayWithCapacity:allowedTypesCount];
@@ -130,11 +141,11 @@ import (
 
 // ShowFileSelectDialog shows a file selection dialog and returns the selected file path.
 // animationType: "default", "none", "document", "utility", "alert", "sheet"
-func showFileSelectDialog(animationType string, allowedTypes []string) (string, error) {
+func showFileSelectDialog(options FileSelectOptions) (string, error) {
 	runtime.UnlockOSThread()
 
 	var animCode int
-	switch animationType {
+	switch options.AnimationType {
 	case "default":
 		animCode = 0
 	case "none":
@@ -153,10 +164,15 @@ func showFileSelectDialog(animationType string, allowedTypes []string) (string, 
 
 	var cancelled C.int
 	var cStr *C.char
+	var cDirectory *C.char
+	if options.Directory != "" {
+		cDirectory = C.CString(options.Directory)
+		defer C.free(unsafe.Pointer(cDirectory))
+	}
 
-	if len(allowedTypes) > 0 {
-		cTypes := make([]*C.char, len(allowedTypes))
-		for i, t := range allowedTypes {
+	if len(options.AllowedTypes) > 0 {
+		cTypes := make([]*C.char, len(options.AllowedTypes))
+		for i, t := range options.AllowedTypes {
 			cTypes[i] = C.CString(t)
 		}
 		defer func() {
@@ -164,9 +180,9 @@ func showFileSelectDialog(animationType string, allowedTypes []string) (string, 
 				C.free(unsafe.Pointer(ct))
 			}
 		}()
-		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), &cTypes[0], C.int(len(cTypes)))
+		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), &cTypes[0], C.int(len(cTypes)), cDirectory)
 	} else {
-		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), nil, 0)
+		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), nil, 0, cDirectory)
 	}
 
 	if cancelled != 0 {
