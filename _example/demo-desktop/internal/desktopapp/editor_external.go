@@ -267,7 +267,7 @@ func openFileInEditor(file string, line string, col string, preferredEditor *Edi
 	if selection.ID == editorNoneAppID {
 		return nil
 	}
-	if selection.ID == editorSystemAppID {
+	if selection.ID == editorSystemAppID || selection.ID == editorBrowserAppID {
 		return openFileWithSystemDefault(absoluteFile)
 	}
 	if isCustomEditorSelection(selection) {

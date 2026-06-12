@@ -1016,7 +1016,7 @@
                 <div class="settings-editor-rule-add">
                   <label class="settings-field">
                     <span class="settings-label-row">后缀</span>
-                    <input class="settings-input" data-editor-rule-extension placeholder=".mp4" />
+                    <input class="settings-input" data-editor-rule-extension placeholder=".html, .htm" />
                   </label>
                   <label class="settings-field">
                     <span class="settings-label-row">打开应用</span>
@@ -1964,9 +1964,9 @@
       }
 
       function addEditorFileRule() {
-        var extension = normalizeFileExtension(editorRuleExtension && editorRuleExtension.value);
-        if (!extension) {
-          setShortcutMessage("请填写有效后缀，例如 .mp4", "warning");
+        var extensions = normalizeFileExtensions(editorRuleExtension && editorRuleExtension.value);
+        if (!extensions.length) {
+          setShortcutMessage("请填写有效后缀，例如 .html, .htm", "warning");
           return;
         }
         var editor = editorAppByKey(editorRuleApp && editorRuleApp.value);
@@ -1976,9 +1976,11 @@
         }
         var previousEditorSettings = editorSettings;
         var rules = normalizeFileEditorRules(editorSettings.fileEditorRules).filter(function (rule) {
-          return rule.extension !== extension;
+          return extensions.indexOf(rule.extension) === -1;
         });
-        rules.push({ extension: extension, editor: editor });
+        extensions.forEach(function (extension) {
+          rules.push({ extension: extension, editor: editor });
+        });
         editorSettings = normalizeEditorSettings(Object.assign({}, editorSettings, {
           fileEditorRules: rules,
         }));
@@ -1988,7 +1990,7 @@
         saveEditorSettings(editorSettings).then(function (saved) {
           editorSettings = normalizeEditorSettings(saved || editorSettings);
           renderEditorSettings();
-          setShortcutMessage("已保存 " + extension + " 打开规则", "ready");
+          setShortcutMessage("已保存 " + extensions.join(", ") + " 打开规则", "ready");
         }, function (err) {
           editorSettings = previousEditorSettings;
           renderEditorSettings();
@@ -2052,7 +2054,7 @@
       }
 
       function defaultEditorApps() {
-        return [normalizeEditorApp(defaultFileEditor()), normalizeEditorApp(noneFileEditor()), normalizeEditorApp(systemFileEditor())];
+        return [normalizeEditorApp(defaultFileEditor()), normalizeEditorApp(noneFileEditor()), normalizeEditorApp(systemFileEditor()), normalizeEditorApp(browserFileEditor())];
       }
 
       function normalizeEditorApp(value) {
@@ -2574,6 +2576,14 @@
         };
       }
 
+      function browserFileEditor() {
+        return {
+          id: "browser",
+          name: "浏览器",
+          path: "",
+        };
+      }
+
       function noneFileEditor() {
         return {
           id: "none",
@@ -2585,11 +2595,13 @@
       function defaultFileEditorRules() {
         var code = defaultFileEditor();
         var none = noneFileEditor();
+        var browser = browserFileEditor();
         return [
           { extension: ".js", editor: code },
           { extension: ".ts", editor: code },
           { extension: ".tsx", editor: code },
           { extension: ".jsx", editor: code },
+          { extension: ".html", editor: browser },
           { extension: ".mp4", editor: none },
           { extension: ".mp3", editor: none },
         ];
@@ -2630,6 +2642,15 @@
         return "." + text;
       }
 
+      function normalizeFileExtensions(value) {
+        var seen = Object.create(null);
+        return String(value || "").split(/[,，]/).map(normalizeFileExtension).filter(function (extension) {
+          if (!extension || seen[extension]) return false;
+          seen[extension] = true;
+          return true;
+        });
+      }
+
       function editorNameFromID(id) {
         switch (String(id || "").trim()) {
           case "code":
@@ -2654,6 +2675,8 @@
             return "不打开";
           case "system":
             return "系统默认应用";
+          case "browser":
+            return "浏览器";
           default:
             return "";
         }

@@ -83,9 +83,17 @@ func defaultEditorNoneSelection() *EditorAppSelection {
 	}
 }
 
+func defaultEditorBrowserSelection() *EditorAppSelection {
+	return &EditorAppSelection{
+		ID:   editorBrowserAppID,
+		Name: editorDisplayName(editorBrowserAppID),
+	}
+}
+
 func defaultEditorFileRules() []EditorFileRule {
 	codeEditor := defaultEditorAppSelection()
 	noneEditor := defaultEditorNoneSelection()
+	browserEditor := defaultEditorBrowserSelection()
 	extensions := []struct {
 		extension string
 		editor    *EditorAppSelection
@@ -94,6 +102,7 @@ func defaultEditorFileRules() []EditorFileRule {
 		{".ts", codeEditor},
 		{".tsx", codeEditor},
 		{".jsx", codeEditor},
+		{".html", browserEditor},
 		{".mp4", noneEditor},
 		{".mp3", noneEditor},
 	}

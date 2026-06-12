@@ -19,11 +19,14 @@ func TestLoadStoredEditorSettingsDefaultsToVimDisabled(t *testing.T) {
 	if settings.FileEditor == nil || settings.FileEditor.ID != "code" || settings.FileEditor.Name != "VS Code" {
 		t.Fatalf("FileEditor = %#v, want VS Code", settings.FileEditor)
 	}
-	if len(settings.FileEditorRules) != 6 {
+	if len(settings.FileEditorRules) != 7 {
 		t.Fatalf("FileEditorRules = %#v, want default common rules", settings.FileEditorRules)
 	}
-	if settings.FileEditorRules[4].Extension != ".mp4" || settings.FileEditorRules[4].Editor.ID != "none" {
-		t.Fatalf("mp4 default rule = %#v, want no-op", settings.FileEditorRules[4])
+	if settings.FileEditorRules[4].Extension != ".html" || settings.FileEditorRules[4].Editor.ID != "browser" {
+		t.Fatalf("html default rule = %#v, want browser", settings.FileEditorRules[4])
+	}
+	if settings.FileEditorRules[5].Extension != ".mp4" || settings.FileEditorRules[5].Editor.ID != "none" {
+		t.Fatalf("mp4 default rule = %#v, want no-op", settings.FileEditorRules[5])
 	}
 }
 
@@ -88,6 +91,13 @@ func TestEditorSelectionForOpenDefaultsMediaToNoop(t *testing.T) {
 	selection := editorSelectionForOpen("/Users/me/song.mp3", "", "", "", nil)
 	if selection == nil || selection.ID != "none" {
 		t.Fatalf("selection = %#v, want no-op", selection)
+	}
+}
+
+func TestEditorSelectionForOpenDefaultsHTMLToBrowser(t *testing.T) {
+	selection := editorSelectionForOpen("/Users/me/page.html", "", "", "", nil)
+	if selection == nil || selection.ID != "browser" {
+		t.Fatalf("selection = %#v, want browser", selection)
 	}
 }
 

@@ -28,11 +28,11 @@ type MemoWindowPayload struct {
 	Memos json.RawMessage `json:"memos"`
 }
 
-func droppedFilesFromPayload(payload string, logger *zerolog.Logger) []velo.H {
-	var paths []string
-	if err := json.Unmarshal([]byte(payload), &paths); err != nil {
+func droppedFilesFromPayload(payload string, logger *zerolog.Logger) ([]velo.H, velo.H) {
+	paths, point, err := droppedFilePathsFromPayload(payload)
+	if err != nil {
 		logger.Error().Err(err).Msg("failed to parse dropped file payload")
-		return nil
+		return nil, nil
 	}
 
 	files := make([]velo.H, 0, len(paths))
@@ -44,7 +44,32 @@ func droppedFilesFromPayload(payload string, logger *zerolog.Logger) []velo.H {
 		}
 		files = append(files, file)
 	}
-	return files
+	return files, point
+}
+
+func droppedFilePathsFromPayload(payload string) ([]string, velo.H, error) {
+	var paths []string
+	if err := json.Unmarshal([]byte(payload), &paths); err == nil {
+		return paths, nil, nil
+	}
+
+	var data struct {
+		Paths []string `json:"paths"`
+		X     *float64 `json:"x"`
+		Y     *float64 `json:"y"`
+	}
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		return nil, nil, err
+	}
+
+	var point velo.H
+	if data.X != nil && data.Y != nil {
+		point = velo.H{
+			"x": *data.X,
+			"y": *data.Y,
+		}
+	}
+	return data.Paths, point, nil
 }
 
 func droppedFileForPath(path string) (velo.H, error) {
