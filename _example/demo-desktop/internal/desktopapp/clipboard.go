@@ -1,11 +1,13 @@
 package desktopapp
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,9 +28,16 @@ type ClipboardSnapshot struct {
 	Name          string `json:"name,omitempty"`
 	Size          int    `json:"size,omitempty"`
 	CapturedAt    string `json:"capturedAt"`
+	ChangedAt     string `json:"changedAt,omitempty"`
 }
 
 var clipboardReadMu sync.Mutex
+
+var observedClipboard = struct {
+	sync.RWMutex
+	id        string
+	changedAt time.Time
+}{}
 
 func registerClipboardRoutes(b *velo.Box, logger *zerolog.Logger) {
 	b.Get("/api/clipboard/latest", func(c *velo.BoxContext) interface{} {
@@ -36,7 +45,20 @@ func registerClipboardRoutes(b *velo.Box, logger *zerolog.Logger) {
 		if !ok {
 			return c.Ok(velo.H{"found": false})
 		}
-		return c.Ok(velo.H{"found": true, "item": item})
+
+		maxAge := clipboardMaxAge(c.Query("maxAgeSeconds"))
+		changedAt, ageMs, fresh := clipboardFreshness(item.ID, maxAge)
+		if !changedAt.IsZero() {
+			item.ChangedAt = changedAt.Format(time.RFC3339Nano)
+		}
+
+		return c.Ok(velo.H{
+			"ageMs":     ageMs,
+			"changedAt": item.ChangedAt,
+			"found":     true,
+			"fresh":     fresh,
+			"item":      item,
+		})
 	})
 }
 
@@ -44,6 +66,23 @@ func initClipboardReader(logger *zerolog.Logger) {
 	if err := clipboard.Init(); err != nil {
 		logger.Warn().Err(err).Msg("clipboard unavailable")
 		return
+	}
+	go watchClipboardChanges(logger)
+}
+
+func watchClipboardChanges(logger *zerolog.Logger) {
+	ch := clipboard.Watch(context.Background())
+	for data := range ch {
+		if data.Error != nil {
+			logger.Debug().Err(data.Error).Str("type", data.Type).Msg("clipboard read failed")
+			continue
+		}
+		changedAt := time.Now()
+		item, ok := clipboardSnapshotFromContent(data, changedAt)
+		if !ok {
+			continue
+		}
+		rememberClipboardChange(item.ID, changedAt)
 	}
 }
 
@@ -94,6 +133,75 @@ func readClipboardImage(rawType string, capturedAt string) (ClipboardSnapshot, b
 		return ClipboardSnapshot{}, false
 	}
 	return imageClipboardSnapshot(rawType, imageData, capturedAt), true
+}
+
+func clipboardSnapshotFromContent(data clipboard.ClipboardContent, capturedAt time.Time) (ClipboardSnapshot, bool) {
+	rawType := strings.TrimSpace(data.Type)
+	capturedAtText := capturedAt.Format(time.RFC3339Nano)
+
+	switch rawType {
+	case "public.utf8-plain-text":
+		text, ok := data.Data.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return ClipboardSnapshot{}, false
+		}
+		return textClipboardSnapshot(rawType, text, capturedAtText), true
+	case "public.html":
+		text, _ := data.BackupData.(string)
+		if strings.TrimSpace(text) == "" {
+			text, _ = clipboard.ReadText()
+		}
+		if strings.TrimSpace(text) == "" {
+			text, _ = data.Data.(string)
+		}
+		if strings.TrimSpace(text) == "" {
+			return ClipboardSnapshot{}, false
+		}
+		return textClipboardSnapshot(rawType, text, capturedAtText), true
+	case "public.png":
+		imageData, ok := data.Data.([]byte)
+		if !ok || len(imageData) == 0 {
+			return ClipboardSnapshot{}, false
+		}
+		return imageClipboardSnapshot(rawType, imageData, capturedAtText), true
+	default:
+		return ClipboardSnapshot{}, false
+	}
+}
+
+func rememberClipboardChange(id string, changedAt time.Time) {
+	if strings.TrimSpace(id) == "" || changedAt.IsZero() {
+		return
+	}
+	observedClipboard.Lock()
+	defer observedClipboard.Unlock()
+	observedClipboard.id = id
+	observedClipboard.changedAt = changedAt
+}
+
+func clipboardFreshness(id string, maxAge time.Duration) (time.Time, int64, bool) {
+	observedClipboard.RLock()
+	changedAt := observedClipboard.changedAt
+	if observedClipboard.id != id {
+		changedAt = time.Time{}
+	}
+	observedClipboard.RUnlock()
+
+	if changedAt.IsZero() {
+		return time.Time{}, -1, maxAge <= 0
+	}
+
+	age := time.Since(changedAt)
+	fresh := maxAge <= 0 || age <= maxAge
+	return changedAt, age.Milliseconds(), fresh
+}
+
+func clipboardMaxAge(value string) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func textClipboardSnapshot(rawType string, text string, capturedAt string) ClipboardSnapshot {

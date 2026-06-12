@@ -929,6 +929,25 @@
       return ranges;
     }
 
+    function miniImageLayoutStartLine(text) {
+      const match = String(text || "").match(/^\s*:::\s*([^\s]+)(?:\s+(.*?))?\s*$/);
+      if (!match) return false;
+      const marker = String(match[1] || "").trim().toLowerCase();
+      if (/^(?:images?|image-grid|imagegrid|gallery|photos?|pics?|九宫格|九图|图片九宫格)$/.test(marker)) return true;
+      return /^(?:image-layout|imagelayout|图片布局)$/.test(marker);
+    }
+
+    function miniImageLayoutEndLine(text) {
+      return /^\s*:::\s*$/.test(String(text || ""));
+    }
+
+    function miniImageLayoutItemLine(text) {
+      const value = String(text || "").trim().replace(/^[-*+]\s+/, "");
+      if (!value) return false;
+      if (/^!?\[[^\]\n]*\]\([^)]+\)\s*$/.test(value)) return true;
+      return /^(?:https?:\/\/|\/(?!\/)|@assets\/|local:\/\/|blob:|data:image\/)/i.test(value);
+    }
+
     function rangeOverlaps(ranges, from, to) {
       return ranges.some((range) => from < range.to && to > range.from);
     }
@@ -2176,6 +2195,7 @@
       miniMarkdownDecorations(state) {
         const decorations = [];
         let inCodeBlock = false;
+        let inImageLayoutBlock = false;
 
         state.doc.forEach((node, offset) => {
           if (!node.isTextblock) return;
@@ -2200,6 +2220,48 @@
 
           if (inCodeBlock) {
             pushMiniLineDecoration(decorations, lineFrom, lineTo, "mini-code-block-line");
+            return;
+          }
+
+          if (inImageLayoutBlock) {
+            const end = miniImageLayoutEndLine(text);
+            pushMiniLineDecoration(
+              decorations,
+              lineFrom,
+              lineTo,
+              "mini-image-layout-line" +
+                (end ? " mini-image-layout-fence-line" : "") +
+                (miniImageLayoutItemLine(text) ? " mini-image-layout-item-line" : ""),
+            );
+            if (end) {
+              pushMiniInlineDecoration(
+                decorations,
+                textFrom,
+                textFrom + text.length,
+                "mini-markdown-syntax",
+              );
+              inImageLayoutBlock = false;
+              return;
+            }
+            const layoutLinkRanges = miniMarkdownLinkRanges(text);
+            pushMiniMarkdownLinkDecorations(decorations, layoutLinkRanges, textFrom);
+            return;
+          }
+
+          if (miniImageLayoutStartLine(text)) {
+            pushMiniLineDecoration(
+              decorations,
+              lineFrom,
+              lineTo,
+              "mini-image-layout-line mini-image-layout-fence-line",
+            );
+            pushMiniInlineDecoration(
+              decorations,
+              textFrom,
+              textFrom + text.length,
+              "mini-markdown-syntax",
+            );
+            inImageLayoutBlock = true;
             return;
           }
 

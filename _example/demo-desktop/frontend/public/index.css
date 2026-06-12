@@ -547,6 +547,19 @@ ol {
   background: var(--BG-1);
 }
 
+.mini-editor .mini-image-layout-line {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.mini-editor .mini-image-layout-fence-line {
+  color: var(--memo-blue);
+}
+
+.mini-editor .mini-image-layout-item-line {
+  outline: 1px solid rgba(37, 99, 235, 0.14);
+  outline-offset: -1px;
+}
+
 .mini-editor .mini-blockquote-line {
   background: var(--memo-accent-soft);
   color: var(--FG-0);
@@ -1079,7 +1092,7 @@ body.is-fixed-window .memo-window-shell {
   bottom: 1px;
   display: grid;
   gap: 8px;
-  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  grid-template-columns: 38px minmax(0, 1fr) 38px 38px;
   left: 1px;
   padding: 10px;
   position: fixed;
@@ -1155,6 +1168,20 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-window-comment-editor.is-disabled {
   opacity: 0.72;
+}
+
+.memo-window-comment-switch {
+  min-width: 0;
+  width: 100%;
+}
+
+.memo-window-comment-preview {
+  background: var(--BG-3);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  max-height: 140px;
+  min-height: 44px;
+  padding: 11px 14px;
 }
 
 .memo-window-comment-submit {
@@ -1382,6 +1409,11 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-window-comment-edit-host .ProseMirror,
 .memo-window-comment-edit-host .memo-fallback-editor {
+  max-height: 260px;
+  min-height: 96px;
+}
+
+.memo-window-comment-edit-preview {
   max-height: 260px;
   min-height: 96px;
 }
@@ -2076,6 +2108,38 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-editor-host .ProseMirror p:last-child {
   margin-bottom: 0;
+}
+
+.memo-editor-switch {
+  min-width: 0;
+}
+
+.memo-editor-preview {
+  background: transparent;
+  max-height: min(42vh, 360px);
+  min-height: 120px;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.memo-editor-host.is-inline + .memo-editor-preview {
+  max-height: 260px;
+  min-height: 96px;
+}
+
+.memo-editor-preview .memo-content {
+  background: transparent;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.memo-editor-preview-empty {
+  align-items: center;
+  color: var(--FG-2);
+  display: flex;
+  font-size: var(--font-sm);
+  min-height: 44px;
 }
 
 .memo-fallback-editor {
@@ -3159,6 +3223,90 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-1);
   font-size: var(--font-sm);
   line-height: 1.35;
+}
+
+.memo-image-layout {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(var(--memo-image-layout-columns, 3), minmax(0, 1fr));
+  margin: 2px auto 8px;
+  max-width: min(100%, 420px);
+  width: 100%;
+}
+
+.memo-image-layout-grid.is-count-1 {
+  max-width: min(100%, 360px);
+}
+
+.memo-image-layout-grid.is-count-2 {
+  max-width: min(100%, 420px);
+}
+
+.memo-image-layout-grid.is-count-4 {
+  max-width: min(100%, 420px);
+}
+
+.memo-image-layout-item {
+  appearance: none;
+  background: var(--BG-1);
+  border: 0;
+  border-radius: 4px;
+  cursor: zoom-in;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.memo-image-layout-item::before {
+  content: "";
+  display: block;
+  padding-top: 100%;
+}
+
+.memo-image-layout-grid.is-count-1 .memo-image-layout-item::before {
+  padding-top: 72%;
+}
+
+.memo-image-layout-item img {
+  display: block;
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+  width: 100%;
+}
+
+.memo-image-layout-item:focus-visible {
+  outline: 2px solid var(--memo-accent);
+  outline-offset: 2px;
+}
+
+.memo-image-layout-more {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.56);
+  color: #fff;
+  display: flex;
+  font-size: var(--font-display);
+  font-weight: 700;
+  inset: 0;
+  justify-content: center;
+  letter-spacing: 0;
+  position: absolute;
+}
+
+.memo-image-layout-empty {
+  background: var(--BG-1);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--FG-1);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  margin: 2px auto 8px;
+  max-width: min(100%, 420px);
+  padding: 12px;
+  text-align: center;
 }
 
 .memo-file-block {

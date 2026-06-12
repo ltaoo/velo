@@ -160,6 +160,7 @@ Memo 的正文不只是普通 Markdown，前后端都会从中提取结构化语
 - Wiki 风格引用：`[[target]]`、`[[target|alias]]`、`![[target]]`。
 - 行选择器：例如 `[[target#L3]]` 或 `[[target#L3-L8]]`。
 - Markdown 链接和图片：`[label](url)`、`![alt](url)`。
+- 图片布局块：`:::image-layout grid` 到 `:::`，块内每行一个 Markdown 图片或图片 URL；`grid` 当前按微博式九宫格展示，`:::images` / `:::image-grid` 作为兼容别名。
 - 原始 URL：直接写入的 `http://` 或 `https://` 链接。
 - 托管附件引用：`@assets/{storageId}/{objectKey}`。
 

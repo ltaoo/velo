@@ -531,7 +531,7 @@ function createMemoClipboardPlugin(editor) {
 function createMemoTimeSyntaxHighlightPlugin(editor) {
   const PM = window.ProsemirrorMod;
   const key = new PM.PluginKey(editor.id + "-memoTimeSyntaxHighlight");
-  const timePattern = /(^|[\s([{（【「『])(::(?:\d{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32})))/g;
+  const timePattern = /(^|[\s([{（【「『])(::(?!:)(?:\d{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32})))/g;
 
   return new PM.Plugin({
     key,
@@ -1143,6 +1143,7 @@ function createMemoTimePickerPlugin(editor) {
     const found = indexes[0];
     const prev = found.index > 0 ? before.charAt(found.index - 1) : "";
     if (prev && !/\s/.test(prev)) return null;
+    if (before.charAt(found.index + found.trigger.length) === ":") return null;
 
     const query = before.slice(found.index + found.trigger.length);
     if (!isActiveMemoTimeQuery(query)) return null;
@@ -1295,6 +1296,7 @@ function createMemoTimePickerPlugin(editor) {
 function isActiveMemoTimeQuery(query) {
   const value = String(query || "");
   if (!value) return true;
+  if (value.charAt(0) === ":") return false;
   if (/[\r\n]/.test(value)) return false;
   if (/[<>()\[\]{}，。！？、；;,.]/u.test(value)) return false;
   if (!/\s/u.test(value)) return true;
@@ -1385,6 +1387,13 @@ function memoSlashCommands() {
       detail: "插入 Markdown 表格",
       keywords: "table",
       text: "| 列 1 | 列 2 |\n| --- | --- |\n|  |  |",
+    },
+    {
+      icon: "GRID",
+      label: "图片布局",
+      detail: "插入 grid 图片布局",
+      keywords: "image layout gallery grid photos 九宫格 图片 微博",
+      text: ":::image-layout grid\n![图片 1]()\n![图片 2]()\n![图片 3]()\n:::",
     },
     {
       icon: "TIME",

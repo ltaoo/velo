@@ -68,6 +68,30 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
       continue;
     }
 
+    const imageLayout = parseMemoImageLayoutStartLine(line);
+    if (imageLayout) {
+      const startIndex = index;
+      const layoutLines = [];
+      let endIndex = startIndex;
+      index++;
+      while (index < lines.length) {
+        if (isMemoImageLayoutEndLine(lines[index])) {
+          endIndex = index;
+          break;
+        }
+        layoutLines.push(lines[index]);
+        endIndex = index;
+        index++;
+      }
+      if (index >= lines.length) index = lines.length - 1;
+      html += memoLineTemplate(
+        memoLineNumberRange(startIndex, endIndex, lineNumberOffset),
+        renderMemoImageLayoutBlock(imageLayout, parseMemoImageLayoutItems(layoutLines)),
+        "is-image-layout",
+      );
+      continue;
+    }
+
     if (!line.trim()) {
       html += memoLineTemplate(lineNumber + lineNumberOffset, '<div class="memo-markdown-gap"></div>', "is-empty");
       continue;
@@ -178,6 +202,27 @@ function stripQuoteMarker(line) {
   return match ? match[1] : line;
 }
 
+function parseMemoImageLayoutStartLine(line) {
+  const match = String(line || "").match(/^\s*:::\s*([^\s]+)(?:\s+(.*?))?\s*$/);
+  if (!match) return null;
+
+  const marker = String(match[1] || "").trim().toLowerCase();
+  const info = String(match[2] || "").trim();
+  if (/^(?:images?|image-grid|imagegrid|gallery|photos?|pics?|九宫格|九图|图片九宫格)$/.test(marker)) {
+    return { info, type: "grid" };
+  }
+  if (!/^(?:image-layout|imagelayout|图片布局)$/.test(marker)) return null;
+
+  return {
+    info,
+    type: memoImageLayoutTypeFromInfo(info),
+  };
+}
+
+function isMemoImageLayoutEndLine(line) {
+  return /^\s*:::\s*$/.test(String(line || ""));
+}
+
 function memoLineTemplate(lineNumber, body, className = "") {
   return `
     <div class="memo-source-line ${className}">
@@ -237,7 +282,7 @@ function replaceMemoTimeSyntax(html) {
     .map(function (part) {
       if (!part || part.charAt(0) === "<") return part;
       return part.replace(
-        /(^|[\s([{（【「『])(::)((?:\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))/g,
+        /(^|[\s([{（【「『])(::)(?!:)((?:\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?)|(?:\d{1,2}:\d{2}(?::\d{2})?)|(?:[^\s<>()\[\]{}，。！？、；;,.]{1,32}))/g,
         function (_, prefix, trigger, value) {
           return prefix + renderMemoTimeToken(trigger, value);
         },
@@ -421,6 +466,55 @@ function parseStandaloneMarkdownResource(line) {
   return { type, label, url };
 }
 
+function memoImageLayoutTypeFromInfo(info) {
+  const text = String(info || "").trim();
+  if (!text) return "grid";
+
+  const keyValue = text.match(/(?:^|\s)(?:layout|type|view)=([^\s]+)/i);
+  if (keyValue) return normalizeMemoImageLayoutType(keyValue[1]);
+
+  const firstToken = text.split(/\s+/)[0];
+  return normalizeMemoImageLayoutType(firstToken);
+}
+
+function normalizeMemoImageLayoutType(value) {
+  const type = String(value || "").trim().toLowerCase();
+  if (/^(?:grid|nine-grid|ninegrid|weibo|mosaic|九宫格|九图)$/.test(type)) return "grid";
+  if (/^(?:carousel|slider|slideshow|轮播|轮播图)$/.test(type)) return "carousel";
+  return type || "grid";
+}
+
+function parseMemoImageLayoutItems(lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .map(parseMemoImageLayoutItem)
+    .filter(Boolean);
+}
+
+function parseMemoImageLayoutItem(line) {
+  const text = String(line || "").trim().replace(/^[-*+]\s+/, "");
+  if (!text) return null;
+
+  const resource = parseStandaloneMarkdownResource(text);
+  if (resource && resource.type === "image") return resource;
+
+  if (!safeImageUrl(text)) return null;
+  return {
+    type: "image",
+    label: fileDisplayName("", text),
+    url: text,
+  };
+}
+
+function renderMemoImageLayoutBlock(layout, items) {
+  const type = normalizeMemoImageLayoutType(layout && layout.type);
+  switch (type) {
+    case "grid":
+      return renderMemoImageGridLayout(type, items);
+    default:
+      return renderMemoImageFallbackLayout(type, items);
+  }
+}
+
 function renderMemoImageBlock(resource) {
   const src = safeImageUrl(resource.url);
   if (!src) return `<p>${renderMemoImageToken(resource)}</p>`;
@@ -433,6 +527,56 @@ function renderMemoImageBlock(resource) {
       ${label ? `<figcaption>${escapeHTML(label)}</figcaption>` : ""}
     </figure>
   `;
+}
+
+function renderMemoImageGridLayout(layoutType, items) {
+  const images = (Array.isArray(items) ? items : [])
+    .map(function (item) {
+      const src = safeImageUrl(item.url);
+      if (!src) return null;
+      const label = item.label || fileDisplayName("", item.url);
+      return {
+        label,
+        source: item.url,
+        src,
+      };
+    })
+    .filter(Boolean);
+
+  if (!images.length) {
+    return `<div class="memo-image-layout-empty">没有可显示的图片</div>`;
+  }
+
+  const visible = images.slice(0, 9);
+  const hiddenCount = images.length - visible.length;
+  const columnCount = memoImageGridColumnCount(visible.length);
+  return `
+    <div class="memo-image-layout memo-image-layout-grid is-count-${visible.length}" style="--memo-image-layout-columns: ${columnCount}" data-image-layout="${escapeAttr(layoutType || "grid")}" data-image-layout-count="${images.length}">
+      ${visible.map(function (image, index) {
+        const label = image.label || "图片 " + (index + 1);
+        const previewAttrs = imagePreviewAttrs(image.src, label, image.source, label);
+        const overflow = hiddenCount > 0 && index === visible.length - 1
+          ? `<span class="memo-image-layout-more">+${hiddenCount}</span>`
+          : "";
+        return `
+          <button class="memo-image-layout-item" type="button" ${previewAttrs} aria-label="预览 ${escapeAttr(label)}">
+            <img src="${escapeAttr(image.src)}" alt="${escapeAttr(label)}" loading="lazy" />
+            ${overflow}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderMemoImageFallbackLayout(layoutType, items) {
+  return renderMemoImageGridLayout(layoutType || "grid", items);
+}
+
+function memoImageGridColumnCount(count) {
+  if (count <= 1) return 1;
+  if (count === 2 || count === 4) return 2;
+  return 3;
 }
 
 function renderMemoFileBlock(resource, context = {}) {
