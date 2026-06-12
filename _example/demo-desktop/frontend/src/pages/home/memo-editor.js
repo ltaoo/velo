@@ -63,14 +63,24 @@ function noneFileEditor() {
   };
 }
 
+function browserFileEditor() {
+  return {
+    id: "browser",
+    name: "浏览器",
+    path: "",
+  };
+}
+
 function defaultFileEditorRules() {
   const code = defaultFileEditor();
   const none = noneFileEditor();
+  const browser = browserFileEditor();
   return [
     { extension: ".js", editor: code },
     { extension: ".ts", editor: code },
     { extension: ".tsx", editor: code },
     { extension: ".jsx", editor: code },
+    { extension: ".html", editor: browser },
     { extension: ".mp4", editor: none },
     { extension: ".mp3", editor: none },
   ];
@@ -137,6 +147,8 @@ function editorNameFromID(id) {
       return "不打开";
     case "system":
       return "系统默认应用";
+    case "browser":
+      return "浏览器";
     default:
       return "";
   }
@@ -300,6 +312,12 @@ function createMiniEditor(host, options) {
     insertFiles(files) {
       insertFilesIntoEditor(editor, files);
     },
+    insertDroppedFiles(files, point) {
+      return insertDroppedFilesIntoEditor(editor, files, point);
+    },
+    hideDropPlaceholder() {
+      hideFileDropPlaceholder(editor);
+    },
     requestFiles(accept) {
       requestFilesForEditor(editor, accept || "");
     },
@@ -307,6 +325,9 @@ function createMiniEditor(host, options) {
       editor.setText(value || "");
       resetEditorSelection(editor);
       syncEmptyState();
+    },
+    showDropPlaceholder(point, count) {
+      return showFileDropPlaceholder(editor, point, count);
     },
     wrap(prefix, suffix, placeholder) {
       const view = editor.view;
@@ -391,13 +412,259 @@ function resetEditorSelection(editor) {
   }
 }
 
-function installFileDropHandler(host, editor) {
-  function filesFromDataTransfer(dataTransfer) {
-    return dataTransfer && dataTransfer.files && dataTransfer.files.length
-      ? dataTransfer.files
-      : [];
+function filesFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return [];
+
+  const itemFiles = [];
+  Array.from(dataTransfer.items || []).forEach(function (item) {
+    if (!item || item.kind !== "file") return;
+    const file = item.getAsFile();
+    if (file && file.name) itemFiles.push(file);
+  });
+  if (itemFiles.length) return itemFiles;
+
+  return Array.from(dataTransfer.files || []).filter(function (file) {
+    return file && file.name;
+  });
+}
+
+function dataTransferHasFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  if (filesFromDataTransfer(dataTransfer).length) return true;
+  if (Array.from(dataTransfer.types || []).includes("Files")) return true;
+  return Array.from(dataTransfer.items || []).some(function (item) {
+    return item && item.kind === "file";
+  });
+}
+
+function dataTransferFileCount(dataTransfer) {
+  const files = filesFromDataTransfer(dataTransfer);
+  if (files.length) return files.length;
+  return dataTransferHasFiles(dataTransfer) ? 1 : 0;
+}
+
+function eventPoint(event) {
+  return {
+    x: event.clientX,
+    y: event.clientY,
+  };
+}
+
+function normalizedDropPoint(point) {
+  const x = Number(point && point.x);
+  const y = Number(point && point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function topLevelBlockRects(view) {
+  const blocks = [];
+  view.state.doc.forEach(function (node, offset) {
+    if (!node.isBlock) return;
+
+    const dom = view.nodeDOM(offset);
+    if (!(dom instanceof HTMLElement)) return;
+
+    const rect = dom.getBoundingClientRect();
+    if (!rect.width && !rect.height) return;
+
+    blocks.push({
+      dom,
+      node,
+      pos: offset,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
+  });
+  return blocks;
+}
+
+function fileDropBetweenBlockTarget(blocks, point) {
+  const threshold = 7;
+
+  for (let index = 1; index < blocks.length; index += 1) {
+    const previous = blocks[index - 1];
+    const current = blocks[index];
+    const before = Math.min(threshold, Math.max(3, previous.height * 0.3));
+    const after = Math.min(threshold, Math.max(3, current.height * 0.3));
+
+    if (point.y >= previous.bottom - before && point.y <= current.top + after) {
+      return {
+        pos: current.pos,
+        placement: "between",
+      };
+    }
   }
 
+  return null;
+}
+
+function blockTextLineRect(block, point) {
+  if (!block || !block.dom || typeof document.createRange !== "function") return null;
+
+  const range = document.createRange();
+  range.selectNodeContents(block.dom);
+  const rects = Array.from(range.getClientRects()).filter(function (rect) {
+    return rect.width || rect.height;
+  });
+  if (typeof range.detach === "function") range.detach();
+
+  if (!rects.length) return null;
+
+  const tolerance = 3;
+  const matched = rects.find(function (rect) {
+    return point.y >= rect.top - tolerance && point.y <= rect.bottom + tolerance;
+  });
+  if (matched) return matched;
+
+  return rects.reduce(function (nearest, rect) {
+    const distance = Math.min(
+      Math.abs(point.y - rect.top),
+      Math.abs(point.y - rect.bottom),
+    );
+    return !nearest || distance < nearest.distance ? { rect, distance } : nearest;
+  }, null).rect;
+}
+
+function fileDropTargetForBlock(view, block, point) {
+  const lineRect = blockTextLineRect(block, point) || block;
+  const edgeZone = Math.min(36, Math.max(14, lineRect.width * 0.16));
+  const atLineStart = point.x <= lineRect.left + edgeZone;
+  const atLineEnd = point.x >= lineRect.right - edgeZone;
+  const belowMiddle = point.y >= block.top + block.height / 2;
+  const insertAfter = atLineEnd || (!atLineStart && belowMiddle);
+  const afterPos = Math.min(block.pos + block.node.nodeSize, view.state.doc.content.size);
+
+  return {
+    pos: insertAfter ? afterPos : block.pos,
+    placement: insertAfter && afterPos === view.state.doc.content.size ? "after" : "between",
+  };
+}
+
+function nearestFileDropBlock(blocks, point) {
+  return blocks.reduce(function (nearest, block) {
+    const distance =
+      point.y < block.top
+        ? block.top - point.y
+        : point.y > block.bottom
+          ? point.y - block.bottom
+          : 0;
+
+    return !nearest || distance < nearest.distance ? { block, distance } : nearest;
+  }, null).block;
+}
+
+function fileDropTarget(view, rawPoint) {
+  const point = normalizedDropPoint(rawPoint);
+  if (!point) {
+    return {
+      pos: view.state.selection.from,
+      placement: "between",
+    };
+  }
+
+  const blocks = topLevelBlockRects(view);
+  if (!blocks.length) {
+    return {
+      pos: view.state.doc.content.size,
+      placement: "after",
+    };
+  }
+
+  const betweenTarget = fileDropBetweenBlockTarget(blocks, point);
+  if (betweenTarget) return betweenTarget;
+
+  const firstBlock = blocks[0];
+  const lastBlock = blocks[blocks.length - 1];
+
+  if (point.y < firstBlock.top) {
+    return {
+      pos: firstBlock.pos,
+      placement: "between",
+    };
+  }
+
+  if (point.y > lastBlock.bottom + 8) {
+    return {
+      pos: view.state.doc.content.size,
+      placement: "after",
+    };
+  }
+
+  return fileDropTargetForBlock(view, nearestFileDropBlock(blocks, point), point);
+}
+
+function sameFileDropPlaceholder(left, right) {
+  return (
+    !!left &&
+    !!right &&
+    left.active === right.active &&
+    left.pos === right.pos &&
+    left.count === right.count &&
+    left.placement === right.placement
+  );
+}
+
+function showFileDropPlaceholder(editor, point, count) {
+  const view = editor && editor.view;
+  if (!view) return false;
+
+  const target = fileDropTarget(view, point);
+  const next = {
+    active: true,
+    pos: target.pos,
+    count: Math.max(1, Number(count) || 1),
+    placement: target.placement || "between",
+  };
+  const key = memoFileDropPluginKey(editor);
+  const current = key.getState(view.state);
+  if (!sameFileDropPlaceholder(current, next)) {
+    view.dispatch(
+      view.state.tr.setMeta(key, {
+        type: "showDropPlaceholder",
+        ...next,
+      }),
+    );
+  }
+  return true;
+}
+
+function hideFileDropPlaceholder(editor) {
+  const view = editor && editor.view;
+  if (!view) return;
+
+  const key = memoFileDropPluginKey(editor);
+  const current = key.getState(view.state);
+  if (!current || !current.active) return;
+
+  view.dispatch(view.state.tr.setMeta(key, { type: "hideDropPlaceholder" }));
+}
+
+function fileDropPlaceholderWidget(pluginState) {
+  const placeholder = document.createElement("span");
+  placeholder.className = "file-drop-placeholder file-drop-placeholder-block";
+  placeholder.setAttribute("aria-hidden", "true");
+
+  const badge = document.createElement("span");
+  badge.className = "file-drop-placeholder-badge";
+  badge.textContent = pluginState.count > 1 ? String(pluginState.count) : "FILE";
+  placeholder.appendChild(badge);
+
+  const text = document.createElement("span");
+  text.className = "file-drop-placeholder-text";
+  text.textContent = pluginState.placement === "after"
+    ? "释放后在末尾新行插入文件"
+    : "释放后在这里插入文件";
+  placeholder.appendChild(text);
+
+  return placeholder;
+}
+
+function installFileDropHandler(host, editor) {
   function filesFromClipboard(clipboardData) {
     return clipboardData && clipboardData.files && clipboardData.files.length
       ? clipboardData.files
@@ -405,10 +672,16 @@ function installFileDropHandler(host, editor) {
   }
 
   function onDragOver(event) {
-    if (!filesFromDataTransfer(event.dataTransfer).length) return;
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
+    showFileDropPlaceholder(editor, eventPoint(event), dataTransferFileCount(event.dataTransfer));
+  }
+
+  function onDragLeave(event) {
+    if (event.relatedTarget && host.contains(event.relatedTarget)) return;
+    hideFileDropPlaceholder(editor);
   }
 
   function onDrop(event) {
@@ -416,7 +689,8 @@ function installFileDropHandler(host, editor) {
     if (!files.length) return;
     event.preventDefault();
     event.stopPropagation();
-    insertFilesIntoEditor(editor, files);
+    hideFileDropPlaceholder(editor);
+    insertFilesIntoEditor(editor, files, eventPoint(event));
     editor.focus();
   }
 
@@ -442,13 +716,16 @@ function installFileDropHandler(host, editor) {
 
   host.addEventListener("dragenter", onDragOver, true);
   host.addEventListener("dragover", onDragOver, true);
+  host.addEventListener("dragleave", onDragLeave, true);
   host.addEventListener("drop", onDrop, true);
   host.addEventListener("paste", onPaste, true);
   return function () {
     host.removeEventListener("dragenter", onDragOver, true);
     host.removeEventListener("dragover", onDragOver, true);
+    host.removeEventListener("dragleave", onDragLeave, true);
     host.removeEventListener("drop", onDrop, true);
     host.removeEventListener("paste", onPaste, true);
+    hideFileDropPlaceholder(editor);
   };
 }
 
@@ -499,6 +776,7 @@ function installMemoEditorPlugins(editor, options) {
   }
 
   const plugins = [
+    createMemoFileDropPlugin(editor),
     createMemoClipboardPlugin(editor),
     createMemoReferencePlugin(editor, options || {}),
     createMemoSlashCommandPlugin(editor, options || {}),
@@ -533,6 +811,70 @@ function createMemoClipboardPlugin(editor) {
           event.clipboardData.setData("text/plain", text);
           return true;
         },
+      },
+    },
+  });
+}
+
+function memoFileDropPluginKey(editor) {
+  const PM = window.ProsemirrorMod;
+  if (!editor.__memoFileDropPluginKey) {
+    editor.__memoFileDropPluginKey = new PM.PluginKey(editor.id + "-memoFileDrop");
+  }
+  return editor.__memoFileDropPluginKey;
+}
+
+function createMemoFileDropPlugin(editor) {
+  const PM = window.ProsemirrorMod;
+  const key = memoFileDropPluginKey(editor);
+
+  return new PM.Plugin({
+    key,
+    state: {
+      init() {
+        return { active: false, pos: null, count: 0, placement: "between" };
+      },
+      apply(transaction, value) {
+        const meta = transaction.getMeta(key);
+        if (meta && meta.type === "showDropPlaceholder") {
+          return {
+            active: true,
+            pos: meta.pos,
+            count: meta.count || 1,
+            placement: meta.placement || "between",
+          };
+        }
+        if (meta && meta.type === "hideDropPlaceholder") {
+          return { active: false, pos: null, count: 0, placement: "between" };
+        }
+        if (transaction.docChanged && value.active && value.pos != null) {
+          return {
+            ...value,
+            pos: transaction.mapping.map(value.pos),
+          };
+        }
+        return value;
+      },
+    },
+    props: {
+      decorations(state) {
+        const pluginState = key.getState(state);
+        if (!pluginState || !pluginState.active || pluginState.pos == null) {
+          return PM.DecorationSet.empty;
+        }
+
+        const pos = Math.max(0, Math.min(pluginState.pos, state.doc.content.size));
+        return PM.DecorationSet.create(state.doc, [
+          PM.Decoration.widget(pos, () => fileDropPlaceholderWidget(pluginState), {
+            key: [
+              "memo-file-drop-placeholder",
+              pos,
+              pluginState.count,
+              pluginState.placement || "between",
+            ].join("-"),
+            side: -1,
+          }),
+        ]);
       },
     },
   });
@@ -1785,15 +2127,88 @@ function padMemoNumber(value) {
   return String(value).padStart(2, "0");
 }
 
-function insertFilesIntoEditor(editor, files) {
-  filesToMarkdown(files).then(function (markdown) {
+function insertFilesIntoEditor(editor, files, point) {
+  return filesToMarkdown(files).then(function (markdown) {
     if (!markdown) return;
-    const current = editor.getText();
-    insertPlainTextIntoEditor(editor, (current && !current.endsWith("\n") ? "\n" : "") + markdown);
+    insertMarkdownAtDropTarget(editor, markdown, point);
     editor.focus();
   }).catch(function (err) {
     console.error(uploadErrorMessage(err));
   });
+}
+
+function insertDroppedFilesIntoEditor(editor, files, point) {
+  hideFileDropPlaceholder(editor);
+  return droppedFilesToMarkdown(files).then(function (markdown) {
+    if (!markdown) return;
+    insertMarkdownAtDropTarget(editor, markdown, point);
+    editor.focus();
+  }).catch(function (err) {
+    console.error(uploadErrorMessage(err));
+    throw err;
+  });
+}
+
+function insertMarkdownAtDropTarget(editor, markdown, point) {
+  const view = editor && editor.view;
+  if (!view || !point) {
+    const current = editor.getText();
+    insertPlainTextIntoEditor(editor, (current && !current.endsWith("\n") ? "\n" : "") + markdown);
+    return;
+  }
+
+  const target = fileDropTarget(view, point);
+  if (insertMarkdownBlockAtPosition(view, markdown, target.pos)) return;
+
+  const selection = selectionAtDocumentPosition(view.state, target.pos);
+  const transaction = view.state.tr
+    .setSelection(selection)
+    .insertText(markdown)
+    .scrollIntoView();
+  view.dispatch(transaction);
+}
+
+function insertMarkdownBlockAtPosition(view, markdown, position) {
+  const PM = window.ProsemirrorMod;
+  const schema = view && view.state && view.state.schema;
+  const paragraph = schema && schema.nodes && schema.nodes.paragraph;
+  if (!PM || !paragraph) return false;
+
+  const lines = String(markdown || "")
+    .split("\n")
+    .filter(function (line) {
+      return line.length > 0;
+    });
+  if (!lines.length) return false;
+
+  const nodes = lines.map(function (line) {
+    return paragraph.create(null, schema.text(line));
+  });
+  const pos = Math.max(0, Math.min(Number(position) || 0, view.state.doc.content.size));
+
+  try {
+    const fragment = PM.Fragment.fromArray(nodes);
+    const insertedSize = nodes.reduce(function (size, node) {
+      return size + node.nodeSize;
+    }, 0);
+    let transaction = view.state.tr.insert(pos, fragment);
+    const cursorPos = Math.min(pos + insertedSize, transaction.doc.content.size);
+    transaction = transaction
+      .setSelection(PM.Selection.near(transaction.doc.resolve(cursorPos), -1))
+      .scrollIntoView();
+    view.dispatch(transaction);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function selectionAtDocumentPosition(state, position) {
+  const PM = window.ProsemirrorMod;
+  const pos = Math.max(0, Math.min(Number(position) || 0, state.doc.content.size));
+  const $pos = state.doc.resolve(pos);
+  if ($pos.parent.inlineContent) return PM.TextSelection.create(state.doc, pos);
+  return PM.Selection.near($pos, 1);
 }
 
 function requestFilesForEditor(editor, accept) {
@@ -2096,6 +2511,34 @@ function createFallbackEditor(host, options) {
       save();
     }
   });
+  function insertFiles(files) {
+    filesToMarkdown(files).then((markdown) => {
+      if (!markdown) return;
+      textarea.value += `${textarea.value && !textarea.value.endsWith("\n") ? "\n" : ""}${markdown}`;
+      if (options.onChange) options.onChange(textarea.value);
+    }).catch((err) => {
+      console.error(uploadErrorMessage(err));
+    });
+  }
+  function onDragOver(event) {
+    if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    textarea.classList.add("is-file-drag-over");
+  }
+  function onDrop(event) {
+    if (!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    textarea.classList.remove("is-file-drag-over");
+    insertFiles(event.dataTransfer.files);
+    textarea.focus();
+  }
+  function onDragLeave(event) {
+    if (event.relatedTarget && textarea.contains(event.relatedTarget)) return;
+    textarea.classList.remove("is-file-drag-over");
+  }
   function onPaste(event) {
     const url = clipboardPlainURL(event.clipboardData);
     if (!url) return;
@@ -2103,12 +2546,20 @@ function createFallbackEditor(host, options) {
     event.stopPropagation();
     insertMarkdownLinkIntoTextarea(textarea, url, options.onChange);
   }
+  textarea.addEventListener("dragenter", onDragOver);
+  textarea.addEventListener("dragover", onDragOver);
+  textarea.addEventListener("dragleave", onDragLeave);
+  textarea.addEventListener("drop", onDrop);
   textarea.addEventListener("paste", onPaste);
   return {
     blur() {
       textarea.blur();
     },
     destroy() {
+      textarea.removeEventListener("dragenter", onDragOver);
+      textarea.removeEventListener("dragover", onDragOver);
+      textarea.removeEventListener("dragleave", onDragLeave);
+      textarea.removeEventListener("drop", onDrop);
       textarea.removeEventListener("paste", onPaste);
       textarea.remove();
     },
@@ -2130,17 +2581,23 @@ function createFallbackEditor(host, options) {
       if (options.onChange) options.onChange(textarea.value);
     },
     insertFiles(files) {
-      filesToMarkdown(files).then((markdown) => {
-        if (!markdown) return;
-        textarea.value += `${textarea.value && !textarea.value.endsWith("\n") ? "\n" : ""}${markdown}`;
-        if (options.onChange) options.onChange(textarea.value);
-      }).catch((err) => {
-        console.error(uploadErrorMessage(err));
-      });
+      insertFiles(files);
+    },
+    insertDroppedFiles(files) {
+      textarea.classList.remove("is-file-drag-over");
+      insertFiles(files);
+      return Promise.resolve();
+    },
+    hideDropPlaceholder() {
+      textarea.classList.remove("is-file-drag-over");
     },
     setText(value) {
       textarea.value = value || "";
       if (options.onChange) options.onChange(textarea.value);
+    },
+    showDropPlaceholder() {
+      textarea.classList.add("is-file-drag-over");
+      return true;
     },
     wrap(prefix, suffix, placeholder) {
       const start = textarea.selectionStart;
@@ -2171,6 +2628,7 @@ export {
   cloudStorageById,
   createMiniEditor,
   defaultEditorSettings,
+  droppedFilesToMarkdown,
   fileInfoToUploadURL,
   filesToMarkdown,
   insertPlainTextIntoEditor,

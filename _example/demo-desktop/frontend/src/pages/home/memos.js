@@ -842,9 +842,6 @@ export function mountMemosHome(root) {
     if (!window.onGoMessage) return;
     window.onGoMessage(function (payload) {
       if (!payload) return;
-      if (payload.type === "memo_file_drop") {
-        insertDroppedFiles(payload.files);
-      }
       if (payload.type === "main_window_focus") {
         state.clipboardForeground = true;
         requestClipboardLatest({ maxAgeMs: CLIPBOARD_FOREGROUND_MAX_AGE_MS });
@@ -2551,18 +2548,6 @@ export function mountMemosHome(root) {
     if (accept) els.attachInput.setAttribute("accept", accept);
     else els.attachInput.removeAttribute("accept");
     els.attachInput.click();
-  }
-
-  function insertDroppedFiles(files) {
-    if (!els.composerHost || !els.composerHost.isConnected) return;
-    droppedFilesToMarkdown(files).then(function (markdown) {
-      if (!markdown || !composerEditor) return;
-      composerEditor.insertBlock(markdown);
-      composerEditor.focus();
-      showToast("已插入拖拽文件");
-    }).catch(function (err) {
-      showToast(uploadErrorMessage(err));
-    });
   }
 
   function renderAll() {

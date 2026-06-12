@@ -67,6 +67,8 @@ var (
 	objc_msgSend_Rect_ptr            func(id, sel uintptr, r CGRect, ptr uintptr) uintptr
 	objc_msgSend_Size                func(id, sel uintptr, s CGSize) uintptr
 	objc_msgSend_Point               func(id, sel uintptr, p CGPoint) uintptr
+	objc_msgSend_PointReturn         func(id, sel uintptr) CGPoint
+	objc_msgSend_Point_ID_Return     func(id, sel uintptr, p CGPoint, arg uintptr) CGPoint
 )
 
 func initObjcRuntime() {
@@ -90,6 +92,8 @@ func initObjcRuntime() {
 	purego.RegisterLibFunc(&objc_msgSend_Rect_ptr, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_Size, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_Point, objc, "objc_msgSend")
+	purego.RegisterLibFunc(&objc_msgSend_PointReturn, objc, "objc_msgSend")
+	purego.RegisterLibFunc(&objc_msgSend_Point_ID_Return, objc, "objc_msgSend")
 }
 
 // Dispatch handling
@@ -230,6 +234,14 @@ func (id ID) SendSize(sel Selector, s CGSize) ID {
 
 func (id ID) SendPoint(sel Selector, p CGPoint) ID {
 	return ID(objc_msgSend_Point(uintptr(id), uintptr(sel), p))
+}
+
+func (id ID) SendPointReturn(sel Selector) CGPoint {
+	return objc_msgSend_PointReturn(uintptr(id), uintptr(sel))
+}
+
+func (id ID) SendPointIDReturn(sel Selector, p CGPoint, arg ID) CGPoint {
+	return objc_msgSend_Point_ID_Return(uintptr(id), uintptr(sel), p, uintptr(arg))
 }
 
 // Helper functions for class creation

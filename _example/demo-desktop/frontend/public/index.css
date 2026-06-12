@@ -2110,6 +2110,57 @@ body.is-fixed-window .memo-window-shell {
   margin-bottom: 0;
 }
 
+.memo-editor-host .ProseMirror .file-drop-placeholder {
+  align-items: center;
+  background: rgba(232, 246, 255, 0.94);
+  border: 1px dashed #1976ad;
+  border-radius: 7px;
+  box-shadow:
+    0 0 0 3px rgba(25, 118, 173, 0.12),
+    0 8px 18px rgba(23, 32, 38, 0.12);
+  color: #114b72;
+  display: flex;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  gap: 7px;
+  line-height: 1.2;
+  margin: 8px 0;
+  max-width: min(420px, calc(100% - 12px));
+  padding: 5px 9px 5px 5px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.memo-editor-host .ProseMirror .file-drop-placeholder::before {
+  align-self: stretch;
+  background: #1976ad;
+  border-radius: 999px;
+  content: "";
+  display: inline-block;
+  width: 3px;
+}
+
+.memo-editor-host .ProseMirror .file-drop-placeholder-badge {
+  align-items: center;
+  background: #1976ad;
+  border-radius: 5px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  height: 20px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 30px;
+  padding: 0 5px;
+}
+
+.memo-editor-host .ProseMirror .file-drop-placeholder-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memo-editor-switch {
   min-width: 0;
 }
@@ -2157,6 +2208,10 @@ body.is-fixed-window .memo-window-shell {
   resize: vertical;
   width: 100%;
   word-break: break-word;
+}
+
+.memo-fallback-editor.is-file-drag-over {
+  box-shadow: inset 0 0 0 2px rgba(25, 118, 173, 0.42);
 }
 
 .memo-composer-toolbar {

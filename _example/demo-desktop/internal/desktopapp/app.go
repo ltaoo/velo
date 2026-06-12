@@ -135,19 +135,6 @@ func mainWindowOptions(pathname string, b *velo.Box, logger *zerolog.Logger) *ve
 		OnReopen: func() {
 			showMainWindow(b, logger)
 		},
-		OnDragDrop: func(event string, payload string) {
-			if event != "drop" {
-				return
-			}
-			files := droppedFilesFromPayload(payload, logger)
-			if len(files) == 0 {
-				return
-			}
-			b.SendMessage(velo.H{
-				"type":  "memo_file_drop",
-				"files": files,
-			})
-		},
 	}
 }
 

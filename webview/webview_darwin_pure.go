@@ -713,10 +713,7 @@ func veloWebViewDraggingEntered(self, _cmd, sender uintptr) uintptr {
 	if !hasDraggedFiles(sender) {
 		return 0 // NSDragOperationNone
 	}
-	// Notify JS
-	webView := cocoa.ID(self)
-	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_enter"});`)
-	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+	sendFileDragPointMessage(cocoa.ID(self), cocoa.ID(sender))
 	return 1 // NSDragOperationCopy
 }
 
@@ -724,22 +721,21 @@ func veloWebViewDraggingUpdated(self, _cmd, sender uintptr) uintptr {
 	if !hasDraggedFiles(sender) {
 		return 0
 	}
+	sendFileDragPointMessage(cocoa.ID(self), cocoa.ID(sender))
 	return 1
 }
 
 func veloWebViewDraggingExited(self, _cmd, sender uintptr) {
-	webView := cocoa.ID(self)
-	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_leave"});`)
-	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+	sendFileDragLeaveMessage(cocoa.ID(self))
 }
 
 func veloWebViewPerformDragOperation(self, _cmd, sender uintptr) uintptr {
 	// Hide overlay immediately
 	webView := cocoa.ID(self)
-	script := cocoa.StringToNSString(`window.__receiveGoMessage && window.__receiveGoMessage({"type":"__velo_drag_leave"});`)
-	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+	sendFileDragLeaveMessage(webView)
 
 	senderID := cocoa.ID(sender)
+	point := dropPointInWebView(webView, senderID)
 	pasteboard := senderID.Send(cocoa.RegisterName("draggingPasteboard"))
 
 	// Read file URLs from pasteboard using readObjectsForClasses:options:
@@ -781,11 +777,58 @@ func veloWebViewPerformDragOperation(self, _cmd, sender uintptr) uintptr {
 	}
 
 	if opts != nil && opts.HandleDragDrop != nil {
-		pathsJSON, _ := json.Marshal(paths)
-		go opts.HandleDragDrop("drop", string(pathsJSON))
+		payload := map[string]interface{}{
+			"paths": paths,
+			"x":     point.X,
+			"y":     point.Y,
+		}
+		payloadJSON, _ := json.Marshal(payload)
+		go opts.HandleDragDrop("drop", string(payloadJSON))
 	}
 
 	return 1
+}
+
+func sendFileDragPointMessage(webView cocoa.ID, sender cocoa.ID) {
+	point := dropPointInWebView(webView, sender)
+	payload := map[string]interface{}{
+		"type": "__velo_file_drag_over",
+		"point": map[string]float64{
+			"x": float64(point.X),
+			"y": float64(point.Y),
+		},
+	}
+	sendWebViewMessage(webView, payload)
+}
+
+func sendFileDragLeaveMessage(webView cocoa.ID) {
+	sendWebViewMessage(webView, map[string]interface{}{"type": "__velo_drag_leave"})
+}
+
+func sendWebViewMessage(webView cocoa.ID, payload map[string]interface{}) {
+	payloadJSON, _ := json.Marshal(payload)
+	script := cocoa.StringToNSString(fmt.Sprintf(
+		`window.__receiveGoMessage && window.__receiveGoMessage(%s);`,
+		string(payloadJSON),
+	))
+	webView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), script, 0)
+}
+
+func dropPointInWebView(webView cocoa.ID, sender cocoa.ID) cocoa.CGPoint {
+	windowPoint := sender.SendPointReturn(cocoa.RegisterName("draggingLocation"))
+	viewPoint := webView.SendPointIDReturn(cocoa.RegisterName("convertPoint:fromView:"), windowPoint, 0)
+
+	boundsValue := webView.Send(cocoa.RegisterName("valueForKey:"), cocoa.StringToNSString("bounds"))
+	if boundsValue == 0 {
+		return viewPoint
+	}
+
+	var bounds cocoa.CGRect
+	boundsValue.Send(cocoa.RegisterName("getValue:"), unsafe.Pointer(&bounds))
+	return cocoa.CGPoint{
+		X: viewPoint.X,
+		Y: bounds.Height - viewPoint.Y,
+	}
 }
 
 func createWindow(opts *BoxWebviewOptions, isMain bool) {

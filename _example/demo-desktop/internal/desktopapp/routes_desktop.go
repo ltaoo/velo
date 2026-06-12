@@ -3,6 +3,8 @@ package desktopapp
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"example/simple/internal/desktopapp/external"
@@ -91,13 +93,11 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			allowedTypes = imageFileExtensions()
 		}
 
-		var path string
-		var err error
-		if len(allowedTypes) > 0 {
-			path, err = file.ShowFileSelectDialogWithTypes("default", allowedTypes)
-		} else {
-			path, err = file.ShowFileSelectDialog("default")
-		}
+		path, err := file.ShowFileSelectDialogWithOptions(file.FileSelectOptions{
+			AnimationType: "default",
+			AllowedTypes:  allowedTypes,
+			Directory:     userDocumentsDirectory(),
+		})
 		if err != nil {
 			return c.Error(err.Error())
 		}
@@ -225,4 +225,16 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			"windowName": memoWindowName(memoID),
 		})
 	})
+}
+
+func userDocumentsDirectory() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return ""
+	}
+	documentsDir := filepath.Join(homeDir, "Documents")
+	if info, err := os.Stat(documentsDir); err == nil && info.IsDir() {
+		return documentsDir
+	}
+	return homeDir
 }

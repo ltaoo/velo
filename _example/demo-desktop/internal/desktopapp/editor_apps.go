@@ -12,6 +12,7 @@ import (
 const editorAppIDPrefix = "app:"
 const editorNoneAppID = "none"
 const editorSystemAppID = "system"
+const editorBrowserAppID = "browser"
 
 type EditorAppInfo struct {
 	ID           string `json:"id"`
@@ -53,6 +54,7 @@ func listEditorApplications(query string) []EditorAppInfo {
 	}
 	add(noopApplication())
 	add(systemDefaultApplication())
+	add(browserApplication())
 	for _, app := range discoverLocalApplications() {
 		add(app)
 	}
@@ -88,6 +90,15 @@ func systemDefaultApplication() EditorAppInfo {
 		ID:        editorSystemAppID,
 		Name:      "系统默认应用",
 		Kind:      "system",
+		Available: true,
+	}
+}
+
+func browserApplication() EditorAppInfo {
+	return EditorAppInfo{
+		ID:        editorBrowserAppID,
+		Name:      "浏览器",
+		Kind:      "browser",
 		Available: true,
 	}
 }
@@ -189,6 +200,9 @@ func editorDisplayName(id string) string {
 	}
 	if id == editorSystemAppID {
 		return "系统默认应用"
+	}
+	if id == editorBrowserAppID {
+		return "浏览器"
 	}
 	for _, spec := range editorSpecs() {
 		if spec.name == id {

@@ -5,6 +5,6 @@ package file
 
 import "fmt"
 
-func showFileSelectDialog(animationType string, allowedTypes []string) (string, error) {
+func showFileSelectDialog(options FileSelectOptions) (string, error) {
 	return "", fmt.Errorf("not support")
 }
