@@ -45,7 +45,13 @@ function detachedMemoWindowTemplate() {
         <button class="memo-window-comment-tool" type="button" data-window-comment-attach title="添加图片或附件" aria-label="添加图片或附件">
           ${SVG.plus}
         </button>
-        <div class="memo-editor-host memo-window-comment-editor" data-window-comment-editor></div>
+        <div class="memo-editor-switch memo-window-comment-switch">
+          <div class="memo-editor-host memo-window-comment-editor" data-window-comment-editor data-editor-switch-host></div>
+          <section class="memo-editor-preview memo-window-comment-preview velo-no-drag" data-window-comment-preview hidden></section>
+        </div>
+        <button class="memo-window-comment-tool" type="button" data-window-comment-preview-toggle title="预览" aria-label="预览评论" aria-pressed="false">
+          ${SVG.eye}
+        </button>
         <button class="memo-window-comment-submit" type="submit" data-window-comment-submit title="发送" aria-label="发送评论" disabled>
           ${SVG.send}
         </button>
@@ -121,8 +127,12 @@ function detachedMemoCommentTemplate(comment, renderContext, editingCommentId = 
         editing
           ? `
             <div class="memo-window-comment-edit">
-              <div class="memo-editor-host is-inline memo-window-comment-edit-host" data-window-comment-edit-host></div>
+              <div class="memo-editor-switch">
+                <div class="memo-editor-host is-inline memo-window-comment-edit-host" data-window-comment-edit-host data-editor-switch-host></div>
+                <section class="memo-editor-preview memo-window-comment-edit-preview" data-window-comment-edit-preview hidden></section>
+              </div>
               <div class="memo-window-comment-edit-actions">
+                <button class="memo-secondary-button" type="button" data-window-comment-action="preview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
                 <button class="memo-secondary-button" type="button" data-window-comment-action="cancel">${SVG.x}<span>取消</span></button>
                 <button class="memo-primary-button" type="button" data-window-comment-action="save">${SVG.check}<span>保存</span></button>
               </div>
@@ -322,13 +332,20 @@ function shellTemplate() {
               ${SVG.chevronDown}
             </label>
           </div>
-          <div class="memo-editor-host" data-composer-host></div>
+          <div class="memo-editor-switch memo-composer-switch">
+            <div class="memo-editor-host" data-composer-host data-editor-switch-host></div>
+            <section class="memo-editor-preview memo-composer-preview" data-composer-preview hidden></section>
+          </div>
           <div class="memo-composer-toolbar">
             <div class="memo-composer-status-line">
               <span data-composer-vim-status></span>
               <span data-composer-status></span>
             </div>
             <div class="memo-composer-actions">
+              <button class="memo-secondary-button" type="button" data-action="toggleComposerPreview" aria-pressed="false">
+                ${SVG.eye}
+                <span>预览</span>
+              </button>
               <button class="memo-primary-button" type="button" data-action="createMemo">
                 ${SVG.send}
                 <span>发布</span>
@@ -591,9 +608,13 @@ function memoCommentSectionTemplate(comments, commenting, renderContext) {
         commenting
           ? `
             <div class="memo-comment-editor">
-              <div class="memo-editor-host is-inline" data-comment-host></div>
+              <div class="memo-editor-switch">
+                <div class="memo-editor-host is-inline" data-comment-host data-editor-switch-host></div>
+                <section class="memo-editor-preview memo-comment-preview" data-comment-preview hidden></section>
+              </div>
               <div class="memo-inline-actions memo-comment-actions">
                 <div class="memo-inline-status-line" data-comment-vim-status></div>
+                <button class="memo-secondary-button" type="button" data-action="toggleCommentPreview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
                 <button class="memo-secondary-button" type="button" data-action="cancelComment">${SVG.x}<span>取消</span></button>
                 <button class="memo-primary-button" type="button" data-action="saveComment">${SVG.check}<span>评论</span></button>
               </div>
@@ -1178,7 +1199,10 @@ function clipboardCapturedAtLabel(value) {
 function editTemplate(memo, projects = []) {
   return `
     <div class="memo-inline-editor">
-      <div class="memo-editor-host is-inline" data-edit-host></div>
+      <div class="memo-editor-switch">
+        <div class="memo-editor-host is-inline" data-edit-host data-editor-switch-host></div>
+        <section class="memo-editor-preview memo-edit-preview" data-edit-preview hidden></section>
+      </div>
       <div class="memo-inline-actions">
         <div class="memo-inline-status-line" data-edit-vim-status></div>
         <label class="memo-select-wrap is-compact">
@@ -1193,6 +1217,7 @@ function editTemplate(memo, projects = []) {
           </select>
           ${SVG.chevronDown}
         </label>
+        <button class="memo-secondary-button" type="button" data-action="toggleEditPreview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
         <button class="memo-secondary-button" type="button" data-action="cancelEdit">${SVG.x}<span>取消</span></button>
         <button class="memo-primary-button" type="button" data-action="saveEdit">${SVG.check}<span>保存</span></button>
       </div>
