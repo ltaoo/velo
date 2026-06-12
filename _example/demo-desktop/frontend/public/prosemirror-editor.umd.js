@@ -1090,6 +1090,122 @@
       });
     }
 
+    function miniSelectionInCodeContext(state) {
+      return miniSelectionInCodeNode(state) ||
+        miniSelectionInFence(state) ||
+        miniSelectionInInlineCode(state);
+    }
+
+    function miniSelectionInCodeNode(state) {
+      const selection = state && state.selection;
+      if (!selection || !selection.empty) return false;
+
+      const $from = selection.$from;
+      for (let depth = $from.depth; depth >= 0; depth -= 1) {
+        const node = $from.node(depth);
+        const type = node && node.type;
+        if (type && ((type.spec && type.spec.code) || type.name === "code_block")) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function miniSelectionInFence(state) {
+      const selection = state && state.selection;
+      if (!selection || !selection.empty) return false;
+
+      const textBeforeCursor = state.doc.textBetween(0, selection.from, "\n", "\n");
+      const lines = textBeforeCursor.replace(/\r\n/g, "\n").split("\n");
+      const previousLines = lines.slice(0, -1);
+      const currentLine = lines[lines.length - 1] || "";
+      let inFence = false;
+
+      previousLines.forEach((line) => {
+        if (miniFenceLine(miniUnquoteFenceLine(line))) inFence = !inFence;
+      });
+      return inFence || miniFenceLine(miniUnquoteFenceLine(currentLine));
+    }
+
+    function miniSelectionInInlineCode(state) {
+      const selection = state && state.selection;
+      if (!selection || !selection.empty) return false;
+
+      const $from = selection.$from;
+      if (!$from.parent || !$from.parent.isTextblock) return false;
+
+      const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+      return miniHasOpenInlineCode(before);
+    }
+
+    function miniFenceLine(line) {
+      const trimmed = String(line || "").trim();
+      return trimmed.startsWith("```") || trimmed.startsWith("~~~");
+    }
+
+    function miniUnquoteFenceLine(line) {
+      let value = String(line || "");
+      while (/^\s{0,3}>\s?/.test(value)) {
+        value = value.replace(/^\s{0,3}>\s?/, "");
+      }
+      return value;
+    }
+
+    function miniHasOpenInlineCode(value) {
+      const text = String(value || "");
+      let activeDelimiter = "";
+      let index = 0;
+
+      while (index < text.length) {
+        const tickIndex = text.indexOf("`", index);
+        if (tickIndex < 0) break;
+        if (miniEscapedBacktick(text, tickIndex)) {
+          index = tickIndex + 1;
+          continue;
+        }
+
+        let end = tickIndex + 1;
+        while (end < text.length && text.charAt(end) === "`") end += 1;
+        const delimiter = text.slice(tickIndex, end);
+        if (!activeDelimiter) {
+          activeDelimiter = delimiter;
+        } else if (delimiter === activeDelimiter) {
+          activeDelimiter = "";
+        }
+        index = end;
+      }
+
+      return Boolean(activeDelimiter);
+    }
+
+    function miniMaskInlineCode(value) {
+      const text = String(value || "");
+      const chars = text.split("");
+      let index = 0;
+      while (index < chars.length) {
+        if (text.charAt(index) !== "`" || miniEscapedBacktick(text, index)) {
+          index += 1;
+          continue;
+        }
+        const runStart = index;
+        while (index < text.length && text.charAt(index) === "`") index += 1;
+        const delimiter = text.slice(runStart, index);
+        const closeIndex = text.slice(index).indexOf(delimiter);
+        const end = closeIndex >= 0 ? index + closeIndex + delimiter.length : chars.length;
+        for (let i = runStart; i < end; i += 1) chars[i] = " ";
+        index = end;
+      }
+      return chars.join("");
+    }
+
+    function miniEscapedBacktick(text, index) {
+      let slashCount = 0;
+      for (let i = index - 1; i >= 0 && text.charAt(i) === "\\"; i -= 1) {
+        slashCount += 1;
+      }
+      return slashCount % 2 === 1;
+    }
+
     class ProsemirrorEditor {
       constructor(options) {
         const editorOptions = options || {};
@@ -1518,8 +1634,9 @@
 
         const $from = selection.$from;
         if (!$from.parent.isTextblock) return null;
+        if (miniSelectionInCodeContext(state)) return null;
 
-        const before = $from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc");
+        const before = miniMaskInlineCode($from.parent.textBetween(0, $from.parentOffset, "\ufffc", "\ufffc"));
         const match = /(^|\s)@([^\s@]*)$/u.exec(before);
         if (!match) return null;
 
