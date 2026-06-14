@@ -100,6 +100,17 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
       continue;
     }
 
+    const table = parseMemoTableBlock(lines, index);
+    if (table) {
+      html += memoLineTemplate(
+        memoLineNumberRange(index, table.endIndex, lineNumberOffset),
+        renderMemoTableBlock(table, context),
+        "is-table",
+      );
+      index = table.endIndex;
+      continue;
+    }
+
     const memoEmbed = parseStandaloneMemoEmbed(line);
     if (memoEmbed) {
       html += memoLineTemplate(lineNumber + lineNumberOffset, renderMemoEmbedCard(memoEmbed, context), "is-embed");
@@ -238,6 +249,153 @@ function memoLineTemplate(lineNumber, body, className = "") {
 function listIndentWidth(whitespace) {
   const level = Math.min(6, Math.floor(String(whitespace || "").replace(/\t/g, "  ").length / 2));
   return level * 18;
+}
+
+function parseMemoTableBlock(lines, startIndex) {
+  const header = parseMemoTableRow(lines[startIndex]);
+  if (!header) return null;
+
+  const separator = parseMemoTableSeparator(lines[startIndex + 1]);
+  if (!separator) return null;
+
+  const columnCount = Math.max(header.cells.length, separator.alignments.length);
+  if (columnCount < 1) return null;
+
+  const rows = [];
+  let index = startIndex + 2;
+  while (index < lines.length) {
+    const row = parseMemoTableRow(lines[index]);
+    if (!row) break;
+    rows.push(normalizeMemoTableCells(row.cells, columnCount));
+    index++;
+  }
+
+  return {
+    alignments: normalizeMemoTableCells(separator.alignments, columnCount),
+    endIndex: index - 1,
+    headers: normalizeMemoTableCells(header.cells, columnCount),
+    rows,
+  };
+}
+
+function parseMemoTableRow(line) {
+  const text = String(line || "").trim();
+  if (!text || !hasUnescapedTablePipe(text)) return null;
+
+  let body = text;
+  if (body.charAt(0) === "|") body = body.slice(1);
+  if (body.endsWith("|") && !body.endsWith("\\|")) body = body.slice(0, -1);
+
+  const cells = splitMemoTableCells(body);
+  if (!cells.length) return null;
+  if (cells.length < 2 && text.charAt(0) !== "|" && !text.endsWith("|")) return null;
+  return { cells };
+}
+
+function parseMemoTableSeparator(line) {
+  const row = parseMemoTableRow(line);
+  if (!row) return null;
+
+  const alignments = [];
+  for (const cell of row.cells) {
+    const marker = String(cell || "").trim().replace(/\s+/g, "");
+    if (!/^:?-{2,}:?$/.test(marker)) return null;
+    const left = marker.startsWith(":");
+    const right = marker.endsWith(":");
+    alignments.push(left && right ? "center" : right ? "right" : left ? "left" : "");
+  }
+
+  return { alignments };
+}
+
+function splitMemoTableCells(value) {
+  const text = String(value || "");
+  const cells = [];
+  let cell = "";
+  let escaped = false;
+  let inlineCode = false;
+
+  for (const char of text) {
+    if (escaped) {
+      cell += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      cell += char;
+      escaped = true;
+      continue;
+    }
+    if (char === "`") {
+      inlineCode = !inlineCode;
+      cell += char;
+      continue;
+    }
+    if (char === "|" && !inlineCode) {
+      cells.push(unescapeMemoTableCell(cell.trim()));
+      cell = "";
+      continue;
+    }
+    cell += char;
+  }
+
+  cells.push(unescapeMemoTableCell(cell.trim()));
+  return cells;
+}
+
+function hasUnescapedTablePipe(value) {
+  let escaped = false;
+  let inlineCode = false;
+  for (const char of String(value || "")) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "`") {
+      inlineCode = !inlineCode;
+      continue;
+    }
+    if (char === "|" && !inlineCode) return true;
+  }
+  return false;
+}
+
+function unescapeMemoTableCell(value) {
+  return String(value || "").replace(/\\\|/g, "|");
+}
+
+function normalizeMemoTableCells(cells, count) {
+  const output = Array.isArray(cells) ? cells.slice(0, count) : [];
+  while (output.length < count) output.push("");
+  return output;
+}
+
+function renderMemoTableBlock(table, context) {
+  const alignments = table.alignments || [];
+  const headers = table.headers || [];
+  const rows = table.rows || [];
+  return `
+    <div class="memo-table-scroll">
+      <table class="memo-markdown-table">
+        <thead>
+          <tr>${headers.map((cell, index) => renderMemoTableCell("th", cell, alignments[index], context)).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `<tr>${row.map((cell, index) => renderMemoTableCell("td", cell, alignments[index], context)).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMemoTableCell(tag, value, alignment, context) {
+  const alignClass = alignment ? ` is-align-${alignment}` : "";
+  const content = inlineMarkdown(value, context) || "&nbsp;";
+  return `<${tag} class="${alignClass}">${content}</${tag}>`;
 }
 
 function inlineMarkdown(value, context = {}) {

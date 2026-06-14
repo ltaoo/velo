@@ -1170,6 +1170,25 @@
 
         <section class="settings-section">
           <div class="settings-profile-head">
+            <div class="settings-profile-title">启动</div>
+          </div>
+          <div class="settings-shortcut-card">
+            <div>
+              <div class="settings-shortcut-title">开机自动启动</div>
+              <div class="settings-shortcut-description" data-autostart-detail>读取中</div>
+            </div>
+            <label class="settings-check">
+              <input type="checkbox" data-autostart-enabled />
+              <span>启用</span>
+            </label>
+          </div>
+          <div class="settings-actions">
+            <div class="settings-message" data-autostart-message></div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-profile-head">
             <div class="settings-profile-title">更新</div>
           </div>
           <div class="settings-update-panel">
@@ -1196,6 +1215,8 @@
       var EDITOR_APPS_API = "/api/editor/apps";
       var INPUT_SOURCE_LOCK_API = "/api/settings/input-source-lock";
       var INPUT_SOURCE_LOCK_SAVE_API = "/api/settings/input-source-lock/save";
+      var AUTOSTART_API = "/api/settings/autostart";
+      var AUTOSTART_SAVE_API = "/api/settings/autostart/save";
       var STORAGE_API = "/api/settings/cloud-storage";
       var STORAGE_SAVE_API = "/api/settings/cloud-storage/save";
       var OPEN_WINDOW_API = "/api/open_window";
@@ -1237,6 +1258,9 @@
       var appVersion = document.querySelector("[data-app-version]");
       var veloVersion = document.querySelector("[data-velo-version]");
       var appMode = document.querySelector("[data-app-mode]");
+      var autoStartEnabled = document.querySelector("[data-autostart-enabled]");
+      var autoStartDetail = document.querySelector("[data-autostart-detail]");
+      var autoStartMessage = document.querySelector("[data-autostart-message]");
       var updateActions = document.querySelector("[data-update-actions]");
       var updateMessage = document.querySelector("[data-update-message]");
       var updateProgress = document.querySelector("[data-update-progress]");
@@ -1259,6 +1283,9 @@
       var inputSourceLock = loadInputSourceLockSettings();
       var inputSourceStatus = defaultInputSourceStatus();
       var inputSourceStatusLoaded = false;
+      var autoStart = defaultAutoStartSettings();
+      var autoStartLoaded = false;
+      var autoStartSaving = false;
       var INPUT_SOURCE_UNSUPPORTED_MESSAGE = "当前平台不支持输入法锁定，或无法读取系统输入源。";
       var INPUT_SOURCE_MISSING_PREFIX = "当前设备缺少已保存的输入法";
 
@@ -1286,6 +1313,15 @@
         render();
       }, function (err) {
         setMessage("读取配置失败: " + errorMessage(err), "warning");
+      });
+      loadAutoStartConfig().then(function (settings) {
+        autoStart = normalizeAutoStartSettings(settings);
+        autoStartLoaded = true;
+        renderAutoStart();
+      }, function (err) {
+        autoStartLoaded = true;
+        renderAutoStart();
+        setAutoStartMessage("读取开机启动设置失败: " + errorMessage(err), "warning");
       });
 
       document.querySelector(".settings-nav").addEventListener("click", function (event) {
@@ -1486,6 +1522,11 @@
         }
       });
 
+      aboutPanel.addEventListener("change", function (event) {
+        if (!event.target.matches("[data-autostart-enabled]")) return;
+        setAutoStartEnabled(Boolean(event.target.checked));
+      });
+
       window.addEventListener("focus", function () {
         loadEditorConfig().then(function (settings) {
           editorSettings = normalizeEditorSettings(settings);
@@ -1506,6 +1547,14 @@
           state = normalizeSettings(settings);
           render();
         }, function (_) { });
+        loadAutoStartConfig().then(function (settings) {
+          autoStart = normalizeAutoStartSettings(settings);
+          autoStartLoaded = true;
+          renderAutoStart();
+        }, function (_) {
+          autoStartLoaded = true;
+          renderAutoStart();
+        });
         loadAppInfo();
       });
 
@@ -1605,6 +1654,48 @@
             version: "读取失败",
           };
           renderAbout();
+        });
+      }
+
+      function loadAutoStartConfig() {
+        if (canUseNativeStorage()) {
+          return callStorage(AUTOSTART_API, "GET").then(function (data) {
+            return normalizeAutoStartSettings(data && data.config ? data.config : data);
+          });
+        }
+        return Promise.resolve(defaultAutoStartSettings());
+      }
+
+      function saveAutoStartSettings(value) {
+        var next = normalizeAutoStartSettings(value);
+        if (canUseNativeStorage()) {
+          return callStorage(AUTOSTART_SAVE_API, "POST", { enabled: next.enabled }).then(function (data) {
+            return normalizeAutoStartSettings(data && data.config ? data.config : next);
+          });
+        }
+        return Promise.reject(new Error("当前环境不支持开机启动设置"));
+      }
+
+      function setAutoStartEnabled(enabled) {
+        var previous = autoStart;
+        autoStart = normalizeAutoStartSettings(Object.assign({}, autoStart, {
+          enabled: enabled,
+        }));
+        autoStartSaving = true;
+        renderAutoStart();
+        setAutoStartMessage(enabled ? "正在开启开机自动启动..." : "正在关闭开机自动启动...", "");
+        saveAutoStartSettings(autoStart).then(function (saved) {
+          autoStart = normalizeAutoStartSettings(saved);
+          autoStartSaving = false;
+          autoStartLoaded = true;
+          renderAutoStart();
+          setAutoStartMessage(autoStart.enabled ? "已开启开机自动启动" : "已关闭开机自动启动", autoStart.enabled ? "ready" : "");
+        }, function (err) {
+          autoStart = previous;
+          autoStartSaving = false;
+          autoStartLoaded = true;
+          renderAutoStart();
+          setAutoStartMessage("保存失败: " + errorMessage(err), "warning");
         });
       }
 
@@ -1713,6 +1804,7 @@
         renderShortcuts();
         renderStatus(state);
         renderAbout();
+        renderAutoStart();
       }
 
       function setActivePanel(panelName) {
@@ -1743,6 +1835,27 @@
         veloVersion.textContent = appInfo && appInfo.velo ? appInfo.velo : "读取中";
         appMode.textContent = appInfo && appInfo.mode ? appInfo.mode : "读取中";
         renderUpdate();
+      }
+
+      function renderAutoStart() {
+        autoStart = normalizeAutoStartSettings(autoStart);
+        if (autoStartEnabled) {
+          autoStartEnabled.checked = autoStart.enabled;
+          autoStartEnabled.disabled = autoStartSaving || !autoStart.supported;
+        }
+        if (autoStartDetail) {
+          if (!canUseNativeStorage()) {
+            autoStartDetail.textContent = "仅桌面应用运行时可用。";
+          } else if (!autoStartLoaded) {
+            autoStartDetail.textContent = "正在读取系统开机启动状态。";
+          } else if (!autoStart.supported) {
+            autoStartDetail.textContent = "当前平台暂不支持开机自动启动。";
+          } else if (autoStart.enabled) {
+            autoStartDetail.textContent = (autoStart.appName || "应用") + " 会在登录后自动启动。";
+          } else {
+            autoStartDetail.textContent = (autoStart.appName || "应用") + " 不会在登录后自动启动。";
+          }
+        }
       }
 
       function renderUpdate() {
@@ -2502,6 +2615,12 @@
         calendarMessage.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
       }
 
+      function setAutoStartMessage(text, tone) {
+        if (!autoStartMessage) return;
+        autoStartMessage.textContent = text || "";
+        autoStartMessage.style.color = tone === "warning" ? "var(--danger)" : tone === "ready" ? "var(--accent-strong)" : "";
+      }
+
       function loadEditorSettings() {
         try {
           return normalizeEditorSettings(JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY) || "null"));
@@ -2706,6 +2825,23 @@
         return {
           enabled: true,
           openMemoSearch: "Ctrl+O",
+        };
+      }
+
+      function defaultAutoStartSettings() {
+        return {
+          appName: "",
+          enabled: false,
+          supported: false,
+        };
+      }
+
+      function normalizeAutoStartSettings(value) {
+        var raw = value && typeof value === "object" ? value : {};
+        return {
+          appName: String(raw.appName || ""),
+          enabled: Boolean(raw.enabled),
+          supported: Boolean(raw.supported),
         };
       }
 

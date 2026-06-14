@@ -2802,6 +2802,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-content ul,
 .memo-content ol,
 .memo-content figure,
+.memo-content .memo-table-scroll,
 .memo-content .memo-ref-card,
 .memo-content h1,
 .memo-content h2,
@@ -2818,6 +2819,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-line-body > ul,
 .memo-line-body > ol,
 .memo-line-body > figure,
+.memo-line-body > .memo-table-scroll,
 .memo-line-body > .memo-ref-card,
 .memo-line-body > h1,
 .memo-line-body > h2,
@@ -3005,6 +3007,69 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-content a {
   color: var(--memo-blue);
+}
+
+.memo-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.memo-markdown-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  min-width: 100%;
+}
+
+.memo-markdown-table th,
+.memo-markdown-table td {
+  border-bottom: 1px solid var(--BORDER);
+  border-right: 1px solid var(--BORDER);
+  min-width: 88px;
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.memo-markdown-table th:first-child,
+.memo-markdown-table td:first-child {
+  border-left: 1px solid var(--BORDER);
+}
+
+.memo-markdown-table thead th {
+  background: var(--BG-1);
+  border-top: 1px solid var(--BORDER);
+  color: var(--FG-0);
+  font-weight: 700;
+}
+
+.memo-markdown-table th:first-child {
+  border-top-left-radius: 6px;
+}
+
+.memo-markdown-table th:last-child {
+  border-top-right-radius: 6px;
+}
+
+.memo-markdown-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 6px;
+}
+
+.memo-markdown-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 6px;
+}
+
+.memo-markdown-table .is-align-left {
+  text-align: left;
+}
+
+.memo-markdown-table .is-align-center {
+  text-align: center;
+}
+
+.memo-markdown-table .is-align-right {
+  text-align: right;
 }
 
 .memo-line-list-item {
