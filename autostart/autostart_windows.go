@@ -5,6 +5,7 @@ package autostart
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -24,12 +25,13 @@ func (a *windowsAutoStart) Enable() error {
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
+	command := strconv.Quote(execPath)
 	key, err := registry.OpenKey(registry.CURRENT_USER, registryPath, registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("failed to open registry key: %w", err)
 	}
 	defer key.Close()
-	return key.SetStringValue(a.appName, execPath)
+	return key.SetStringValue(a.appName, command)
 }
 
 func (a *windowsAutoStart) Disable() error {
