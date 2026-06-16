@@ -116,14 +116,25 @@ export function createMemoInVault(content, visibility, projectId) {
 
 export function updateMemoInVault(id, patch) {
   if (typeof globalThis.invoke !== "function") {
-    return Promise.resolve(Object.assign({ id }, patch));
+    const memos = loadMemos();
+    const index = memos.findIndex((memo) => memo && memo.id === id);
+    const next = Object.assign({}, index >= 0 ? memos[index] : { id }, patch);
+    if (index >= 0) {
+      memos[index] = next;
+      saveMemos(memos);
+    }
+    return Promise.resolve(next);
   }
   const args = { id };
   if (Object.prototype.hasOwnProperty.call(patch, "content")) args.content = patch.content;
+  if (Object.prototype.hasOwnProperty.call(patch, "createdAt")) args.createdAt = patch.createdAt;
   if (Object.prototype.hasOwnProperty.call(patch, "projectId")) args.projectId = normalizeProjectID(patch.projectId);
   if (Object.prototype.hasOwnProperty.call(patch, "visibility")) args.visibility = patch.visibility;
   if (Object.prototype.hasOwnProperty.call(patch, "pinned")) args.pinned = patch.pinned;
   if (Object.prototype.hasOwnProperty.call(patch, "archived")) args.archived = patch.archived;
+  if (Object.prototype.hasOwnProperty.call(patch, "kind")) args.kind = patch.kind;
+  if (Object.prototype.hasOwnProperty.call(patch, "taskId")) args.taskId = patch.taskId;
+  if (Object.prototype.hasOwnProperty.call(patch, "updatedAt")) args.updatedAt = patch.updatedAt;
   return globalThis.invoke("/api/memos/update", {
     method: "POST",
     args,

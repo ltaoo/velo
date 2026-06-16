@@ -294,6 +294,9 @@ export function mountMemosHome(root) {
     activeView: "memos",
     calendarMonth: startOfMonth(new Date()),
     commentDraft: "",
+    commentEditDraft: "",
+    commentEditingId: "",
+    commentEditPreviewVisible: false,
     commentPreviewVisible: false,
     commentingMemoId: "",
     comments: [],
@@ -303,6 +306,8 @@ export function mountMemosHome(root) {
     editDraft: "",
     editProjectId: "",
     editVisibility: DEFAULT_VISIBILITY,
+    sourceDraft: "",
+    sourceEditingId: "",
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
@@ -347,6 +352,8 @@ export function mountMemosHome(root) {
   };
 
   let composerEditor = null;
+  let commentEditEditor = null;
+  let commentEditEditorCommentId = "";
   let commentEditor = null;
   let commentEditorMemoId = "";
   let editEditor = null;
@@ -432,7 +439,9 @@ export function mountMemosHome(root) {
       if (state.highlightTimer) window.clearTimeout(state.highlightTimer);
       if (composerEditor) composerEditor.destroy();
       if (commentEditor) commentEditor.destroy();
+      if (commentEditEditor) commentEditEditor.destroy();
       if (editEditor) editEditor.destroy();
+      commentEditEditorCommentId = "";
       commentEditorMemoId = "";
       editEditorMemoId = "";
       root.innerHTML = "";
@@ -528,12 +537,13 @@ export function mountMemosHome(root) {
     if (vimChanged) {
       if (editEditor) syncEditDraftFromEditor();
       if (commentEditor) syncCommentDraftFromEditor();
+      if (commentEditEditor) syncCommentEditDraftFromEditor();
       if (composerEditor) composerEditor.destroy();
       els.composerHost.innerHTML = "";
       composerEditor = createComposerEditor(composerText);
       renderComposerStatus(composerEditor.getText());
 
-      if (state.activeView === "memos" && (state.editingId || state.commentingMemoId)) renderFeed();
+      if (state.activeView === "memos" && (state.editingId || state.commentingMemoId || state.commentEditingId)) renderFeed();
       if (calendarChanged) renderCalendar();
       if (fileEditorChanged) renderAll();
       if (!options.silent) showToast(next.vimMode ? "已启用 Vim 模式" : "已关闭 Vim 模式");
@@ -611,6 +621,8 @@ export function mountMemosHome(root) {
       state.activeTag = "";
       state.editingId = "";
       state.editPreviewVisible = false;
+      state.sourceDraft = "";
+      state.sourceEditingId = "";
       state.commentPreviewVisible = false;
       state.commentingMemoId = "";
       state.commentDraft = "";
@@ -685,6 +697,8 @@ export function mountMemosHome(root) {
 
     const memoNode = closestElement(action, "[data-memo-id]");
     const memoId = memoNode ? memoNode.dataset.memoId : "";
+    const commentNode = closestElement(action, "[data-comment-id]");
+    const commentId = commentNode ? commentNode.dataset.commentId : "";
     const taskNode = closestElement(action, "[data-task-id]");
     const taskId = taskNode ? taskNode.dataset.taskId : "";
     const gtdItemNode = closestElement(action, "[data-gtd-item-id]");
@@ -705,6 +719,9 @@ export function mountMemosHome(root) {
       case "cancelComment":
         cancelComment();
         break;
+      case "cancelCommentEdit":
+        cancelCommentEdit();
+        break;
       case "clearFilters":
         state.activeFilter = "all";
         state.activeTag = "";
@@ -712,9 +729,14 @@ export function mountMemosHome(root) {
         state.composerProjectId = state.lastComposerProjectId || "";
         state.commentingMemoId = "";
         state.commentDraft = "";
+        state.commentEditingId = "";
+        state.commentEditDraft = "";
+        state.commentEditPreviewVisible = false;
         state.commentPreviewVisible = false;
         state.editingId = "";
         state.editPreviewVisible = false;
+        state.sourceDraft = "";
+        state.sourceEditingId = "";
         state.query = "";
         state.selectedCalendarDate = "";
         els.searchInput.value = "";
@@ -729,8 +751,14 @@ export function mountMemosHome(root) {
       case "commentMemo":
         startComment(memoId);
         break;
+      case "deleteComment":
+        deleteComment(commentId);
+        break;
       case "toggleCommentPreview":
         toggleCommentPreview(memoId);
+        break;
+      case "toggleCommentEditPreview":
+        toggleCommentEditPreview(commentId);
         break;
       case "toggleComposerPreview":
         toggleComposerPreview();
@@ -783,6 +811,18 @@ export function mountMemosHome(root) {
       case "editMemo":
         startEdit(memoId);
         break;
+      case "editComment":
+        startCommentEdit(commentId);
+        break;
+      case "editMemoSource":
+        startSourceEdit(memoId);
+        break;
+      case "cancelMemoSource":
+        cancelSourceEdit();
+        break;
+      case "saveMemoSource":
+        saveMemoSource(memoId);
+        break;
       case "toggleMemoExpand":
         toggleMemoExpand(memoId);
         break;
@@ -803,6 +843,9 @@ export function mountMemosHome(root) {
         break;
       case "saveComment":
         saveComment(memoId);
+        break;
+      case "saveCommentEdit":
+        saveCommentEdit();
         break;
       case "sortMemos":
         state.sortDesc = !state.sortDesc;
@@ -1445,6 +1488,8 @@ export function mountMemosHome(root) {
     state.activeProjectFilter = "all";
     state.editingId = "";
     state.editPreviewVisible = false;
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
     state.query = "";
     state.selectedCalendarDate = "";
     els.searchInput.value = "";
@@ -1500,6 +1545,11 @@ export function mountMemosHome(root) {
     if (event.target.matches("[data-search-input]")) {
       state.query = event.target.value.trim();
       renderAll();
+      return;
+    }
+
+    if (event.target.matches("[data-memo-source-yaml]")) {
+      state.sourceDraft = event.target.value;
     }
   }
 
@@ -1659,10 +1709,19 @@ export function mountMemosHome(root) {
     if (!state.commentPreviewVisible && commentEditor) commentEditor.focus();
   }
 
+  function toggleCommentEditPreview(commentId) {
+    if (!commentId || state.commentEditingId !== commentId) return;
+    syncCommentEditDraftFromEditor();
+    state.commentEditPreviewVisible = !state.commentEditPreviewVisible;
+    renderCommentEditPreview(commentId);
+    if (!state.commentEditPreviewVisible && commentEditEditor) commentEditEditor.focus();
+  }
+
   function renderEditablePreviews() {
     renderComposerPreview();
     if (state.editingId) renderEditPreview(state.editingId);
     if (state.commentingMemoId) renderCommentPreview(state.commentingMemoId);
+    if (state.commentEditingId) renderCommentEditPreview(state.commentEditingId);
   }
 
   function renderComposerPreview() {
@@ -1695,6 +1754,18 @@ export function mountMemosHome(root) {
       state.commentPreviewVisible,
       content,
       memoRenderContext(memoId, { readonly: true, showLineNumbers: false }),
+    );
+  }
+
+  function renderCommentEditPreview(commentId) {
+    const comment = findComment(commentId);
+    const content = commentEditEditor ? commentEditEditor.getText() : state.commentEditDraft;
+    renderEditorPreviewPanel(
+      els.memoList.querySelector("[data-comment-edit-preview]"),
+      els.memoList.querySelector('[data-action="toggleCommentEditPreview"]'),
+      state.commentEditPreviewVisible,
+      content,
+      memoRenderContext(comment && comment.memoId, { readonly: true, showLineNumbers: false }),
     );
   }
 
@@ -2048,11 +2119,48 @@ export function mountMemosHome(root) {
     state.commentingMemoId = memoId;
     state.commentDraft = "";
     state.commentPreviewVisible = false;
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentEditPreviewVisible = false;
     state.editingId = "";
     state.editDraft = "";
     state.editPreviewVisible = false;
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
     if (!state.expandedMemoIds.has(memoId)) state.expandedMemoIds.add(memoId);
     renderFeed();
+  }
+
+  function startCommentEdit(commentId) {
+    const comment = findComment(commentId);
+    if (!comment) return;
+    if (commentEditEditor && state.commentEditingId === comment.id) {
+      commentEditEditor.focus();
+      return;
+    }
+    if (commentEditEditor) syncCommentEditDraftFromEditor();
+    state.commentEditingId = comment.id;
+    state.commentEditDraft = comment.content || "";
+    state.commentEditPreviewVisible = false;
+    state.commentingMemoId = "";
+    state.commentDraft = "";
+    state.commentPreviewVisible = false;
+    state.editingId = "";
+    state.editDraft = "";
+    state.editPreviewVisible = false;
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
+    if (comment.memoId && !state.expandedMemoIds.has(comment.memoId)) state.expandedMemoIds.add(comment.memoId);
+    renderFeed();
+  }
+
+  function cancelCommentEdit(options = {}) {
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentEditPreviewVisible = false;
+    renderFeed();
+    if (options.message) showToast(options.message);
+    return Promise.resolve({ ok: true, message: options.message || "comment edit cancelled" });
   }
 
   function cancelComment(options = {}) {
@@ -2095,11 +2203,70 @@ export function mountMemosHome(root) {
     });
   }
 
+  function saveCommentEdit() {
+    const comment = findComment(state.commentEditingId);
+    if (!comment) return Promise.resolve({ ok: false, message: "找不到评论" });
+    if (state.commentSaving) return Promise.resolve({ ok: false, message: "正在保存" });
+    const content = commentEditEditor ? commentEditEditor.getText() : state.commentEditDraft;
+    if (!content.trim()) {
+      showToast("评论不能为空");
+      if (commentEditEditor) commentEditEditor.focus();
+      return Promise.resolve({ ok: false, message: "评论不能为空" });
+    }
+
+    state.commentSaving = true;
+    return updateMemoCommentInVault(comment.id, { content }).then(
+      function (updated) {
+        upsertCommentInState(updated);
+        state.commentEditingId = "";
+        state.commentEditDraft = "";
+        state.commentEditPreviewVisible = false;
+        renderFeed();
+        showToast("已保存评论");
+        return { ok: true, message: "已保存评论" };
+      },
+      function (err) {
+        showToast("保存评论失败: " + errorMessage(err));
+        return { ok: false, message: "保存评论失败: " + errorMessage(err) };
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+    });
+  }
+
+  function deleteComment(commentId) {
+    const comment = findComment(commentId);
+    if (!comment || state.commentSaving) return;
+    if (!window.confirm("删除这条评论？")) return;
+
+    state.commentSaving = true;
+    deleteMemoCommentInVault(comment.id, { cleanupAssets: true }).then(
+      function () {
+        state.comments = state.comments.filter((item) => item.id !== comment.id);
+        if (state.commentEditingId === comment.id) {
+          state.commentEditingId = "";
+          state.commentEditDraft = "";
+          state.commentEditPreviewVisible = false;
+        }
+        renderFeed();
+        showToast("已删除评论");
+      },
+      function (err) {
+        showToast("删除评论失败: " + errorMessage(err));
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+    });
+  }
+
   function exitComment(memoId) {
     const memo = findMemo(memoId);
     if (!memo) {
       state.commentingMemoId = "";
       state.commentDraft = "";
+      state.commentEditingId = "";
+      state.commentEditDraft = "";
+      state.commentEditPreviewVisible = false;
       state.commentPreviewVisible = false;
       renderFeed();
       return Promise.resolve({ ok: true, message: "quit" });
@@ -2118,6 +2285,11 @@ export function mountMemosHome(root) {
     state.commentingMemoId = "";
     state.commentDraft = "";
     state.commentPreviewVisible = false;
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentEditPreviewVisible = false;
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
     state.editingId = memoId;
     state.editDraft = draft ? draft.content : memo.content;
     state.editPreviewVisible = false;
@@ -2125,6 +2297,27 @@ export function mountMemosHome(root) {
     state.editVisibility = draft ? draft.visibility || DEFAULT_VISIBILITY : memo.visibility || DEFAULT_VISIBILITY;
     renderFeed();
     if (draft) showToast("已恢复编辑草稿");
+  }
+
+  function startSourceEdit(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return;
+    state.commentingMemoId = "";
+    state.commentDraft = "";
+    state.commentPreviewVisible = false;
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentEditPreviewVisible = false;
+    state.editingId = "";
+    state.editDraft = "";
+    state.editPreviewVisible = false;
+    state.sourceEditingId = memoId;
+    state.sourceDraft = memoSourceYaml(memo);
+    renderFeed();
+    window.requestAnimationFrame(function () {
+      const input = els.memoList.querySelector("[data-memo-source-yaml]");
+      if (input) input.focus();
+    });
   }
 
   function toggleMemoExpand(memoId) {
@@ -2150,6 +2343,28 @@ export function mountMemosHome(root) {
         showToast("删除草稿失败: " + errorMessage(err));
       });
     }
+  }
+
+  function cancelSourceEdit() {
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
+    renderFeed();
+  }
+
+  function saveMemoSource(memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    const parsed = parseMemoSourceYaml(state.sourceDraft, memo);
+    if (parsed.error) {
+      showToast(parsed.error);
+      return Promise.resolve({ ok: false, message: parsed.error });
+    }
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
+    return updateMemo(memoId, parsed.patch).then(function (result) {
+      if (!result || result.ok !== false) showToast("源数据已保存");
+      return result;
+    });
   }
 
   function saveEdit(memoId, options = {}) {
@@ -2218,6 +2433,113 @@ export function mountMemosHome(root) {
       );
     }
     return Promise.resolve({ ok: false, message: "找不到 memo" });
+  }
+
+  function memoSourceYaml(memo) {
+    const lines = [
+      ["id", memo.id || ""],
+      ["createdAt", memo.createdAt || ""],
+      ["updatedAt", memo.updatedAt || ""],
+      ["visibility", memo.visibility || DEFAULT_VISIBILITY],
+      ["pinned", Boolean(memo.pinned)],
+      ["archived", Boolean(memo.archived)],
+      ["projectId", memo.projectId || ""],
+      ["kind", memo.kind || ""],
+      ["taskId", memo.taskId || ""],
+    ];
+    return lines.map(function ([key, value]) {
+      if (typeof value === "boolean") return `${key}: ${value ? "true" : "false"}`;
+      return `${key}: ${yamlQuote(value)}`;
+    }).join("\n");
+  }
+
+  function parseMemoSourceYaml(value, memo) {
+    const meta = {};
+    const allowed = new Set(["id", "createdAt", "created_at", "updatedAt", "updated_at", "visibility", "pinned", "archived", "projectId", "kind", "taskId"]);
+    const ignored = new Set(["schemaVersion", "contentWhitespace", "tags", "references"]);
+    const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim();
+      if (!line || line.startsWith("#") || line === "---") continue;
+      if (/^-\s/.test(line)) continue;
+      const colon = line.indexOf(":");
+      if (colon < 0) return { error: `源数据第 ${index + 1} 行缺少冒号` };
+      const key = line.slice(0, colon).trim();
+      if (!key) return { error: `源数据第 ${index + 1} 行缺少字段名` };
+      if (ignored.has(key)) continue;
+      if (!allowed.has(key)) return { error: `不支持的源数据字段: ${key}` };
+      meta[key] = yamlScalarValue(line.slice(colon + 1));
+    }
+
+    const id = String(meta.id || "").trim();
+    if (!id) return { error: "源数据必须保留 id" };
+    if (id !== memo.id) return { error: "暂不支持修改 memo id" };
+
+    const createdAt = String(meta.createdAt || meta.created_at || "").trim();
+    if (!createdAt) return { error: "createdAt 不能为空" };
+    if (!isValidMemoTime(createdAt)) return { error: "createdAt 必须是 RFC3339 时间" };
+
+    const updatedAt = String(meta.updatedAt || meta.updated_at || "").trim();
+    if (updatedAt && !isValidMemoTime(updatedAt)) return { error: "updatedAt 必须是 RFC3339 时间" };
+
+    const visibility = String(meta.visibility || DEFAULT_VISIBILITY).trim().toUpperCase();
+    if (!Object.prototype.hasOwnProperty.call(VISIBILITY, visibility)) return { error: "visibility 只能是 PRIVATE、PROTECTED 或 PUBLIC" };
+
+    const pinned = parseYAMLBool(meta.pinned, Boolean(memo.pinned));
+    if (pinned === null) return { error: "pinned 必须是 true 或 false" };
+    const archived = parseYAMLBool(meta.archived, Boolean(memo.archived));
+    if (archived === null) return { error: "archived 必须是 true 或 false" };
+
+    return {
+      patch: {
+        archived,
+        createdAt,
+        kind: String(meta.kind || "").trim(),
+        pinned,
+        projectId: normalizeProjectID(meta.projectId || ""),
+        taskId: String(meta.taskId || "").trim(),
+        updatedAt,
+        visibility,
+      },
+    };
+  }
+
+  function yamlQuote(value) {
+    return JSON.stringify(String(value || ""));
+  }
+
+  function yamlScalarValue(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (raw[0] === '"' || raw[0] === "'") {
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        return raw.replace(/^['"]|['"]$/g, "");
+      }
+    }
+    return raw.replace(/\s+#.*$/, "").trim();
+  }
+
+  function parseYAMLBool(value, fallback) {
+    if (value === undefined) return fallback;
+    switch (String(value).trim().toLowerCase()) {
+      case "true":
+      case "yes":
+      case "1":
+        return true;
+      case "false":
+      case "no":
+      case "0":
+        return false;
+      default:
+        return null;
+    }
+  }
+
+  function isValidMemoTime(value) {
+    const date = new Date(value);
+    return !Number.isNaN(date.getTime());
   }
 
   function writeEditDraft(memoId) {
@@ -2581,6 +2903,11 @@ export function mountMemosHome(root) {
       commentEditor = null;
       commentEditorMemoId = "";
     }
+    if (state.activeView !== "memos" && commentEditEditor) {
+      commentEditEditor.destroy();
+      commentEditEditor = null;
+      commentEditEditorCommentId = "";
+    }
     switch (state.activeView) {
       case "todos":
         renderTodos();
@@ -2616,6 +2943,11 @@ export function mountMemosHome(root) {
   function syncCommentDraftFromEditor() {
     if (!commentEditor || !state.commentingMemoId || commentEditorMemoId !== state.commentingMemoId) return;
     state.commentDraft = commentEditor.getText();
+  }
+
+  function syncCommentEditDraftFromEditor() {
+    if (!commentEditEditor || !state.commentEditingId || commentEditEditorCommentId !== state.commentEditingId) return;
+    state.commentEditDraft = commentEditEditor.getText();
   }
 
   function renderProjects() {
@@ -2758,6 +3090,14 @@ export function mountMemosHome(root) {
       commentEditor = null;
       commentEditorMemoId = "";
     }
+    if (commentEditEditor) {
+      if (state.commentEditingId && state.commentEditingId === commentEditEditorCommentId) {
+        syncCommentEditDraftFromEditor();
+      }
+      commentEditEditor.destroy();
+      commentEditEditor = null;
+      commentEditEditorCommentId = "";
+    }
     if (editEditor) {
       syncEditDraftFromEditor();
       editEditor.destroy();
@@ -2853,6 +3193,44 @@ export function mountMemosHome(root) {
       }
     }
 
+    if (state.commentEditingId) {
+      const comment = findComment(state.commentEditingId);
+      const host = els.memoList.querySelector("[data-comment-edit-host]");
+      const editHost = host ? closestElement(host, ".memo-comment-edit") : null;
+      const statusHost = editHost ? editHost.querySelector("[data-comment-edit-vim-status]") : null;
+      if (comment && host) {
+        commentEditEditor = createMiniEditor(host, {
+          memoItems() {
+            return state.memos;
+          },
+          tagItems: editorTagItems,
+          onChange(value) {
+            state.commentEditDraft = value;
+            renderCommentEditPreview(comment.id);
+          },
+          onCommit() {
+            return saveCommentEdit();
+          },
+          onDiscard() {
+            return cancelCommentEdit({ message: "评论编辑已取消" });
+          },
+          onQuit() {
+            return cancelCommentEdit();
+          },
+          onSubmit() {
+            return saveCommentEdit();
+          },
+          placeholder: "编辑评论...",
+          sourceMemoId: comment.memoId,
+          value: state.commentEditDraft,
+          vim: editorVimEnabled(),
+          vimStatusHost: statusHost,
+        });
+        commentEditEditorCommentId = comment.id;
+        commentEditEditor.focus();
+      }
+    }
+
     syncMemoExpandControls();
     renderEditablePreviews();
   }
@@ -2868,6 +3246,9 @@ export function mountMemosHome(root) {
         {
           comments: commentsForMemo(memo.id),
           commenting: state.commentingMemoId === memo.id,
+          editingCommentId: state.commentEditingId,
+          sourceDraft: state.sourceEditingId === memo.id ? state.sourceDraft : "",
+          sourceEditing: state.sourceEditingId === memo.id,
         },
       );
     } catch (err) {
@@ -3152,6 +3533,11 @@ export function mountMemosHome(root) {
         if (left === right) return a.id.localeCompare(b.id);
         return left - right;
       });
+  }
+
+  function findComment(commentId) {
+    const id = String(commentId || "").trim();
+    return state.comments.find((comment) => comment && comment.id === id) || null;
   }
 
   function upsertCommentInState(comment) {
@@ -3651,6 +4037,8 @@ export function mountMemosHome(root) {
         state.query = "";
         state.editingId = "";
         state.editPreviewVisible = false;
+        state.sourceDraft = "";
+        state.sourceEditingId = "";
         els.searchInput.value = "";
         break;
       default:
@@ -3669,6 +4057,8 @@ export function mountMemosHome(root) {
     state.query = "";
     state.editingId = "";
     state.editPreviewVisible = false;
+    state.sourceDraft = "";
+    state.sourceEditingId = "";
     els.searchInput.value = "";
     renderAll();
   }

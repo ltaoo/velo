@@ -44,7 +44,7 @@ func loadAppName(dir string) string {
 	return "app"
 }
 
-func runDev(dir string) error {
+func runDev(dir string, engine string) error {
 	mainFile := filepath.Join(dir, "main.go")
 	if _, err := os.Stat(mainFile); err != nil {
 		return fmt.Errorf("main.go not found in %s", dir)
@@ -102,6 +102,9 @@ func runDev(dir string) error {
 		cmd.Stdout = crlf
 		cmd.Stderr = crlf
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if engine != "" {
+			cmd.Env = append(os.Environ(), "VELO_WEBVIEW_ENGINE="+engine)
+		}
 
 		doneCh := make(chan error, 1)
 		if err := cmd.Start(); err != nil {
