@@ -79,6 +79,17 @@ type BuildSection struct {
 	ExcludeFiles []string     `json:"exclude_files"`
 }
 
+type DesktopSection struct {
+	Engine   string          `json:"engine"`
+	Electron ElectronSection `json:"electron"`
+}
+
+type ElectronSection struct {
+	Enabled        bool   `json:"enabled"`
+	PackageManager string `json:"package_manager"`
+	Command        string `json:"command"`
+}
+
 type ReleaseSection struct {
 	Footer string `json:"footer"`
 }
@@ -149,6 +160,7 @@ type Config struct {
 		IOS     IOSSection     `json:"ios"`
 	} `json:"platforms"`
 	Build   BuildSection   `json:"build"`
+	Desktop DesktopSection `json:"desktop"`
 	Release ReleaseSection `json:"release"`
 	Update  UpdateSection  `json:"update"`
 }

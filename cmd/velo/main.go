@@ -40,11 +40,14 @@ func main() {
 			os.Exit(1)
 		}
 	case "dev":
+		fs := flag.NewFlagSet("dev", flag.ExitOnError)
+		engine := fs.String("engine", "", "webview engine: native or electron")
+		fs.Parse(os.Args[2:])
 		dir := "."
-		if len(os.Args) > 2 {
-			dir = os.Args[2]
+		if fs.NArg() > 0 {
+			dir = fs.Arg(0)
 		}
-		if err := runDev(dir); err != nil {
+		if err := runDev(dir, *engine); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}

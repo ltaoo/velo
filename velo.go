@@ -185,7 +185,8 @@ type AppConfig struct {
 		Icon        string `json:"icon"`
 		TrayIcon    string `json:"tray_icon"`
 	} `json:"app"`
-	Update buildcfg.UpdateSection `json:"update"`
+	Desktop buildcfg.DesktopSection `json:"desktop"`
+	Update  buildcfg.UpdateSection  `json:"update"`
 }
 
 func LoadAppConfig(embedded ...[]byte) *AppConfig {
@@ -288,6 +289,7 @@ type veloRuntimeInfo struct {
 	Version   string                 `json:"version"`
 	Mode      string                 `json:"mode"`
 	ModeValue int                    `json:"mode_value"`
+	Engine    string                 `json:"engine"`
 	AppName   string                 `json:"app_name"`
 	Title     string                 `json:"title"`
 	Config    veloRuntimeConfig      `json:"config"`
@@ -310,10 +312,12 @@ type Box struct {
 	iconData               []byte
 	appConfig              *AppConfig
 	quitOnLastWindowClosed bool
+	webviewEngine          webview.Engine
 }
 
 type VeloAppOpt struct {
 	Mode                   Mode
+	WebviewEngine          webview.Engine
 	AppName                string
 	Title                  string
 	IconData               []byte
@@ -334,8 +338,13 @@ func NewApp(o *VeloAppOpt) *Box {
 		appName:                appConfig.displayName(),
 		appConfig:              appConfig,
 		quitOnLastWindowClosed: true,
+		webviewEngine:          resolveWebviewEngine(appConfig, o.WebviewEngine),
 	}
 	b.mode = o.Mode
+	if b.webviewEngine == webview.EngineElectron && b.mode == ModeBridge {
+		fmt.Println("[velo] electron webview engine uses HTTP/WebSocket transport; switching ModeBridge to ModeBridgeHttp")
+		b.mode = ModeBridgeHttp
+	}
 	if o.AppName != "" {
 		b.appName = o.AppName
 	}
@@ -352,6 +361,22 @@ func NewApp(o *VeloAppOpt) *Box {
 	b.registerStoreRoutes()
 	b.registerVeloRoutes()
 	return b
+}
+
+func resolveWebviewEngine(cfg *AppConfig, override webview.Engine) webview.Engine {
+	if override != "" {
+		return webview.NormalizeEngine(override)
+	}
+	if env := os.Getenv("VELO_WEBVIEW_ENGINE"); env != "" {
+		return webview.NormalizeEngine(webview.Engine(env))
+	}
+	if cfg != nil && cfg.Desktop.Engine != "" {
+		return webview.NormalizeEngine(webview.Engine(cfg.Desktop.Engine))
+	}
+	if cfg != nil && cfg.Desktop.Electron.Enabled {
+		return webview.EngineElectron
+	}
+	return webview.EngineNative
 }
 
 func (c *AppConfig) runtimeConfig() veloRuntimeConfig {
@@ -397,6 +422,7 @@ func (b *Box) runtimeInfo(window *veloRuntimeWindowInfo) veloRuntimeInfo {
 		Version:   Version,
 		Mode:      b.mode.String(),
 		ModeValue: int(b.mode),
+		Engine:    string(b.webviewEngine),
 		AppName:   b.appName,
 		Title:     title,
 		Config:    b.appConfig.runtimeConfig(),
@@ -405,8 +431,8 @@ func (b *Box) runtimeInfo(window *veloRuntimeWindowInfo) veloRuntimeInfo {
 }
 
 func (b *Box) injectedRuntimeJS(window *veloRuntimeWindowInfo) string {
-	data, err := json.Marshal(b.runtimeInfo(window))
-	if err != nil {
+	data := b.runtimeJSON(window)
+	if data == "" {
 		return string(asset.JSRuntime)
 	}
 	return fmt.Sprintf(`Object.defineProperty(window, "__VELO__", {
@@ -415,7 +441,15 @@ func (b *Box) injectedRuntimeJS(window *veloRuntimeWindowInfo) string {
   configurable: false,
   enumerable: false
 });
-%s`, string(data), string(asset.JSRuntime))
+%s`, data, string(asset.JSRuntime))
+}
+
+func (b *Box) runtimeJSON(window *veloRuntimeWindowInfo) string {
+	data, err := json.Marshal(b.runtimeInfo(window))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (b *Box) webviewURL(optURL, pathname string) string {
@@ -519,6 +553,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		Pathname:               pathname,
 		IconData:               b.iconData,
 		InjectedJS:             b.injectedRuntimeJS(windowInfo),
+		RuntimeJSON:            b.runtimeJSON(windowInfo),
 		AppName:                b.appName,
 		Title:                  title,
 		Width:                  width,
@@ -532,6 +567,8 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleDragDrop:         opt.OnDragDrop,
 		HandleReopen:           opt.OnReopen,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		Engine:                 b.webviewEngine,
+		ElectronCommand:        b.appConfig.Desktop.Electron.Command,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
 		HideTrafficLights:      opt.HideTrafficLights,
@@ -882,6 +919,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		Pathname:               pathname,
 		IconData:               b.iconData,
 		InjectedJS:             b.injectedRuntimeJS(windowInfo),
+		RuntimeJSON:            b.runtimeJSON(windowInfo),
 		AppName:                b.appName,
 		Title:                  title,
 		Width:                  width,
@@ -895,6 +933,8 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HandleDragDrop:         opt.OnDragDrop,
 		HandleReopen:           opt.OnReopen,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		Engine:                 b.webviewEngine,
+		ElectronCommand:        b.appConfig.Desktop.Electron.Command,
 		Frameless:              opt.Frameless,
 		Hidden:                 opt.Hidden,
 		HideTrafficLights:      opt.HideTrafficLights,
@@ -903,7 +943,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		URL:                    windowURL,
 	}
 	b.webviews = append(b.webviews, opts)
-	wv := &webview.Webview{}
+	wv := webview.NewHandle(windowName, b.webviewEngine)
 	b.Webview = wv
 	return wv
 }
