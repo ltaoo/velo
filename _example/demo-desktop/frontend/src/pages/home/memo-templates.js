@@ -543,6 +543,9 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const projectBadge = projectBadgeTemplate(memo.projectId, projects);
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const commenting = options.commenting === true;
+  const editingCommentId = String(options.editingCommentId || "");
+  const sourceEditing = options.sourceEditing === true;
+  const sourceDraft = String(options.sourceDraft || "");
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -569,7 +572,9 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
       ${
         editing
           ? editTemplate(memo, projects)
-          : `
+          : sourceEditing
+            ? memoSourceTemplate(sourceDraft)
+            : `
             <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
               <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
               <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
@@ -580,7 +585,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             ${summary}
           `
       }
-      ${!editing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext) : ""}
+      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId) : ""}
       <footer class="memo-card-actions">
         <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
         <button class="memo-action-button" type="button" data-action="commentMemo" title="评论">
@@ -588,6 +593,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           ${comments.length ? `<span class="memo-action-count">${comments.length}</span>` : ""}
         </button>
         <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
+        <button class="memo-action-button" type="button" data-action="editMemoSource" title="编辑源数据" aria-label="编辑源数据">${SVG.code}</button>
         ${
           archived
             ? `<button class="memo-action-button" type="button" data-action="restoreMemo" title="恢复">${SVG.restore}</button>`
@@ -596,6 +602,19 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
         <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
       </footer>
     </article>
+  `;
+}
+
+function memoSourceTemplate(sourceDraft) {
+  return `
+    <div class="memo-inline-editor memo-source-editor">
+      <textarea class="memo-source-textarea" data-memo-source-yaml spellcheck="false" rows="10">${escapeHTML(sourceDraft)}</textarea>
+      <div class="memo-inline-actions">
+        <div class="memo-inline-status-line">YAML frontmatter</div>
+        <button class="memo-secondary-button" type="button" data-action="cancelMemoSource">${SVG.x}<span>取消</span></button>
+        <button class="memo-primary-button" type="button" data-action="saveMemoSource">${SVG.check}<span>保存</span></button>
+      </div>
+    </div>
   `;
 }
 
@@ -646,14 +665,14 @@ function memoCardTagsTemplate(tags, options = {}) {
   return `<div class="memo-card-tags">${items.join("")}</div>`;
 }
 
-function memoCommentSectionTemplate(comments, commenting, renderContext) {
+function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "") {
   const commentContext = {
     ...renderContext,
     showLineNumbers: false,
   };
   return `
     <section class="memo-comments" aria-label="评论">
-      ${comments.length ? `<div class="memo-comment-list">${comments.map((comment) => memoCommentTemplate(comment, commentContext)).join("")}</div>` : ""}
+      ${comments.length ? `<div class="memo-comment-list">${comments.map((comment) => memoCommentTemplate(comment, commentContext, editingCommentId)).join("")}</div>` : ""}
       ${
         commenting
           ? `
@@ -676,11 +695,12 @@ function memoCommentSectionTemplate(comments, commenting, renderContext) {
   `;
 }
 
-function memoCommentTemplate(comment, renderContext) {
+function memoCommentTemplate(comment, renderContext, editingCommentId = "") {
   const time = comment.updatedAt || comment.createdAt;
+  const editing = comment.id === editingCommentId;
   const content = renderMemoCommentContent(comment, renderContext);
   return `
-    <article class="memo-comment" data-comment-id="${escapeAttr(comment.id)}">
+    <article class="memo-comment ${editing ? "is-editing" : ""}" data-comment-id="${escapeAttr(comment.id)}">
       <header class="memo-comment-head">
         <div class="memo-avatar memo-comment-avatar">U</div>
         <div>
@@ -688,7 +708,32 @@ function memoCommentTemplate(comment, renderContext) {
           <time datetime="${escapeAttr(time)}">${formatRelativeDate(time)}</time>
         </div>
       </header>
-      <div class="memo-content memo-comment-content">${content}</div>
+      ${
+        editing
+          ? `
+            <div class="memo-comment-edit">
+              <div class="memo-editor-switch">
+                <div class="memo-editor-host is-inline memo-comment-edit-host" data-comment-edit-host data-editor-switch-host></div>
+                <section class="memo-editor-preview memo-comment-edit-preview" data-comment-edit-preview hidden></section>
+              </div>
+              <div class="memo-inline-actions memo-comment-edit-actions">
+                <div class="memo-inline-status-line" data-comment-edit-vim-status></div>
+                <button class="memo-secondary-button" type="button" data-action="toggleCommentEditPreview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
+                <button class="memo-secondary-button" type="button" data-action="cancelCommentEdit">${SVG.x}<span>取消</span></button>
+                <button class="memo-primary-button" type="button" data-action="saveCommentEdit">${SVG.check}<span>保存</span></button>
+              </div>
+            </div>
+          `
+          : `
+            <div class="memo-comment-bubble">
+              <div class="memo-comment-hover-actions" aria-label="评论操作">
+                <button class="memo-action-button" type="button" data-action="editComment" title="编辑评论" aria-label="编辑评论">${SVG.edit}</button>
+                <button class="memo-action-button is-danger" type="button" data-action="deleteComment" title="删除评论" aria-label="删除评论">${SVG.trash}</button>
+              </div>
+              <div class="memo-content memo-comment-content">${content}</div>
+            </div>
+          `
+      }
     </article>
   `;
 }

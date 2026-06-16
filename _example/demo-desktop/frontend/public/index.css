@@ -4291,6 +4291,7 @@ body.is-fixed-window .memo-window-shell {
   display: grid;
   gap: 8px;
   padding: 10px;
+  position: relative;
 }
 
 .memo-comment-head {
@@ -4324,6 +4325,62 @@ body.is-fixed-window .memo-window-shell {
   line-height: 1.58;
 }
 
+.memo-comment-bubble {
+  min-width: 0;
+}
+
+.memo-comment-hover-actions {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  padding: 2px;
+  pointer-events: none;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  z-index: 2;
+}
+
+.memo-comment:hover .memo-comment-hover-actions,
+.memo-comment:focus-within .memo-comment-hover-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.memo-comment-hover-actions .memo-action-button {
+  height: 26px;
+  width: 26px;
+}
+
+.memo-comment-edit {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.memo-comment-edit-host .ProseMirror,
+.memo-comment-edit-host .memo-fallback-editor {
+  max-height: 260px;
+  min-height: 96px;
+}
+
+.memo-comment-edit-preview {
+  max-height: 260px;
+  min-height: 96px;
+}
+
+.memo-comment-edit-actions {
+  background: var(--BG-1);
+}
+
 .memo-comment-content .memo-line-list {
   gap: 4px;
 }
@@ -4342,6 +4399,28 @@ body.is-fixed-window .memo-window-shell {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
+}
+
+.memo-source-editor {
+  background: var(--BG-0);
+}
+
+.memo-source-textarea {
+  background: transparent;
+  border: 0;
+  color: var(--FG-0);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-sm);
+  line-height: 1.55;
+  max-height: min(42vh, 360px);
+  min-height: 180px;
+  outline: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  resize: vertical;
+  tab-size: 2;
+  width: 100%;
 }
 
 .memo-inline-actions {

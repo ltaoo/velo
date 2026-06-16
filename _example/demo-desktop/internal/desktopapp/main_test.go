@@ -206,6 +206,70 @@ func TestCreateVaultMemoPreservesBlankLines(t *testing.T) {
 	}
 }
 
+func TestUpdateVaultMemoSourceMetadata(t *testing.T) {
+	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if existing {
+		t.Fatalf("new temp vault should not be existing")
+	}
+
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "补录的 memo",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+
+	createdAt := "2024-01-02T03:04:05Z"
+	updatedAt := ""
+	kind := "note"
+	taskID := "task_abc"
+	pinned := true
+	updated, err := updateVaultMemo(ctx, MemoUpdateRequest{
+		CreatedAt: &createdAt,
+		ID:        memo.ID,
+		Kind:      &kind,
+		Pinned:    &pinned,
+		TaskID:    &taskID,
+		UpdatedAt: &updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("update memo source metadata: %v", err)
+	}
+	if updated.Content != memo.Content {
+		t.Fatalf("content = %q, want %q", updated.Content, memo.Content)
+	}
+	if updated.CreatedAt != createdAt {
+		t.Fatalf("createdAt = %q, want %q", updated.CreatedAt, createdAt)
+	}
+	if updated.UpdatedAt != "" {
+		t.Fatalf("updatedAt = %q, want empty", updated.UpdatedAt)
+	}
+	if updated.Kind != kind || updated.TaskID != taskID || !updated.Pinned {
+		t.Fatalf("updated memo = %#v, want kind/task/pinned metadata", updated)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(ctx.RootDir, filepath.FromSlash(updated.Path)))
+	if err != nil {
+		t.Fatalf("read updated memo: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"createdAt: \"" + createdAt + "\"",
+		"updatedAt: \"\"",
+		"kind: \"" + kind + "\"",
+		"taskId: \"" + taskID + "\"",
+		"补录的 memo",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("memo file missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestCreateVaultMemoCanBelongToProject(t *testing.T) {
 	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
 	if err != nil {

@@ -36,9 +36,13 @@ type MemoCreateRequest struct {
 type MemoUpdateRequest struct {
 	Archived   *bool   `json:"archived"`
 	Content    *string `json:"content"`
+	CreatedAt  *string `json:"createdAt"`
 	ID         string  `json:"id"`
+	Kind       *string `json:"kind,omitempty"`
 	Pinned     *bool   `json:"pinned"`
 	ProjectID  *string `json:"projectId,omitempty"`
+	TaskID     *string `json:"taskId,omitempty"`
+	UpdatedAt  *string `json:"updatedAt"`
 	Visibility *string `json:"visibility"`
 }
 
@@ -148,6 +152,16 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 		}
 		memo.Content = content
 	}
+	if req.CreatedAt != nil {
+		createdAt := strings.TrimSpace(*req.CreatedAt)
+		if createdAt == "" {
+			return MemoRecord{}, fmt.Errorf("memo createdAt is required")
+		}
+		if parseMemoTime(createdAt).IsZero() {
+			return MemoRecord{}, fmt.Errorf("memo createdAt must be RFC3339")
+		}
+		memo.CreatedAt = createdAt
+	}
 	if req.Visibility != nil {
 		memo.Visibility = normalizeMemoVisibility(*req.Visibility)
 	}
@@ -164,7 +178,21 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 		}
 		memo.ProjectID = projectID
 	}
-	memo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if req.Kind != nil {
+		memo.Kind = strings.TrimSpace(*req.Kind)
+	}
+	if req.TaskID != nil {
+		memo.TaskID = sanitizeTaskID(*req.TaskID)
+	}
+	if req.UpdatedAt != nil {
+		updatedAt := strings.TrimSpace(*req.UpdatedAt)
+		if updatedAt != "" && parseMemoTime(updatedAt).IsZero() {
+			return MemoRecord{}, fmt.Errorf("memo updatedAt must be RFC3339")
+		}
+		memo.UpdatedAt = updatedAt
+	} else if shouldTouchMemoUpdatedAt(req) {
+		memo.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	memo.Path = relativeVaultPath(ctx, path)
 	originalTags := extractMemoTags(memo.Content)
 	if err := syncMemoTaskLines(ctx, &memo); err != nil {
@@ -176,6 +204,14 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 		return MemoRecord{}, err
 	}
 	return memo, nil
+}
+
+func shouldTouchMemoUpdatedAt(req MemoUpdateRequest) bool {
+	return req.Content != nil ||
+		req.Visibility != nil ||
+		req.Pinned != nil ||
+		req.Archived != nil ||
+		req.ProjectID != nil
 }
 
 func deleteVaultMemo(ctx *VaultContext, id string) error {
