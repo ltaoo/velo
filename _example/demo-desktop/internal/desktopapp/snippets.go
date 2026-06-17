@@ -1,6 +1,7 @@
 package desktopapp
 
 import (
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -36,6 +37,22 @@ type CodeSnippet struct {
 	Visibility string   `json:"visibility"`
 }
 
+type StoredLink struct {
+	CreatedAt  string `json:"createdAt"`
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Line       int    `json:"line"`
+	MemoID     string `json:"memoId"`
+	MemoPath   string `json:"memoPath"`
+	MemoTitle  string `json:"memoTitle"`
+	ProjectID  string `json:"projectId,omitempty"`
+	SourceText string `json:"sourceText"`
+	Syntax     string `json:"syntax"`
+	UpdatedAt  string `json:"updatedAt"`
+	URL        string `json:"url"`
+	Visibility string `json:"visibility"`
+}
+
 type snippetMarker struct {
 	Aliases []string
 	Title   string
@@ -55,6 +72,11 @@ type scoredSnippet struct {
 	score int
 }
 
+type scoredLink struct {
+	item  StoredLink
+	score int
+}
+
 var (
 	codeFenceLineRe     = regexp.MustCompile("^(`{3,}|~{3,})\\s*(.*)$")
 	snippetMarkerTextRe = regexp.MustCompile(`(?i)(?:^|\s)(#?snippet|snip|code[-\s]?snippet|代码片段|片段)(?:\s*[:：-]\s*|\s+|$)(.*)$`)
@@ -63,6 +85,8 @@ var (
 	memoEmbedRe         = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 	markdownImageRe     = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`)
 	markdownLinkRe      = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	markdownHTTPLinkRe  = regexp.MustCompile(`(!?)\[([^\]]*)\]\(([^)]+)\)`)
+	rawHTTPURLRe        = regexp.MustCompile(`(?i)\bhttps?://[^\s<>"` + "`" + `]+`)
 )
 
 func registerSnippetRoutes(b *velo.Box) {
@@ -73,6 +97,19 @@ func registerSnippetRoutes(b *velo.Box) {
 		}
 		limit := snippetSearchLimit(c.Query("limit"))
 		items, err := searchVaultSnippets(ctx, c.Query("q"), limit)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"items": items})
+	})
+
+	b.Get("/api/links/search", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		limit := snippetSearchLimit(c.Query("limit"))
+		items, err := searchVaultLinks(ctx, c.Query("q"), limit)
 		if err != nil {
 			return c.Error(err.Error())
 		}
@@ -160,6 +197,54 @@ func searchVaultSnippets(ctx *VaultContext, query string, limit int) ([]CodeSnip
 	return items, nil
 }
 
+func searchVaultLinks(ctx *VaultContext, query string, limit int) ([]StoredLink, error) {
+	memos, err := listVaultMemos(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	directive, term := parseLinkSearchQuery(query)
+	if !directive {
+		return []StoredLink{}, nil
+	}
+	needle := strings.ToLower(strings.TrimSpace(term))
+
+	scored := []scoredLink{}
+	for _, memo := range memos {
+		for _, item := range collectMemoLinks(memo) {
+			score, ok := scoreLinkSearch(item, needle)
+			if !ok {
+				continue
+			}
+			scored = append(scored, scoredLink{item: item, score: score})
+		}
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		left := linkSortTime(scored[i].item)
+		right := linkSortTime(scored[j].item)
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		if scored[i].item.MemoID != scored[j].item.MemoID {
+			return scored[i].item.MemoID > scored[j].item.MemoID
+		}
+		return scored[i].item.Line < scored[j].item.Line
+	})
+
+	if limit <= 0 || limit > len(scored) {
+		limit = len(scored)
+	}
+	items := make([]StoredLink, 0, limit)
+	for _, item := range scored[:limit] {
+		items = append(items, item.item)
+	}
+	return items, nil
+}
+
 func parseSnippetSearchQuery(query string) (bool, string) {
 	raw := strings.TrimSpace(query)
 	if raw == "" {
@@ -173,6 +258,23 @@ func parseSnippetSearchQuery(query string) (bool, string) {
 		return true, strings.TrimSpace(strings.TrimPrefix(raw, fields[0]))
 	}
 	return false, raw
+}
+
+func parseLinkSearchQuery(query string) (bool, string) {
+	raw := strings.TrimSpace(query)
+	if raw == "" {
+		return false, ""
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return false, ""
+	}
+	switch strings.ToLower(fields[0]) {
+	case "link", "links", "url", "链接":
+		return true, strings.TrimSpace(strings.TrimPrefix(raw, fields[0]))
+	default:
+		return false, raw
+	}
 }
 
 func scoreSnippetSearch(item CodeSnippet, needle string) (int, bool) {
@@ -240,6 +342,44 @@ func scoreSnippetSearch(item CodeSnippet, needle string) (int, bool) {
 	return score, true
 }
 
+func scoreLinkSearch(item StoredLink, needle string) (int, bool) {
+	if needle == "" {
+		return 10, true
+	}
+
+	searchText := strings.ToLower(strings.Join([]string{
+		item.Label,
+		item.URL,
+		item.MemoTitle,
+		item.MemoPath,
+		item.ProjectID,
+		item.Visibility,
+	}, " "))
+	if !matchesSnippetQuery(searchText, needle) {
+		return 0, false
+	}
+
+	score := 0
+	label := strings.ToLower(item.Label)
+	linkURL := strings.ToLower(item.URL)
+	if label == needle {
+		score += 90
+	} else if label != "" && strings.HasPrefix(label, needle) {
+		score += 60
+	} else if label != "" && strings.Contains(label, needle) {
+		score += 35
+	}
+	if linkURL == needle {
+		score += 80
+	} else if strings.Contains(linkURL, needle) {
+		score += 30
+	}
+	if strings.Contains(strings.ToLower(item.SourceText), needle) || strings.Contains(strings.ToLower(item.MemoTitle), needle) {
+		score += 8
+	}
+	return score, true
+}
+
 func matchesSnippetQuery(haystack string, needle string) bool {
 	needle = strings.TrimSpace(strings.ToLower(needle))
 	if needle == "" {
@@ -261,6 +401,20 @@ func matchesSnippetQuery(haystack string, needle string) bool {
 }
 
 func snippetSortTime(item CodeSnippet) time.Time {
+	if item.UpdatedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, item.UpdatedAt); err == nil {
+			return t
+		}
+	}
+	if item.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, item.CreatedAt); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func linkSortTime(item StoredLink) time.Time {
 	if item.UpdatedAt != "" {
 		if t, err := time.Parse(time.RFC3339Nano, item.UpdatedAt); err == nil {
 			return t
@@ -316,6 +470,85 @@ func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 		items = append(items, codeSnippetView(memo, lines, *active, len(lines)-1))
 	}
 	return items
+}
+
+func collectMemoLinks(memo MemoRecord) []StoredLink {
+	lines := memoContentLines(memo.Content)
+	items := []StoredLink{}
+	var activeFence *memoCodeFence
+
+	for index, line := range lines {
+		fence, hasFence := parseMemoCodeFenceLine(line)
+		if activeFence != nil {
+			if hasFence && memoCodeFenceCloses(fence, *activeFence) {
+				activeFence = nil
+			}
+			continue
+		}
+		if hasFence {
+			activeFence = &fence
+			continue
+		}
+		items = append(items, collectMemoLineLinks(memo, lines, maskMemoInlineCode(line), index)...)
+	}
+	return items
+}
+
+func collectMemoLineLinks(memo MemoRecord, lines []string, line string, lineIndex int) []StoredLink {
+	items := []StoredLink{}
+	markdownRanges := [][2]int{}
+
+	for _, match := range markdownHTTPLinkRe.FindAllStringSubmatchIndex(line, -1) {
+		if len(match) < 8 {
+			continue
+		}
+		markdownRanges = append(markdownRanges, [2]int{match[0], match[1]})
+		marker := line[match[2]:match[3]]
+		if marker == "!" {
+			continue
+		}
+		label := strings.TrimSpace(line[match[4]:match[5]])
+		target, ok := normalizeStoredHTTPURL(line[match[6]:match[7]])
+		if !ok {
+			continue
+		}
+		items = append(items, storedLinkView(memo, lines, lineIndex, len(items), "markdown", label, target))
+	}
+
+	for _, match := range rawHTTPURLRe.FindAllStringIndex(line, -1) {
+		if len(match) != 2 || memoByteRangeContains(markdownRanges, match[0]) {
+			continue
+		}
+		target, ok := normalizeStoredHTTPURL(cleanRawStoredURL(line[match[0]:match[1]]))
+		if !ok {
+			continue
+		}
+		items = append(items, storedLinkView(memo, lines, lineIndex, len(items), "raw", "", target))
+	}
+
+	return items
+}
+
+func storedLinkView(memo MemoRecord, lines []string, lineIndex int, index int, syntax string, label string, target string) StoredLink {
+	title := compactSnippetText(label, 120)
+	if title == "" {
+		title = linkDisplayName(target)
+	}
+	return StoredLink{
+		CreatedAt:  memo.CreatedAt,
+		ID:         memo.ID + ":" + strconv.Itoa(lineIndex) + ":" + strconv.Itoa(index) + ":link",
+		Label:      title,
+		Line:       lineIndex + 1,
+		MemoID:     memo.ID,
+		MemoPath:   memo.Path,
+		MemoTitle:  memoTitleText(memo),
+		ProjectID:  memo.ProjectID,
+		SourceText: sourceTextFromMemoLines(lines, lineIndex, "仅包含链接的 memo"),
+		Syntax:     syntax,
+		UpdatedAt:  memo.UpdatedAt,
+		URL:        target,
+		Visibility: memo.Visibility,
+	}
 }
 
 func codeSnippetView(memo MemoRecord, lines []string, block activeCodeBlock, endIndex int) CodeSnippet {
@@ -549,6 +782,51 @@ func slugSnippetCommand(value string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "-")
+}
+
+func normalizeStoredHTTPURL(value string) (string, bool) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return "", false
+	}
+	for _, r := range raw {
+		if r <= 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || strings.TrimSpace(parsed.Host) == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	parsed.Scheme = scheme
+	return parsed.String(), true
+}
+
+func cleanRawStoredURL(value string) string {
+	url := strings.TrimSpace(value)
+	for strings.TrimRight(url, "),.;:!?，。；：！？") != url {
+		url = strings.TrimRight(url, "),.;:!?，。；：！？")
+	}
+	return url
+}
+
+func linkDisplayName(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return compactSnippetText(value, 120)
+	}
+	label := parsed.Host
+	if parsed.Path != "" && parsed.Path != "/" {
+		label += parsed.Path
+	}
+	if label == "" {
+		label = value
+	}
+	return compactSnippetText(label, 120)
 }
 
 func isSnippetMarkerToken(value string) bool {
