@@ -152,13 +152,15 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			return c.Error(err.Error())
 		}
 
-		confirmed, err := platform.ConfirmExternalBrowserOpen(external.BrowserConfirmMessage(target))
-		if err != nil {
-			logger.Error().Err(err).Str("url", target).Msg("failed to confirm external URL")
-			return c.Error(fmt.Sprintf("Failed to show confirm dialog: %v", err))
-		}
-		if !confirmed {
-			return c.Ok(velo.H{"success": false, "cancelled": true, "url": target})
+		if !strings.EqualFold(strings.TrimSpace(c.Query("confirm")), "false") {
+			confirmed, err := platform.ConfirmExternalBrowserOpen(external.BrowserConfirmMessage(target))
+			if err != nil {
+				logger.Error().Err(err).Str("url", target).Msg("failed to confirm external URL")
+				return c.Error(fmt.Sprintf("Failed to show confirm dialog: %v", err))
+			}
+			if !confirmed {
+				return c.Ok(velo.H{"success": false, "cancelled": true, "url": target})
+			}
 		}
 
 		if err := external.OpenBrowser(target); err != nil {

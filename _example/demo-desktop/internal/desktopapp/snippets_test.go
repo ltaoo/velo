@@ -167,3 +167,79 @@ func TestSearchVaultSnippetsSupportsSnippetDirective(t *testing.T) {
 		t.Fatalf("snippet directive with spaces results = %#v, want spaces ignored", items)
 	}
 }
+
+func TestCollectMemoLinksSkipsCodeAndImages(t *testing.T) {
+	memo := MemoRecord{
+		Content: strings.Join([]string{
+			"# Link Memo",
+			"",
+			"[Velo](https://github.com/ltaoo/velo)",
+			"Raw https://example.com/docs?tab=api.",
+			"![Logo](https://example.com/logo.png)",
+			"`https://example.com/inline-code`",
+			"```md",
+			"https://example.com/code-block",
+			"```",
+		}, "\n"),
+		CreatedAt:  "2026-06-10T01:00:00Z",
+		ID:         "memo_links",
+		Path:       "memos/2026/06/memo_links.md",
+		Visibility: "PRIVATE",
+	}
+
+	items := collectMemoLinks(memo)
+	if len(items) != 2 {
+		t.Fatalf("link count = %d, want 2: %#v", len(items), items)
+	}
+	if items[0].Label != "Velo" || items[0].URL != "https://github.com/ltaoo/velo" || items[0].Syntax != "markdown" {
+		t.Fatalf("first link = %#v, want markdown Velo link", items[0])
+	}
+	if items[1].URL != "https://example.com/docs?tab=api" || items[1].Syntax != "raw" {
+		t.Fatalf("second link = %#v, want cleaned raw URL", items[1])
+	}
+}
+
+func TestSearchVaultLinksSupportsLinkDirective(t *testing.T) {
+	ctx, existing, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	if existing {
+		t.Fatalf("new temp vault should not be existing")
+	}
+
+	if _, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content: strings.Join([]string{
+			"# References",
+			"[Velo repo](https://github.com/ltaoo/velo)",
+			"[Go docs](https://go.dev/doc/)",
+		}, "\n"),
+		Visibility: "PRIVATE",
+	}); err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+
+	items, err := searchVaultLinks(ctx, "link velo", 10)
+	if err != nil {
+		t.Fatalf("search links: %v", err)
+	}
+	if len(items) != 1 || items[0].Label != "Velo repo" {
+		t.Fatalf("link velo results = %#v, want Velo repo", items)
+	}
+
+	items, err = searchVaultLinks(ctx, "velo", 10)
+	if err != nil {
+		t.Fatalf("plain search: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("plain search results = %#v, want no results until link command is explicit", items)
+	}
+
+	items, err = searchVaultLinks(ctx, "link", 10)
+	if err != nil {
+		t.Fatalf("link directive search: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("link directive results = %#v, want all links", items)
+	}
+}

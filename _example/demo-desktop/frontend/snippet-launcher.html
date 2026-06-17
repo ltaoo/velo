@@ -204,6 +204,11 @@
       background: #bfdbfe;
     }
 
+    .snippet-result:not(.is-active):not(:hover) .snippet-kind.is-link {
+      color: #3b0764;
+      background: #e9d5ff;
+    }
+
     .snippet-name {
       min-width: 0;
       overflow: hidden;
@@ -247,6 +252,18 @@
       line-height: 1.45;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+
+    .snippet-code.is-link {
+      color: var(--launcher-text);
+      background: var(--launcher-row);
+      white-space: normal;
+    }
+
+    .snippet-result:hover .snippet-code.is-link,
+    .snippet-result.is-active .snippet-code.is-link {
+      color: var(--launcher-row-active-text);
+      background: rgba(255, 255, 255, 0.12);
     }
 
     .snippet-status {
@@ -296,7 +313,7 @@
   <main class="snippet-launcher" data-snippet-launcher>
     <section class="snippet-search" data-velo-drag>
       <div class="snippet-prompt">›</div>
-      <input class="snippet-input" data-snippet-input data-velo-no-drag autocomplete="off" spellcheck="false" placeholder="输入命令" />
+      <input class="snippet-input" data-snippet-input data-velo-no-drag autocomplete="off" spellcheck="false" placeholder="snippet / link" />
       <button class="snippet-close" type="button" title="关闭" data-velo-no-drag data-action="close">×</button>
     </section>
 

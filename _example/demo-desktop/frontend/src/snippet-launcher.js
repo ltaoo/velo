@@ -63,7 +63,7 @@ function bindEvents() {
       const index = Number(item.dataset.snippetIndex);
       if (!Number.isInteger(index)) return;
       state.activeIndex = index;
-      copyActiveSnippet();
+      activateActiveItem(event.shiftKey);
     });
   }
   window.addEventListener("focus", function () {
@@ -93,7 +93,7 @@ function handleInputKeydown(event) {
   }
   if (event.key === "Enter") {
     event.preventDefault();
-    copyActiveSnippet();
+    activateActiveItem(event.shiftKey);
   }
 }
 
@@ -156,7 +156,7 @@ function runSearch(query) {
     return;
   }
 
-  const url = "/api/snippets/search?q=" + encodeURIComponent(command.raw) + "&limit=" + MAX_RESULTS;
+  const url = command.endpoint + "?q=" + encodeURIComponent(command.raw) + "&limit=" + MAX_RESULTS;
   invoke(url, { method: "GET" }).then(function (resp) {
     if (requestId !== state.requestId) return;
     if (!resp || resp.code !== 0) {
@@ -180,13 +180,27 @@ function runSearch(query) {
 
 function parseLauncherCommand(value) {
   const raw = String(value || "").trim();
-  const match = raw.match(/^(snippet|snip)(?:\s+(.*))?$/i);
+  const match = raw.match(/^(snippet|snip|link|links|url|链接)(?:\s+(.*))?$/i);
   if (!match) return null;
+  const name = match[1].toLowerCase();
   const term = String(match[2] || "").trim();
+  if (name === "link" || name === "links" || name === "url" || name === "链接") {
+    return {
+      endpoint: "/api/links/search",
+      emptyLabel: "link",
+      name,
+      raw: term ? "link " + term : "link",
+      term,
+      type: "link",
+    };
+  }
   return {
-    name: match[1].toLowerCase(),
+    endpoint: "/api/snippets/search",
+    emptyLabel: "snippet",
+    name,
     raw: term ? "snippet " + term : "snippet",
     term,
+    type: "snippet",
   };
 }
 
@@ -195,6 +209,20 @@ function moveActive(delta) {
   state.activeIndex = (state.activeIndex + delta + state.items.length) % state.items.length;
   render();
   scrollActiveIntoView();
+}
+
+function activateActiveItem(copyOnly) {
+  const item = state.items[state.activeIndex];
+  if (!item) return;
+  if (item.url) {
+    if (copyOnly) {
+      copyActiveLink();
+    } else {
+      openActiveLink();
+    }
+    return;
+  }
+  copyActiveSnippet();
 }
 
 function copyActiveSnippet() {
@@ -207,6 +235,45 @@ function copyActiveSnippet() {
   }, function (err) {
     state.status = "复制失败: " + errorMessage(err);
     renderStatus();
+  });
+}
+
+function openActiveLink() {
+  const item = state.items[state.activeIndex];
+  if (!item || !item.url) return;
+  openLinkInDefaultBrowser(item.url).then(function () {
+    state.status = "已打开 " + (item.label || item.url);
+    renderStatus();
+    window.setTimeout(closeWindow, 120);
+  }, function (err) {
+    state.status = "打开失败: " + errorMessage(err);
+    renderStatus();
+  });
+}
+
+function copyActiveLink() {
+  const item = state.items[state.activeIndex];
+  if (!item || !item.url) return;
+  copyText(item.url).then(function () {
+    state.status = "已复制 " + (item.label || item.url);
+    renderStatus();
+    window.setTimeout(closeWindow, 160);
+  }, function (err) {
+    state.status = "复制失败: " + errorMessage(err);
+    renderStatus();
+  });
+}
+
+function openLinkInDefaultBrowser(url) {
+  if (typeof invoke !== "function") {
+    window.open(url, "_blank", "noopener");
+    return Promise.resolve();
+  }
+  return invoke("/api/external/open?confirm=false&url=" + encodeURIComponent(url), { method: "GET" }).then(function (resp) {
+    if (!resp || resp.code !== 0) {
+      throw new Error((resp && resp.msg) || "打开链接失败");
+    }
+    return resp;
   });
 }
 
@@ -345,30 +412,11 @@ function renderResults() {
   if (state.loading && !state.items.length) {
     els.results.innerHTML = '<div class="snippet-empty">搜索中</div>';
   } else if (!state.items.length) {
-    els.results.innerHTML = '<div class="snippet-empty">没有匹配的 snippet</div>';
+    els.results.innerHTML = '<div class="snippet-empty">没有匹配的 ' + escapeHTML(command.emptyLabel || "结果") + '</div>';
   } else {
     els.results.innerHTML = state.items.map(function (item, index) {
-      const line = item.endLine && item.endLine !== item.startLine
-        ? "L" + item.startLine + "-L" + item.endLine
-        : "L" + item.startLine;
-      const meta = [
-        item.command || "",
-        item.language || "",
-        item.memoTitle || item.memoId || "",
-        line,
-      ].filter(Boolean).join(" · ");
-      return [
-        '<button id="snippet-result-' + index + '" class="snippet-result ' + (index === state.activeIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.activeIndex ? "true" : "false") + '" data-snippet-index="' + index + '">',
-        '<span class="snippet-result-main">',
-        '<span class="snippet-result-title">',
-        '<span class="snippet-kind ' + (item.marked ? "is-snippet" : "is-code") + '">' + (item.marked ? "SNIP" : "CODE") + '</span>',
-        '<span class="snippet-name">' + escapeHTML(item.title || item.command || "代码片段") + '</span>',
-        '</span>',
-        '<span class="snippet-meta">' + escapeHTML(meta) + '</span>',
-        '</span>',
-        '<pre class="snippet-code"><code>' + escapeHTML(compactCode(item.code || "")) + '</code></pre>',
-        '</button>',
-      ].join("");
+      if (item.url) return renderLinkResult(item, index);
+      return renderSnippetResult(item, index);
     }).join("");
   }
 
@@ -388,6 +436,50 @@ function renderResults() {
     if (els.status) els.status.style.visibility = "";
     scrollActiveIntoView();
   });
+}
+
+function renderSnippetResult(item, index) {
+  const line = item.endLine && item.endLine !== item.startLine
+    ? "L" + item.startLine + "-L" + item.endLine
+    : "L" + item.startLine;
+  const meta = [
+    item.command || "",
+    item.language || "",
+    item.memoTitle || item.memoId || "",
+    line,
+  ].filter(Boolean).join(" · ");
+  return [
+    '<button id="snippet-result-' + index + '" class="snippet-result ' + (index === state.activeIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.activeIndex ? "true" : "false") + '" data-snippet-index="' + index + '">',
+    '<span class="snippet-result-main">',
+    '<span class="snippet-result-title">',
+    '<span class="snippet-kind ' + (item.marked ? "is-snippet" : "is-code") + '">' + (item.marked ? "SNIP" : "CODE") + '</span>',
+    '<span class="snippet-name">' + escapeHTML(item.title || item.command || "代码片段") + '</span>',
+    '</span>',
+    '<span class="snippet-meta">' + escapeHTML(meta) + '</span>',
+    '</span>',
+    '<pre class="snippet-code"><code>' + escapeHTML(compactCode(item.code || "")) + '</code></pre>',
+    '</button>',
+  ].join("");
+}
+
+function renderLinkResult(item, index) {
+  const meta = [
+    item.memoTitle || item.memoId || "",
+    item.line ? "L" + item.line : "",
+    item.syntax || "",
+  ].filter(Boolean).join(" · ");
+  return [
+    '<button id="snippet-result-' + index + '" class="snippet-result ' + (index === state.activeIndex ? "is-active" : "") + '" type="button" role="option" aria-selected="' + (index === state.activeIndex ? "true" : "false") + '" data-snippet-index="' + index + '">',
+    '<span class="snippet-result-main">',
+    '<span class="snippet-result-title">',
+    '<span class="snippet-kind is-link">LINK</span>',
+    '<span class="snippet-name">' + escapeHTML(item.label || item.url || "超链接") + '</span>',
+    '</span>',
+    '<span class="snippet-meta">' + escapeHTML(meta) + '</span>',
+    '</span>',
+    '<pre class="snippet-code is-link"><code>' + escapeHTML(compactCode(item.url || "")) + '</code></pre>',
+    '</button>',
+  ].join("");
 }
 
 function desiredExpandedWindowHeight() {
