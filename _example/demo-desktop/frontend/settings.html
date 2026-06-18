@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>设置</title>
   <script src="/public/input-policy.js" defer></script>
+  <script type="module" src="/src/window-state.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -1273,6 +1274,8 @@
         progress: 0,
         status: "idle",
       };
+      var windowSession = null;
+      var pendingSettingsSessionState = null;
       var state = normalizeSettings(null);
       var editorSettings = loadEditorSettings();
       var editorApps = [];
@@ -1289,6 +1292,7 @@
       var INPUT_SOURCE_UNSUPPORTED_MESSAGE = "当前平台不支持输入法锁定，或无法读取系统输入源。";
       var INPUT_SOURCE_MISSING_PREFIX = "当前设备缺少已保存的输入法";
 
+      initWindowSession();
       render();
       loadAppInfo();
       bindUpdateMessages();
@@ -1310,6 +1314,7 @@
       });
       loadConfig().then(function (settings) {
         state = normalizeSettings(settings);
+        applySettingsSessionState();
         render();
       }, function (err) {
         setMessage("读取配置失败: " + errorMessage(err), "warning");
@@ -1572,6 +1577,7 @@
           });
         });
         render();
+        scheduleWindowSessionSnapshot();
         setMessage("正在切换启用存储...", "");
         saveConfig(state).then(function (saved) {
           state = normalizeSettings(saved || state);
@@ -1812,6 +1818,7 @@
         render();
         if (activePanel === "shortcuts") ensureEditorAppsLoaded();
         replacePanelQuery();
+        scheduleWindowSessionSnapshot();
       }
 
       function renderShell() {
@@ -1921,6 +1928,50 @@
           }
           window.history.replaceState(null, "", url.pathname + url.search + url.hash);
         } catch (_) { }
+      }
+
+      function initWindowSession() {
+        if (typeof window.registerWindowSession !== "function") {
+          window.setTimeout(initWindowSession, 40);
+          return;
+        }
+        windowSession = window.registerWindowSession({
+          entryPage: "settings.html",
+          getState: getSettingsSessionState,
+          restoreState: restoreSettingsSessionState,
+          title: "设置",
+        });
+      }
+
+      function getSettingsSessionState() {
+        return {
+          activeStorageId: state.activeStorageId || "",
+          panel: activePanel,
+        };
+      }
+
+      function restoreSettingsSessionState(sessionState) {
+        var saved = sessionState && typeof sessionState === "object" ? sessionState : {};
+        pendingSettingsSessionState = saved;
+        applySettingsSessionState();
+      }
+
+      function applySettingsSessionState() {
+        var saved = pendingSettingsSessionState || {};
+        if (saved.panel) {
+          activePanel = saved.panel === "about" || saved.panel === "shortcuts" || saved.panel === "input-source" || saved.panel === "calendar" ? saved.panel : "cloud-storage";
+          replacePanelQuery();
+        }
+        if (saved.activeStorageId && state.storages.some(function (storage) { return storage.id === saved.activeStorageId; })) {
+          state.activeStorageId = saved.activeStorageId;
+        }
+        render();
+      }
+
+      function scheduleWindowSessionSnapshot() {
+        if (windowSession && windowSession.scheduleSnapshot) {
+          windowSession.scheduleSnapshot();
+        }
       }
 
       function renderShortcuts() {

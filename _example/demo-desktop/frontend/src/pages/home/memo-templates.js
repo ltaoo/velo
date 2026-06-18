@@ -845,7 +845,7 @@ function taskCardTemplate(task, context) {
   return `
     <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-task-id="${escapeAttr(task.id)}">
       <label class="memo-task-check">
-        <input type="checkbox" data-task-complete ${complete ? "checked disabled" : ""} />
+        <input type="checkbox" data-task-complete ${complete ? "checked" : ""} />
         <span></span>
       </label>
       <div class="memo-task-body">
@@ -980,7 +980,10 @@ function gtdItemCardTemplate(item, context) {
   const closed = item.status === "closed" || item.status === "resolved";
   return `
     <article class="memo-task-card ${closed ? "is-complete" : ""} is-priority-none" data-gtd-item-id="${escapeAttr(item.id)}">
-      <span class="memo-task-check" aria-hidden="true"></span>
+      <label class="memo-task-check">
+        <input type="checkbox" data-gtd-item-complete ${closed ? "checked" : ""} />
+        <span></span>
+      </label>
       <div class="memo-task-body">
         <div class="memo-task-title-row">
           <strong>${escapeHTML(item.title)}</strong>
@@ -1102,7 +1105,7 @@ function linkTemplate(link) {
   const tags = extractTags(link.memo.content);
   const href = safeUrl(link.url);
   return `
-    <article class="memo-resource-card is-link" data-memo-id="${escapeAttr(link.memoId)}">
+    <article class="memo-resource-card is-link" data-memo-id="${escapeAttr(link.memoId)}" data-link-url="${escapeAttr(link.url)}">
       <a class="memo-resource-target" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">
         <span class="memo-resource-icon">${SVG.link}</span>
         <span class="memo-resource-body">
@@ -1110,6 +1113,7 @@ function linkTemplate(link) {
           <span class="memo-resource-url">${escapeHTML(compactFileURL(link.url))}</span>
         </span>
       </a>
+      <button class="memo-action-button memo-link-copy-button" type="button" data-action="copyLink" title="复制链接" aria-label="复制链接">${SVG.copy}</button>
       <div class="memo-resource-source">
         ${sourceMemoMarkerTemplate(link.memoId)}
         <div class="memo-todo-meta">
@@ -1390,6 +1394,7 @@ export {
   emptyLinksTemplate,
   emptyTasksTemplate,
   emptyTodosTemplate,
+  gtdItemCardTemplate,
   gtdItemGroupTemplate,
   gtdItemWorkspaceTemplate,
   gtdMilestoneGroupTemplate,
@@ -1401,6 +1406,7 @@ export {
   resourceGroupTemplate,
   shellTemplate,
   statTemplate,
+  taskCardTemplate,
   taskGroupTemplate,
   taskWorkspaceTemplate,
   todoGroupTemplate,

@@ -193,6 +193,12 @@ func Run(assets Assets) {
 	_ = sm
 
 	b.NewWebview(mainWindowOptions(initialPathname, b, logger))
+	if initialPathname == "/desktop" {
+		go func() {
+			time.Sleep(1100 * time.Millisecond)
+			restorePersistedOpenWindows(b, logger)
+		}()
+	}
 
 	// 注册全局快捷键: Cmd+Shift+M/H 显示/隐藏主窗口，Ctrl/Cmd+Shift+Space 打开 snippet 启动器。
 	// Carbon hotkeys need the AppKit application/run loop to be ready. Register

@@ -2,7 +2,6 @@ package desktopapp
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 type WindowStateSaveRequest struct {
 	Height int    `json:"height"`
+	Fixed  *bool  `json:"fixed,omitempty"`
 	Name   string `json:"name"`
 	Width  int    `json:"width"`
 	X      int    `json:"x"`
@@ -56,6 +56,67 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			return c.Error("width and height are required")
 		}
 		if err := b.Store.SaveWindow(req.Name, &store.WindowState{X: req.X, Y: req.Y, Width: req.Width, Height: req.Height}); err != nil {
+			return c.Error(err.Error())
+		}
+		if err := updatePersistedOpenWindowFrame(b.Store, req.Name, req.X, req.Y, req.Width, req.Height, req.Fixed); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Post("/api/window/session/save", func(c *velo.BoxContext) interface{} {
+		var req PersistedOpenWindow
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			return c.Error("name is required")
+		}
+		if req.Width > 0 && req.Height > 0 {
+			if err := b.Store.SaveWindow(req.Name, &store.WindowState{X: req.X, Y: req.Y, Width: req.Width, Height: req.Height}); err != nil {
+				return c.Error(err.Error())
+			}
+		}
+		if err := savePersistedWindowSession(b.Store, req); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/window/session/list", func(c *velo.BoxContext) interface{} {
+		return c.Ok(velo.H{"windows": loadPersistedOpenWindows(b.Store).Windows})
+	})
+
+	b.Get("/api/window/session/get", func(c *velo.BoxContext) interface{} {
+		name := strings.TrimSpace(c.Query("name"))
+		if name == "" {
+			return c.Error("name is required")
+		}
+		session, ok := persistedWindowSession(b.Store, name)
+		if !ok {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{"found": true, "session": session})
+	})
+
+	b.Get("/api/window/session/forget", func(c *velo.BoxContext) interface{} {
+		name := strings.TrimSpace(c.Query("name"))
+		if name == "" {
+			return c.Error("name is required")
+		}
+		if err := forgetPersistedOpenWindow(b.Store, name); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/window/opened/forget", func(c *velo.BoxContext) interface{} {
+		name := strings.TrimSpace(c.Query("name"))
+		if name == "" {
+			return c.Error("name is required")
+		}
+		if err := forgetPersistedOpenWindow(b.Store, name); err != nil {
 			return c.Error(err.Error())
 		}
 		return c.Ok(velo.H{"success": true})
@@ -187,17 +248,14 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 		memoWindowCache.items[memoID] = req
 		memoWindowCache.Unlock()
 
-		params := url.Values{}
-		params.Set("id", memoID)
-		if req.Fixed {
-			params.Set("fixed", "1")
-		}
-
 		windowName := memoWindowName(memoID)
+		if err := rememberMemoWindow(b.Store, memoID, req); err != nil {
+			return c.Error(err.Error())
+		}
 		b.OpenWindow(&velo.VeloWebviewOpt{
 			Name:       windowName,
 			Title:      "Memo",
-			Pathname:   "/memo-window?" + params.Encode(),
+			Pathname:   memoWindowPathname(memoID, req.Fixed),
 			Width:      460,
 			Height:     560,
 			Frameless:  true,
@@ -217,7 +275,14 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 		payload, ok := memoWindowCache.items[memoID]
 		memoWindowCache.RUnlock()
 		if !ok {
-			return c.Ok(velo.H{"found": false})
+			var found bool
+			payload, found = loadPersistedMemoWindowPayload(b.Store, memoID)
+			if !found {
+				return c.Ok(velo.H{"found": false})
+			}
+			memoWindowCache.Lock()
+			memoWindowCache.items[memoID] = payload
+			memoWindowCache.Unlock()
 		}
 		return c.Ok(velo.H{
 			"found":      true,

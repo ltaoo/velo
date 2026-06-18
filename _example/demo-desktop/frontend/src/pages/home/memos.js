@@ -27,6 +27,7 @@ import {
   createTaskNote,
   loadTasks,
   normalizeTaskSummary,
+  updateTask,
 } from "../../domain/tasks.js";
 import {
   closeGTDItem,
@@ -89,6 +90,7 @@ import {
   emptyFilesTemplate,
   emptyLinksTemplate,
   emptyTasksTemplate,
+  gtdItemCardTemplate,
   gtdItemGroupTemplate,
   gtdItemWorkspaceTemplate,
   gtdMilestoneGroupTemplate,
@@ -100,6 +102,7 @@ import {
   resourceGroupTemplate,
   shellTemplate,
   statTemplate,
+  taskCardTemplate,
   taskGroupTemplate,
   taskWorkspaceTemplate,
 } from "./memo-templates.js";
@@ -117,6 +120,7 @@ import {
 } from "./memo-editor.js";
 import { renderMemoMarkdown } from "./memo-markdown.js";
 import { addMonths, dateFromKey, formatDateKey, memoDateKey, startOfMonth } from "./memo-date.js";
+import { registerWindowSession } from "../../window-state.js";
 import {
   closestAnchor,
   closestElement,
@@ -160,6 +164,16 @@ function copyCodeBlockFromAction(action, memos, notify) {
   if (code === null) return;
   copyText(code).then(
     () => notify("已复制代码片段"),
+    () => notify("复制失败"),
+  );
+}
+
+function copyInlineLinkFromAction(action, notify) {
+  const linkNode = closestElement(action, "[data-inline-link-url]");
+  const url = linkNode && linkNode.dataset ? linkNode.dataset.inlineLinkUrl : "";
+  if (!url) return;
+  copyText(url).then(
+    () => notify("已复制链接"),
     () => notify("复制失败"),
   );
 }
@@ -768,6 +782,16 @@ export function mountMemosHome(root) {
         break;
       case "copyCodeBlock":
         copyCodeBlock(action);
+        break;
+      case "copyInlineLink":
+        event.preventDefault();
+        event.stopPropagation();
+        copyInlineLinkFromAction(action, showToast);
+        break;
+      case "copyLink":
+        event.preventDefault();
+        event.stopPropagation();
+        copyLink(action);
         break;
       case "copyTaskRef":
         copyTaskRef(taskId);
@@ -1637,7 +1661,14 @@ export function mountMemosHome(root) {
     if (event.target.matches("[data-task-complete]")) {
       const taskNode = closestElement(event.target, "[data-task-id]");
       if (!taskNode) return;
-      completeExistingTask(taskNode.dataset.taskId, event.target);
+      toggleExistingTaskCompletion(taskNode.dataset.taskId, event.target);
+      return;
+    }
+
+    if (event.target.matches("[data-gtd-item-complete]")) {
+      const itemNode = closestElement(event.target, "[data-gtd-item-id]");
+      if (!itemNode) return;
+      toggleExistingGTDItemCompletion(itemNode.dataset.gtdItemId, event.target);
       return;
     }
 
@@ -2029,6 +2060,29 @@ export function mountMemosHome(root) {
     );
   }
 
+  function toggleExistingGTDItemCompletion(itemId, checkbox) {
+    const id = String(itemId || "").trim();
+    if (!id || !checkbox) return;
+    const checked = checkbox.checked;
+    const itemCard = closestElement(checkbox, "[data-gtd-item-id]");
+    checkbox.disabled = true;
+    const request = checked
+      ? closeGTDItem(id)
+      : updateGTDItem(id, { status: "open" });
+    request.then(
+      function (item) {
+        state.gtdItems = state.gtdItems.map((entry) => entry.id === id ? item : entry);
+        replaceGTDItemCard(itemCard, item);
+        showToast(checked ? "已关闭事项" : "已重新打开事项");
+      },
+      function (err) {
+        checkbox.checked = !checked;
+        checkbox.disabled = false;
+        showToast((checked ? "关闭事项失败: " : "重新打开事项失败: ") + errorMessage(err));
+      },
+    );
+  }
+
   function updateExistingGTDMilestone(milestoneId, patch, message) {
     const id = String(milestoneId || "").trim();
     if (!id) return;
@@ -2045,29 +2099,50 @@ export function mountMemosHome(root) {
     );
   }
 
-  function completeExistingTask(taskId, checkbox) {
+  function toggleExistingTaskCompletion(taskId, checkbox) {
     const id = String(taskId || "").trim();
-    if (!id) return;
+    if (!id || !checkbox) return;
+    const checked = checkbox.checked;
     const completedInFilter = state.taskFilter;
     const taskCard = checkbox ? closestElement(checkbox, "[data-task-id]") : null;
-    if (checkbox) checkbox.disabled = true;
-    completeTask(id).then(
+    checkbox.disabled = true;
+    const request = checked
+      ? completeTask(id)
+      : updateTask(id, { completedAt: "", status: "open" });
+    request.then(
       function (task) {
         const summary = normalizeTaskSummary(task);
-        retainCompletedTaskInFilter(id, completedInFilter);
+        if (checked) {
+          retainCompletedTaskInFilter(id, completedInFilter);
+        } else {
+          state.retainedCompletedTaskFilters.delete(id);
+        }
         state.tasks = state.tasks.map((item) => item.id === id && summary ? summary : item);
-        if (taskCard) taskCard.classList.add("is-complete");
-        showToast("已完成任务");
+        replaceTaskCard(taskCard, summary);
+        showToast(checked ? "已完成任务" : "已取消完成");
       },
       function (err) {
-        if (checkbox) {
-          checkbox.checked = false;
-          checkbox.disabled = false;
-        }
-        showToast("完成任务失败: " + errorMessage(err));
-        refreshTasksFromVault();
+        checkbox.checked = !checked;
+        checkbox.disabled = false;
+        showToast((checked ? "完成任务失败: " : "取消完成失败: ") + errorMessage(err));
       },
     );
+  }
+
+  function replaceGTDItemCard(card, item) {
+    if (!card || !item) return;
+    card.outerHTML = gtdItemCardTemplate(item, {
+      milestones: state.gtdMilestones,
+      projects: state.projects,
+    });
+  }
+
+  function replaceTaskCard(card, task) {
+    if (!card || !task) return;
+    card.outerHTML = taskCardTemplate(task, {
+      memos: state.memos,
+      projects: state.projects,
+    });
   }
 
   function addTaskNote(taskId) {
@@ -2846,6 +2921,16 @@ export function mountMemosHome(root) {
 
   function copyCodeBlock(action) {
     copyCodeBlockFromAction(action, scopedMemos(), showToast);
+  }
+
+  function copyLink(action) {
+    const linkCard = closestElement(action, "[data-link-url]");
+    const url = linkCard && linkCard.dataset ? linkCard.dataset.linkUrl : "";
+    if (!url) return;
+    copyText(url).then(
+      () => showToast("已复制链接"),
+      () => showToast("复制失败"),
+    );
   }
 
   function insertFiles(files) {
@@ -3781,7 +3866,9 @@ export function mountMemosHome(root) {
   function sortGTDItemsForView(a, b) {
     const status = gtdItemStatusWeight(a.status) - gtdItemStatusWeight(b.status);
     if (status !== 0) return status;
-    return taskTimeValue(b.updatedAt || b.createdAt) - taskTimeValue(a.updatedAt || a.createdAt);
+    const created = taskTimeValue(b.createdAt || b.updatedAt) - taskTimeValue(a.createdAt || a.updatedAt);
+    if (created !== 0) return created;
+    return String(b.id || "").localeCompare(String(a.id || ""));
   }
 
   function sortGTDMilestonesForView(a, b) {
@@ -4109,6 +4196,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     snapshotInFlight: false,
     snapshotPollTimer: null,
     toastTimer: null,
+    windowSession: null,
     windowName: detachedMemoWindowName(params.get("id") || ""),
   };
 
@@ -4126,6 +4214,14 @@ export function mountDetachedMemoWindow(root, options = {}) {
     toast: root.querySelector("[data-toast]"),
     visibility: root.querySelector("[data-window-visibility]"),
   };
+  state.windowSession = registerWindowSession({
+    entryPage: "memo-window.html",
+    fixed: state.fixed,
+    getState: detachedWindowSessionState,
+    kind: "memo_window",
+    restoreState: restoreDetachedWindowSessionState,
+    title: "Memo",
+  });
   let detachedCommentEditor = createDetachedCommentEditor(state.commentDraft);
   let detachedCommentEditEditor = null;
 
@@ -4274,6 +4370,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     state.commentPreviewVisible = !state.commentPreviewVisible;
     renderDetachedCommentPreview();
     if (!state.commentPreviewVisible && detachedCommentEditor) detachedCommentEditor.focus();
+    scheduleDetachedWindowSessionSnapshot();
   }
 
   function toggleDetachedCommentEditPreview() {
@@ -4282,6 +4379,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     state.commentEditPreviewVisible = !state.commentEditPreviewVisible;
     renderDetachedCommentEditPreview();
     if (!state.commentEditPreviewVisible && detachedCommentEditEditor) detachedCommentEditEditor.focus();
+    scheduleDetachedWindowSessionSnapshot();
   }
 
   function renderDetachedCommentPreview() {
@@ -4374,6 +4472,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
           renderDetachedMemo();
           loadDetachedComments(state.memo && state.memo.id);
           applyFixedState();
+          scheduleDetachedWindowSessionSnapshot();
           return;
         }
         loadDetachedMemoFromLocal(memoId);
@@ -4394,6 +4493,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     setDetachedPayload(memo, payload.memos);
     renderDetachedMemo();
     loadDetachedComments(state.memo && state.memo.id);
+    scheduleDetachedWindowSessionSnapshot();
   }
 
   function refreshDetachedEditorSettings() {
@@ -4510,6 +4610,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     if (!name) return null;
     if (!windowState || windowState.width <= 0 || windowState.height <= 0) return null;
     return {
+      fixed: state.fixed,
       name,
       x: windowState.x,
       y: windowState.y,
@@ -4652,6 +4753,11 @@ export function mountDetachedMemoWindow(root, options = {}) {
         break;
       case "copyCodeBlock":
         copyCodeBlockFromAction(action, state.memos, showToast);
+        break;
+      case "copyInlineLink":
+        event.preventDefault();
+        event.stopPropagation();
+        copyInlineLinkFromAction(action, showToast);
         break;
       default:
         break;
@@ -4936,8 +5042,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
     switch (control) {
       case "close":
         snapshotDetachedWindowState().finally(function () {
-          callNativeWindow("__velo/window/close").catch(function () {
-            window.close();
+          forgetDetachedWindowOpenState().finally(function () {
+            callNativeWindow("__velo/window/close").catch(function () {
+              window.close();
+            });
           });
         });
         break;
@@ -4950,6 +5058,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
       case "toggleFixed":
         state.fixed = !state.fixed;
         applyFixedState();
+        snapshotDetachedWindowState().catch(function () {});
+        if (state.windowSession && state.windowSession.setFixed) {
+          state.windowSession.setFixed(state.fixed).catch(function () {});
+        }
         break;
       default:
         break;
@@ -4960,6 +5072,41 @@ export function mountDetachedMemoWindow(root, options = {}) {
     renderFixedButton();
     document.body.classList.toggle("is-fixed-window", state.fixed);
     callNativeWindow("__velo/window/set_always_on_top", { onTop: state.fixed }).catch(function () {});
+  }
+
+  function forgetDetachedWindowOpenState() {
+    if (typeof invoke !== "function" || !state.windowName) return Promise.resolve(null);
+    return invoke("/api/window/opened/forget?name=" + encodeURIComponent(state.windowName), { method: "GET" }).catch(function () {});
+  }
+
+  function detachedWindowSessionState() {
+    return {
+      commentEditPreviewVisible: state.commentEditPreviewVisible,
+      commentExpandedIds: Array.from(state.commentExpandedIds || []),
+      commentPreviewVisible: state.commentPreviewVisible,
+      memoId: state.memo && state.memo.id,
+      scrollTop: els.content ? els.content.scrollTop : 0,
+    };
+  }
+
+  function restoreDetachedWindowSessionState(sessionState) {
+    const saved = sessionState && typeof sessionState === "object" ? sessionState : {};
+    state.commentPreviewVisible = saved.commentPreviewVisible === true;
+    state.commentEditPreviewVisible = saved.commentEditPreviewVisible === true;
+    if (Array.isArray(saved.commentExpandedIds)) {
+      state.commentExpandedIds = new Set(saved.commentExpandedIds.map(String).filter(Boolean));
+    }
+    window.setTimeout(function () {
+      if (els.content && Number.isFinite(Number(saved.scrollTop))) {
+        els.content.scrollTop = Number(saved.scrollTop);
+      }
+    }, 0);
+  }
+
+  function scheduleDetachedWindowSessionSnapshot() {
+    if (state.windowSession && state.windowSession.scheduleSnapshot) {
+      state.windowSession.scheduleSnapshot();
+    }
   }
 
   function renderFixedButton() {
