@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OSS 文件管理</title>
   <script src="/public/input-policy.js" defer></script>
+  <script type="module" src="/src/window-state.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -550,7 +551,10 @@
       var message = document.querySelector("[data-manager-message]");
       var filePath = document.querySelector("[data-file-path]");
       var fileList = document.querySelector("[data-file-list]");
-      var requestedStorageId = sanitizeStorageId(new URLSearchParams(window.location.search).get("storageId") || "");
+      var initialParams = new URLSearchParams(window.location.search);
+      var requestedStorageId = sanitizeStorageId(initialParams.get("storageId") || "");
+      var requestedPath = normalizeObjectPath(initialParams.get("path") || "");
+      var windowSession = null;
       var state = {
         error: "",
         items: [],
@@ -566,7 +570,8 @@
         state.settings = normalizeSettings(settings);
         ensureSelectedStorage();
         render();
-        loadFiles(selectedStoragePrefix());
+        initWindowSession();
+        loadFiles(requestedPath || selectedStoragePrefix());
       }, function (err) {
         state.error = "读取配置失败: " + errorMessage(err);
         render();
@@ -645,6 +650,8 @@
         state.loadedStorageId = "";
         state.openMenuId = "";
         state.error = "";
+        replaceManagerQuery();
+        scheduleWindowSessionSnapshot();
         render();
         loadFiles(selectedStoragePrefix());
       });
@@ -830,6 +837,8 @@
         state.error = "";
         state.openMenuId = "";
         state.path = normalizeObjectPath(path);
+        replaceManagerQuery();
+        scheduleWindowSessionSnapshot();
         render();
         return callStorage(FILE_LIST_API, "POST", {
           path: state.path,
@@ -838,6 +847,8 @@
           state.items = (Array.isArray(data && data.list) ? data.list : []).map(normalizeFileItem);
           state.loadedStorageId = storage.id;
           state.path = normalizeObjectPath((data && data.path) || state.path);
+          replaceManagerQuery();
+          scheduleWindowSessionSnapshot();
           state.error = "";
         }, function (err) {
           state.items = [];
@@ -947,6 +958,61 @@
           return;
         }
         state.selectedStorageId = state.settings.activeStorageId || ((state.settings.storages[0] && state.settings.storages[0].id) || "");
+      }
+
+      function initWindowSession() {
+        if (typeof window.registerWindowSession !== "function") {
+          window.setTimeout(initWindowSession, 40);
+          return;
+        }
+        windowSession = window.registerWindowSession({
+          entryPage: "oss-manager.html",
+          getState: getManagerSessionState,
+          restoreState: restoreManagerSessionState,
+          title: "OSS 文件管理",
+        });
+      }
+
+      function getManagerSessionState() {
+        return {
+          path: state.path || "",
+          selectedStorageId: state.selectedStorageId || "",
+        };
+      }
+
+      function restoreManagerSessionState(sessionState) {
+        var saved = sessionState && typeof sessionState === "object" ? sessionState : {};
+        if (saved.selectedStorageId) {
+          state.selectedStorageId = sanitizeStorageId(saved.selectedStorageId);
+          ensureSelectedStorage();
+        }
+        if (typeof saved.path === "string") {
+          requestedPath = normalizeObjectPath(saved.path);
+        }
+        replaceManagerQuery();
+      }
+
+      function replaceManagerQuery() {
+        try {
+          var url = new URL(window.location.href);
+          if (state.selectedStorageId) {
+            url.searchParams.set("storageId", state.selectedStorageId);
+          } else {
+            url.searchParams.delete("storageId");
+          }
+          if (state.path) {
+            url.searchParams.set("path", state.path);
+          } else {
+            url.searchParams.delete("path");
+          }
+          window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        } catch (_) { }
+      }
+
+      function scheduleWindowSessionSnapshot() {
+        if (windowSession && windowSession.scheduleSnapshot) {
+          windowSession.scheduleSnapshot();
+        }
       }
 
       function selectedStoragePrefix() {

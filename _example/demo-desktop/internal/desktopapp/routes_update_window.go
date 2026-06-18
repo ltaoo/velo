@@ -91,10 +91,25 @@ func registerUpdateAndWindowRoutes(b *velo.Box, appUpdater *updater.AppUpdater) 
 			Provider:         c.Query("provider"),
 			StorageID:        storageID,
 		})
+		fixed := persistedWindowFixed(b.Store, spec.Name)
+		pathname := pathnameWithFixed(spec.Pathname, fixed)
+		if err := rememberWindowSpec(b.Store, windowing.WindowSpec{
+			EntryPage: spec.EntryPage,
+			Height:    spec.Height,
+			Name:      spec.Name,
+			Pathname:  pathname,
+			Title:     spec.Title,
+			Width:     spec.Width,
+		}); err != nil {
+			return c.Error(err.Error())
+		}
+		if fixed {
+			_ = updatePersistedOpenWindowFixed(b.Store, spec.Name, true)
+		}
 		b.OpenWindow(&velo.VeloWebviewOpt{
 			Name:       spec.Name,
 			Title:      spec.Title,
-			Pathname:   spec.Pathname,
+			Pathname:   pathname,
 			Width:      spec.Width,
 			Height:     spec.Height,
 			EntryPage:  spec.EntryPage,

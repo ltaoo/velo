@@ -100,6 +100,11 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
       continue;
     }
 
+    if (isMemoHorizontalRuleLine(line)) {
+      html += memoLineTemplate(lineNumber + lineNumberOffset, '<hr class="memo-horizontal-rule" />', "is-horizontal-rule");
+      continue;
+    }
+
     const table = parseMemoTableBlock(lines, index);
     if (table) {
       html += memoLineTemplate(
@@ -123,7 +128,9 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
         lineNumber + lineNumberOffset,
         standaloneResource.type === "image"
           ? renderMemoImageBlock(standaloneResource)
-          : renderMemoFileBlock(standaloneResource, context),
+          : standaloneResource.type === "link"
+            ? renderMemoLinkBlock(standaloneResource)
+            : renderMemoFileBlock(standaloneResource, context),
         "is-resource",
       );
       continue;
@@ -214,6 +221,10 @@ function isQuoteLine(line) {
 function stripQuoteMarker(line) {
   const match = String(line || "").match(/^>\s?(.*)$/);
   return match ? match[1] : line;
+}
+
+function isMemoHorizontalRuleLine(line) {
+  return /^\s*-{3,}\s*$/.test(String(line || ""));
 }
 
 function parseMemoImageLayoutStartLine(line) {
@@ -426,8 +437,7 @@ function inlineMarkdownBase(value, context = {}) {
     if (isFileAttachment(label, url)) {
       return renderMemoFileToken({ label, url }, context);
     }
-    const href = safeUrl(url);
-    return `<a href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${escapeHTML(label)}</a>`;
+    return renderMemoLinkToken(label, url);
   });
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -435,6 +445,23 @@ function inlineMarkdownBase(value, context = {}) {
   html = html.replace(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g, '$1<span class="memo-hashtag">#$2</span>');
   html = replaceMemoTimeSyntax(html);
   return html;
+}
+
+function renderMemoLinkToken(label, url) {
+  const href = safeUrl(url);
+  const copyUrl = href !== "#" ? href : url;
+  const title = label || copyUrl;
+  return `
+    <span class="memo-inline-link" data-inline-link-url="${escapeAttr(copyUrl)}">
+      <a class="memo-inline-link-anchor" href="${escapeAttr(href)}" target="_blank" rel="noreferrer" title="${escapeAttr(title)}">
+        <span class="memo-inline-link-icon">${SVG.link}</span>
+        <span class="memo-inline-link-text">${escapeHTML(label || copyUrl)}</span>
+      </a>
+      <button class="memo-inline-link-copy" type="button" data-action="copyInlineLink" title="复制链接" aria-label="复制链接">
+        ${SVG.copy}
+      </button>
+    </span>
+  `;
 }
 
 function replaceMemoTimeSyntax(html) {
@@ -647,9 +674,19 @@ function parseStandaloneMarkdownResource(line) {
   if (!url) return null;
 
   const label = (match[2] || "").trim() || fileDisplayName("", url);
-  const type = match[1] === "!" || isImageAttachment(label, url) ? "image" : "file";
+  const type = match[1] === "!" || isImageAttachment(label, url)
+    ? "image"
+    : isFileAttachment(label, url)
+      ? "file"
+      : isLinkResourceURL(url)
+        ? "link"
+        : "file";
 
   return { type, label, url };
+}
+
+function isLinkResourceURL(value) {
+  return /^(https?:|mailto:)/i.test(String(value || "").trim());
 }
 
 function memoImageLayoutTypeFromInfo(info) {
@@ -783,6 +820,26 @@ function renderMemoFileBlock(resource, context = {}) {
     return `<div class="memo-file-block${localClass}">${body}${openButton}</div>`;
   }
   return `<a class="memo-file-block" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${body}</a>`;
+}
+
+function renderMemoLinkBlock(resource) {
+  const href = safeUrl(resource.url);
+  const copyUrl = href !== "#" ? href : resource.url;
+  const label = String(resource.label || copyUrl || "").trim();
+  return `
+    <div class="memo-link-block" data-inline-link-url="${escapeAttr(copyUrl)}">
+      <a class="memo-link-block-target" href="${escapeAttr(href)}" target="_blank" rel="noreferrer" title="${escapeAttr(label || copyUrl)}">
+        <span class="memo-link-block-icon">${SVG.link}</span>
+        <span class="memo-link-block-text">
+          <span class="memo-link-block-name">${escapeHTML(label || copyUrl)}</span>
+          <span class="memo-link-block-url">${escapeHTML(compactFileURL(copyUrl))}</span>
+        </span>
+      </a>
+      <button class="memo-action-button memo-link-block-copy" type="button" data-action="copyInlineLink" title="复制链接" aria-label="复制链接">
+        ${SVG.copy}
+      </button>
+    </div>
+  `;
 }
 
 function renderMemoImageToken(resource) {

@@ -1,3 +1,10 @@
+import {
+  forgetPersistedWindow,
+  persistedWindowFixedFromURL,
+  registerWindowSession,
+  setPersistedWindowFixed,
+} from "../window-state.js";
+
 const PREVIEW_STORAGE_PREFIX = "demo-desktop:image-preview:";
 const PREVIEW_STORAGE_INDEX = "demo-desktop:image-preview:index";
 const MAX_STORED_PREVIEWS = 16;
@@ -401,7 +408,7 @@ function mountImagePreview(root) {
     canvasHeight: 0,
     canvasWidth: 0,
     color: "#ff4d4f",
-    fixed: false,
+    fixed: persistedWindowFixedFromURL(),
     image: null,
     imageHeight: 0,
     imageWidth: 0,
@@ -418,6 +425,7 @@ function mountImagePreview(root) {
     strokeWidth: 5,
     strokes: [],
     toastTimer: null,
+    windowSession: null,
   };
 
   root.innerHTML = previewTemplate(payload);
@@ -432,7 +440,19 @@ function mountImagePreview(root) {
   };
 
   const ctx = els.canvas.getContext("2d");
+  state.windowSession = registerWindowSession({
+    entryPage: "image-preview.html",
+    fixed: state.fixed,
+    getState() {
+      return imagePreviewSessionState(state);
+    },
+    restoreState(sessionState) {
+      restoreImagePreviewSessionState(sessionState, root, els, state, ctx);
+    },
+    title: payload.title || "图片预览",
+  });
   bindPreviewEvents(root, els, state, ctx);
+  document.body.classList.toggle("is-fixed-window", state.fixed);
   updateMode(root, els, state);
   updateToolbarState(root, state);
   resizeCanvas(els, state, ctx);
@@ -532,6 +552,7 @@ function bindPreviewEvents(root, els, state, ctx) {
       state.mode = "draw";
       updateMode(root, els, state);
       updateToolbarState(root, state);
+      schedulePreviewSessionSnapshot(state);
       return;
     }
 
@@ -544,6 +565,7 @@ function bindPreviewEvents(root, els, state, ctx) {
     const size = closestElement(event.target, "[data-preview-size]");
     if (!size || !root.contains(size)) return;
     state.strokeWidth = clamp(Number(size.value || 5), 2, 18);
+    schedulePreviewSessionSnapshot(state);
   });
 
   els.stage.addEventListener("pointerdown", function (event) {
@@ -596,6 +618,7 @@ function bindPreviewEvents(root, els, state, ctx) {
   els.stage.addEventListener("dblclick", function () {
     if (!state.loaded) return;
     fitImage(els, state, ctx);
+    schedulePreviewSessionSnapshot(state);
   });
 
   window.addEventListener("keydown", function (event) {
@@ -680,6 +703,7 @@ function runPreviewAction(action, root, els, state, ctx) {
     default:
       break;
   }
+  schedulePreviewSessionSnapshot(state);
 }
 
 function loadPreviewImage(els, state, ctx) {
@@ -740,6 +764,7 @@ function setActualSize(els, state, ctx) {
   state.panY = 0;
   state.userZoomed = true;
   renderPreview(els, state, ctx);
+  schedulePreviewSessionSnapshot(state);
 }
 
 function rotateImage(delta, els, state, ctx) {
@@ -812,6 +837,7 @@ function endPointer(event, els, state, ctx) {
   state.activePointer = 0;
   els.stage.classList.remove("is-moving");
   renderPreview(els, state, ctx);
+  schedulePreviewSessionSnapshot(state);
 }
 
 function renderPreview(els, state, ctx) {
@@ -953,7 +979,53 @@ function toggleFixed(root, state) {
   state.fixed = !state.fixed;
   document.body.classList.toggle("is-fixed-window", state.fixed);
   callNativeWindow("__velo/window/set_always_on_top", { onTop: state.fixed }).catch(function () {});
+  setPersistedWindowFixed(state.fixed).catch(function () {});
   updateToolbarState(root, state);
+}
+
+function imagePreviewSessionState(state) {
+  return {
+    color: state.color,
+    mode: state.mode,
+    panX: state.panX,
+    panY: state.panY,
+    payload: state.payload,
+    rotation: state.rotation,
+    scale: state.scale,
+    strokeWidth: state.strokeWidth,
+    strokes: state.strokes,
+  };
+}
+
+function restoreImagePreviewSessionState(sessionState, root, els, state, ctx) {
+  const saved = sessionState && typeof sessionState === "object" ? sessionState : {};
+  if (saved.payload && saved.payload.src) {
+    const nextPayload = normalizePreviewPayload(saved.payload);
+    if (nextPayload.src && nextPayload.src !== state.payload.src) {
+      state.payload = nextPayload;
+      document.title = nextPayload.title || "图片预览";
+      if (els.title) els.title.textContent = nextPayload.title || "图片预览";
+      loadPreviewImage(els, state, ctx);
+    }
+  }
+  if (saved.mode === "draw" || saved.mode === "move") state.mode = saved.mode;
+  if (saved.color) state.color = normalizeColor(saved.color);
+  if (Number(saved.strokeWidth) > 0) state.strokeWidth = Number(saved.strokeWidth);
+  if (Array.isArray(saved.strokes)) state.strokes = saved.strokes;
+  if (Number.isFinite(Number(saved.rotation))) state.rotation = Number(saved.rotation);
+  if (Number.isFinite(Number(saved.scale)) && Number(saved.scale) > 0) state.scale = Number(saved.scale);
+  if (Number.isFinite(Number(saved.panX))) state.panX = Number(saved.panX);
+  if (Number.isFinite(Number(saved.panY))) state.panY = Number(saved.panY);
+  state.userZoomed = true;
+  updateMode(root, els, state);
+  updateToolbarState(root, state);
+  if (state.loaded) renderPreview(els, state, ctx);
+}
+
+function schedulePreviewSessionSnapshot(state) {
+  if (state.windowSession && state.windowSession.scheduleSnapshot) {
+    state.windowSession.scheduleSnapshot();
+  }
 }
 
 function copyRenderedImage(els, state) {
@@ -1042,8 +1114,10 @@ function drawExportAnnotations(ctx, state) {
 }
 
 function closeWindow() {
-  callNativeWindow("__velo/window/close").catch(function () {
-    window.close();
+  forgetPersistedWindow().finally(function () {
+    callNativeWindow("__velo/window/close").catch(function () {
+      window.close();
+    });
   });
 }
 

@@ -5,6 +5,7 @@ import {
   loadMemosFromVault,
   saveMemos,
 } from "./domain/memo-repository.js";
+import { forgetPersistedWindow, registerWindowSession, setPersistedWindowFixed } from "./window-state.js";
 
 const SVG = {
   pin:
@@ -32,6 +33,11 @@ function mountMemoSlim(root) {
     saving: false,
     toastTimer: null,
   };
+  registerWindowSession({
+    entryPage: "memo-slim.html",
+    fixed: state.fixed,
+    title: "Memos",
+  });
 
   root.innerHTML = slimTemplate();
 
@@ -154,6 +160,7 @@ function mountMemoSlim(root) {
       case "toggleFixed":
         state.fixed = !state.fixed;
         applyFixedState();
+        setPersistedWindowFixed(state.fixed).catch(function () {});
         break;
       default:
         break;
@@ -172,8 +179,10 @@ function mountMemoSlim(root) {
           showToast((resp && resp.msg) || "打开完整版失败");
           return;
         }
-        callNativeWindow("__velo/window/close").catch(function () {
-          window.close();
+        forgetPersistedWindow().finally(function () {
+          callNativeWindow("__velo/window/close").catch(function () {
+            window.close();
+          });
         });
       },
       function (err) {
