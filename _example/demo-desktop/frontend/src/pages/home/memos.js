@@ -142,6 +142,7 @@ const CLIPBOARD_MIN_VISIBLE_MS = 1500;
 const DETACHED_WINDOW_STATE_POLL_INTERVAL = 250;
 const DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
 const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
+const memoTocHighlightTimers = new WeakMap();
 
 function normalizeTaskFilter(value) {
   const filter = String(value || "").trim().toLowerCase();
@@ -176,6 +177,37 @@ function copyInlineLinkFromAction(action, notify) {
     () => notify("已复制链接"),
     () => notify("复制失败"),
   );
+}
+
+function scrollMemoTocLine(control) {
+  const card = closestElement(control, "article.memo-card");
+  const lineNumber = String((control && control.dataset && control.dataset.memoTocLine) || "");
+  if (!card || !lineNumber) return;
+
+  const target = Array.from(card.querySelectorAll(".memo-source-line[data-heading-line]")).find(function (line) {
+    return line && line.dataset && line.dataset.headingLine === lineNumber;
+  });
+  if (!target) return;
+
+  card.querySelectorAll("[data-memo-toc-line]").forEach(function (item) {
+    item.classList.toggle("is-active", item.dataset.memoTocLine === lineNumber);
+  });
+
+  const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({
+    behavior: prefersReducedMotion ? "auto" : "smooth",
+    block: "start",
+    inline: "nearest",
+  });
+  target.classList.add("is-toc-target");
+
+  const previousTimer = memoTocHighlightTimers.get(target);
+  if (previousTimer) window.clearTimeout(previousTimer);
+  const nextTimer = window.setTimeout(function () {
+    target.classList.remove("is-toc-target");
+    memoTocHighlightTimers.delete(target);
+  }, 1400);
+  memoTocHighlightTimers.set(target, nextTimer);
 }
 
 function codeBlockTextFromNode(blockNode) {
@@ -703,6 +735,14 @@ export function mountMemosHome(root) {
     if (memoRefTarget && root.contains(memoRefTarget)) {
       event.preventDefault();
       focusMemo(memoRefTarget.dataset.memoRefTarget);
+      return;
+    }
+
+    const tocLine = closestElement(event.target, "[data-memo-toc-line]");
+    if (tocLine && root.contains(tocLine)) {
+      event.preventDefault();
+      event.stopPropagation();
+      scrollMemoTocLine(tocLine);
       return;
     }
 
@@ -4738,6 +4778,14 @@ export function mountDetachedMemoWindow(root, options = {}) {
     if (memoRefTarget && root.contains(memoRefTarget)) {
       event.preventDefault();
       focusDetachedMemo(memoRefTarget.dataset.memoRefTarget);
+      return;
+    }
+
+    const tocLine = closestElement(event.target, "[data-memo-toc-line]");
+    if (tocLine && root.contains(tocLine)) {
+      event.preventDefault();
+      event.stopPropagation();
+      scrollMemoTocLine(tocLine);
       return;
     }
 

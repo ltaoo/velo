@@ -20,6 +20,7 @@ import { calendarDayInfo } from "./memo-calendar-info.js";
 import { SVG } from "./memo-icons.js";
 import {
   compactFileURL,
+  collectMemoHeadings,
   inlineMarkdown,
   renderMemoMarkdown,
   renderVSCodeOpenButton,
@@ -70,6 +71,7 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const editingCommentId = String(options.editingCommentId || "");
   const expandedCommentIds = options.expandedCommentIds;
+  const toc = memoCardTocTemplate(collectMemoHeadings(memo.content));
 
   return `
     <article class="memo-card memo-window-card" data-memo-id="${escapeAttr(memo.id)}">
@@ -90,8 +92,13 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
       </header>
-      <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
-      ${summary}
+      <div class="memo-card-reading ${toc ? "has-toc" : ""}">
+        <div class="memo-card-reading-main">
+          <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+          ${summary}
+        </div>
+        ${toc}
+      </div>
       ${comments.length ? detachedMemoCommentsTemplate(comments, renderContext, editingCommentId, expandedCommentIds) : ""}
     </article>
   `;
@@ -546,6 +553,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const editingCommentId = String(options.editingCommentId || "");
   const sourceEditing = options.sourceEditing === true;
   const sourceDraft = String(options.sourceDraft || "");
+  const toc = !editing && !sourceEditing && expanded ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
 
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
@@ -575,14 +583,19 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           : sourceEditing
             ? memoSourceTemplate(sourceDraft)
             : `
-            <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
-              <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
-              <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
-                <span>${expandLabel}</span>
-                ${SVG.chevronDown}
-              </button>
+            <div class="memo-card-reading ${toc ? "has-toc" : ""}">
+              <div class="memo-card-reading-main">
+                <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
+                  <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
+                  <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
+                    <span>${expandLabel}</span>
+                    ${SVG.chevronDown}
+                  </button>
+                </div>
+                ${summary}
+              </div>
+              ${toc}
             </div>
-            ${summary}
           `
       }
       ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId) : ""}
@@ -602,6 +615,35 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
         <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
       </footer>
     </article>
+  `;
+}
+
+function memoCardTocTemplate(headings) {
+  const items = Array.isArray(headings) ? headings.filter((heading) => heading && heading.text) : [];
+  if (items.length < 2) return "";
+
+  const minLevel = Math.min(...items.map((heading) => Number(heading.level) || 1));
+  const maxDepth = 5;
+
+  return `
+    <nav class="memo-card-toc" aria-label="Memo 目录">
+      <div class="memo-card-toc-title">目录</div>
+      <ol class="memo-card-toc-list">
+        ${items
+          .map(function (heading) {
+            const level = Math.max(1, Math.min(6, Number(heading.level) || 1));
+            const depth = Math.max(0, Math.min(maxDepth, level - minLevel));
+            return `
+              <li class="memo-card-toc-item is-level-${level}" style="--memo-toc-depth: ${depth}">
+                <button type="button" data-memo-toc-line="${escapeAttr(heading.lineNumber)}" title="${escapeAttr(heading.text)}">
+                  <span>${escapeHTML(heading.text)}</span>
+                </button>
+              </li>
+            `;
+          })
+          .join("")}
+      </ol>
+    </nav>
   `;
 }
 

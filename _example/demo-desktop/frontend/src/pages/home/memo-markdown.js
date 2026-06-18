@@ -24,6 +24,44 @@ function renderMemoMarkdown(content, context = {}, lineNumberOffset = 0) {
   return `<div class="memo-line-list${lineNumberClass}">${renderMemoMarkdownLines(lines, context, lineNumberOffset)}</div>`;
 }
 
+function collectMemoHeadings(content) {
+  const lines = memoLines(content);
+  const headings = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+
+    if (isMemoFenceLine(line)) {
+      const openingFence = parseMemoFenceLine(line);
+      index++;
+      while (index < lines.length && !isMemoFenceClosingLine(lines[index], openingFence)) {
+        index++;
+      }
+      continue;
+    }
+
+    const imageLayout = parseMemoImageLayoutStartLine(line);
+    if (imageLayout) {
+      index++;
+      while (index < lines.length && !isMemoImageLayoutEndLine(lines[index])) {
+        index++;
+      }
+      continue;
+    }
+
+    const heading = parseMemoHeadingLine(line);
+    if (!heading || !String(heading.text || "").trim()) continue;
+
+    headings.push({
+      level: heading.level,
+      lineNumber: index + 1,
+      text: heading.text,
+    });
+  }
+
+  return headings;
+}
+
 function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
   let html = "";
 
@@ -174,10 +212,12 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
 
     const heading = parseMemoHeadingLine(line);
     if (heading) {
+      const headingLineNumber = lineNumber + lineNumberOffset;
       html += memoLineTemplate(
-        lineNumber + lineNumberOffset,
+        headingLineNumber,
         `<h${heading.level} class="memo-heading memo-heading-${heading.level}">${inlineMarkdown(heading.text, context)}</h${heading.level}>`,
         `is-heading is-heading-${heading.level}`,
+        `data-heading-line="${escapeAttr(headingLineNumber)}" data-heading-level="${escapeAttr(heading.level)}"`,
       );
       continue;
     }
@@ -248,9 +288,9 @@ function isMemoImageLayoutEndLine(line) {
   return /^\s*:::\s*$/.test(String(line || ""));
 }
 
-function memoLineTemplate(lineNumber, body, className = "") {
+function memoLineTemplate(lineNumber, body, className = "", attrs = "") {
   return `
-    <div class="memo-source-line ${className}">
+    <div class="memo-source-line ${className}"${attrs ? ` ${attrs}` : ""}>
       <span class="memo-line-number" aria-hidden="true" data-line-number="${escapeAttr(lineNumber)}"></span>
       <div class="memo-line-body">${body}</div>
     </div>
@@ -1026,6 +1066,7 @@ function safeUrl(value) {
 }
 
 export {
+  collectMemoHeadings,
   compactFileURL,
   inlineMarkdown,
   renderMemoMarkdown,
