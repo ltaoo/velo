@@ -90,6 +90,7 @@ func restorePersistedOpenWindows(b *velo.Box, logger *zerolog.Logger) {
 	if b == nil || b.Store == nil {
 		return
 	}
+	onClose := forgetPersistedOpenWindowOnClose(b.Store, logger)
 	file := loadPersistedOpenWindows(b.Store)
 	for _, item := range file.Windows {
 		if !shouldPersistOpenWindowName(item.Name) {
@@ -122,6 +123,7 @@ func restorePersistedOpenWindows(b *velo.Box, logger *zerolog.Logger) {
 				Frameless:  item.Frameless,
 				EntryPage:  firstNonEmpty(item.EntryPage, "memo-window.html"),
 				FrontendFS: appAssets.FrontendFS,
+				OnClose:    onClose,
 			})
 		default:
 			pathname := pathnameWithFixed(item.Pathname, item.Fixed)
@@ -134,6 +136,7 @@ func restorePersistedOpenWindows(b *velo.Box, logger *zerolog.Logger) {
 				Frameless:  item.Frameless,
 				EntryPage:  firstNonEmpty(item.EntryPage, "index.html"),
 				FrontendFS: appAssets.FrontendFS,
+				OnClose:    onClose,
 			})
 		}
 	}
@@ -353,6 +356,18 @@ func forgetPersistedOpenWindow(store *store.Store, name string) error {
 	}
 	file.Windows = next
 	return savePersistedOpenWindows(store, file)
+}
+
+func forgetPersistedOpenWindowOnClose(store *store.Store, logger *zerolog.Logger) func(string) {
+	return func(name string) {
+		name = strings.TrimSpace(name)
+		if !shouldPersistOpenWindowName(name) {
+			return
+		}
+		if err := forgetPersistedOpenWindow(store, name); err != nil && logger != nil {
+			logger.Warn().Err(err).Str("window", name).Msg("failed to forget closed window session")
+		}
+	}
 }
 
 func upsertPersistedOpenWindow(store *store.Store, item PersistedOpenWindow) error {

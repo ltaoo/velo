@@ -4613,64 +4613,133 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-comments {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   display: grid;
   gap: 10px;
   margin-top: 12px;
-  padding-top: 12px;
+  padding: 12px 0 0 12px;
+  position: relative;
+}
+
+.memo-comments::before {
+  background: color-mix(in srgb, var(--memo-blue) 46%, var(--border));
+  border-radius: 999px;
+  bottom: 0;
+  content: "";
+  left: 0;
+  position: absolute;
+  top: 12px;
+  width: 2px;
+}
+
+.memo-comments-title {
+  align-items: center;
+  color: var(--FG-1);
+  display: flex;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  gap: 6px;
+  line-height: 1.2;
+  min-height: 20px;
+}
+
+.memo-comments-title strong {
+  align-items: center;
+  background: var(--memo-blue-soft);
+  border: 1px solid color-mix(in srgb, var(--memo-blue) 24%, transparent);
+  border-radius: 999px;
+  color: var(--memo-blue);
+  display: inline-flex;
+  font-size: var(--font-2xs);
+  font-weight: 700;
+  line-height: 1;
+  min-height: 18px;
+  padding: 0 6px;
 }
 
 .memo-comment-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
-.memo-comment {
-  background: var(--BG-1);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.memo-comments .memo-comment {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 5px;
+  justify-items: start;
+  padding: 0;
   position: relative;
 }
 
-.memo-comment-head {
+.memo-comments .memo-comment-head {
   align-items: center;
   color: var(--FG-1);
   display: flex;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  padding-left: 2px;
 }
 
-.memo-comment-avatar {
+.memo-comments .memo-comment-avatar {
+  background: color-mix(in srgb, var(--memo-blue) 12%, var(--BG-4));
+  color: var(--memo-blue);
   flex: 0 0 auto;
   font-size: var(--font-xs);
   height: 24px;
   width: 24px;
 }
 
-.memo-comment-author {
+.memo-comments .memo-comment-author {
   color: var(--FG-0);
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 1.2;
 }
 
-.memo-comment-head time {
+.memo-comments .memo-comment-head time {
   font-size: var(--font-xs);
 }
 
-.memo-comment-content {
+.memo-comments .memo-comment-content {
+  background: transparent;
+  border: 0;
+  color: var(--FG-0);
   font-size: var(--font-sm);
   line-height: 1.58;
-}
-
-.memo-comment-bubble {
+  max-width: 100%;
   min-width: 0;
+  padding: 0;
 }
 
-.memo-comment-hover-actions {
+.memo-comments .memo-comment-bubble {
+  background: color-mix(in srgb, var(--BG-4) 72%, var(--BG-2));
+  border: 1px solid color-mix(in srgb, var(--border) 68%, var(--BG-4));
+  border-radius: 5px 14px 14px 14px;
+  display: grid;
+  justify-self: start;
+  margin-left: 30px;
+  max-width: calc(100% - 30px);
+  min-width: 0;
+  padding: 9px 11px;
+  position: relative;
+}
+
+.memo-comments .memo-comment-bubble::before {
+  background: color-mix(in srgb, var(--BG-4) 72%, var(--BG-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, var(--BG-4));
+  border-left: 1px solid color-mix(in srgb, var(--border) 68%, var(--BG-4));
+  content: "";
+  height: 10px;
+  left: -5px;
+  position: absolute;
+  top: 8px;
+  transform: rotate(45deg);
+  width: 10px;
+}
+
+.memo-comments .memo-comment-hover-actions {
   align-items: center;
   background: var(--BG-1);
   border: 1px solid var(--border);
@@ -4682,29 +4751,34 @@ body.is-fixed-window .memo-window-shell {
   padding: 2px;
   pointer-events: none;
   position: absolute;
-  right: 8px;
-  top: 8px;
+  right: 6px;
+  top: -18px;
   transform: translateY(4px);
   transition: opacity 0.14s ease, transform 0.14s ease;
   z-index: 2;
 }
 
-.memo-comment:hover .memo-comment-hover-actions,
-.memo-comment:focus-within .memo-comment-hover-actions {
+.memo-comments .memo-comment:hover .memo-comment-hover-actions,
+.memo-comments .memo-comment:focus-within .memo-comment-hover-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
 }
 
-.memo-comment-hover-actions .memo-action-button {
+.memo-comments .memo-comment-hover-actions .memo-action-button {
   height: 26px;
   width: 26px;
 }
 
 .memo-comment-edit {
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--BG-4) 72%, var(--BG-2));
+  border: 1px solid color-mix(in srgb, var(--border) 68%, var(--BG-4));
+  border-radius: 5px 14px 14px 14px;
+  justify-self: start;
+  margin-left: 30px;
+  max-width: calc(100% - 30px);
   overflow: hidden;
+  width: 100%;
 }
 
 .memo-comment-edit-host .ProseMirror,
@@ -4719,21 +4793,59 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-comment-edit-actions {
-  background: var(--BG-1);
+  background: color-mix(in srgb, var(--BG-1) 76%, var(--BG-4));
 }
 
-.memo-comment-content .memo-line-list {
+.memo-comments .memo-comment-content .memo-line-list {
   gap: 4px;
 }
 
-.memo-comment-editor {
-  border: 1px solid var(--border);
+.memo-comment-list-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
   border-radius: 6px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  gap: 4px;
+  justify-self: start;
+  line-height: 1;
+  margin-left: 30px;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.memo-comment-list-toggle:hover {
+  background: var(--BG-3);
+  color: var(--FG-0);
+}
+
+.memo-comment-list-toggle svg {
+  height: 14px;
+  transition: transform 0.14s ease;
+  width: 14px;
+}
+
+.memo-comment-list-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.memo-comment-editor {
+  background: color-mix(in srgb, var(--BG-4) 72%, var(--BG-2));
+  border: 1px solid color-mix(in srgb, var(--border) 68%, var(--BG-4));
+  border-radius: 5px 14px 14px 14px;
+  justify-self: start;
+  margin-left: 30px;
+  max-width: calc(100% - 30px);
   overflow: hidden;
+  width: 100%;
 }
 
 .memo-comment-actions {
-  background: var(--BG-1);
+  background: color-mix(in srgb, var(--BG-1) 76%, var(--BG-4));
 }
 
 .memo-inline-editor {

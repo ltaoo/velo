@@ -261,6 +261,7 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			Frameless:  true,
 			EntryPage:  "memo-window.html",
 			FrontendFS: appAssets.FrontendFS,
+			OnClose:    forgetPersistedOpenWindowOnClose(b.Store, logger),
 		})
 		return c.Ok(velo.H{"success": true, "id": memoID, "windowName": windowName})
 	})

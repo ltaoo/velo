@@ -51,6 +51,28 @@ func TestPersistedOpenWindowRegistryLifecycle(t *testing.T) {
 	}
 }
 
+func TestPersistedWindowCloseHandlerForgetsSession(t *testing.T) {
+	st := store.NewWithDir(t.TempDir())
+	if err := rememberWindowSpec(st, windowing.WindowSpec{
+		EntryPage: "settings.html",
+		Height:    640,
+		Name:      "settings",
+		Pathname:  "/settings",
+		Title:     "App-Settings",
+		Width:     760,
+	}); err != nil {
+		t.Fatalf("rememberWindowSpec failed: %v", err)
+	}
+
+	onClose := forgetPersistedOpenWindowOnClose(st, nil)
+	onClose("settings")
+	onClose("desktop")
+
+	if got := len(loadPersistedOpenWindows(st).Windows); got != 0 {
+		t.Fatalf("persisted windows after close = %d, want 0", got)
+	}
+}
+
 func TestPersistedWindowSessionStoresURLFrameAndState(t *testing.T) {
 	st := store.NewWithDir(t.TempDir())
 	rawState := json.RawMessage(`{"panel":"input-source","activeStorageId":"local"}`)

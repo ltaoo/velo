@@ -17,6 +17,7 @@ export function registerWindowSession(options = {}) {
     debounceTimer: null,
     entryPage: String(options.entryPage || "").trim(),
     fixed: readInitialFixed(options),
+    forgetOnUnload: false,
     getState: typeof options.getState === "function" ? options.getState : null,
     inFlight: false,
     kind: String(options.kind || "").trim() || "open_window",
@@ -157,6 +158,10 @@ export function registerWindowSession(options = {}) {
   }
 
   function handleBeforeUnload() {
+    if (state.forgetOnUnload) {
+      forgetSync();
+      return;
+    }
     const payload = windowSessionPayload(state.lastWindowState || readWindowStateHint());
     if (!payload) return;
     try {
@@ -169,9 +174,18 @@ export function registerWindowSession(options = {}) {
 
   function forget() {
     if (typeof invoke !== "function" || !state.name) return Promise.resolve(null);
+    state.forgetOnUnload = true;
     return snapshot().catch(function () {}).then(function () {
       return invoke("/api/window/session/forget?name=" + encodeURIComponent(state.name), { method: "GET" }).catch(function () {});
     });
+  }
+
+  function forgetSync() {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "/api/window/session/forget?name=" + encodeURIComponent(state.name), false);
+      xhr.send();
+    } catch (_) {}
   }
 
   function saveWindowSession(windowState) {

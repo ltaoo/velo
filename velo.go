@@ -566,6 +566,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		HandleReopen:           opt.OnReopen,
+		HandleClose:            opt.OnClose,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Engine:                 b.webviewEngine,
 		ElectronCommand:        b.appConfig.Desktop.Electron.Command,
@@ -856,6 +857,7 @@ type VeloWebviewOpt struct {
 	EntryPage            string
 	OnDragDrop           func(event string, payload string)
 	OnReopen             func()
+	OnClose              func(name string)
 	URL                  string
 }
 
@@ -932,6 +934,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		HandleReopen:           opt.OnReopen,
+		HandleClose:            opt.OnClose,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
 		Engine:                 b.webviewEngine,
 		ElectronCommand:        b.appConfig.Desktop.Electron.Command,

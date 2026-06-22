@@ -29,6 +29,8 @@ import {
 } from "./memo-markdown.js";
 import { escapeAttr, escapeHTML } from "./memo-utils.js";
 
+const MEMO_COMMENT_PREVIEW_LIMIT = 3;
+
 function detachedMemoWindowTemplate() {
   return `
     <div class="memo-window-shell velo-drag" data-velo-drag>
@@ -551,6 +553,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const commenting = options.commenting === true;
   const editingCommentId = String(options.editingCommentId || "");
+  const commentsExpanded = options.commentsExpanded === true;
   const sourceEditing = options.sourceEditing === true;
   const sourceDraft = String(options.sourceDraft || "");
   const toc = !editing && !sourceEditing && expanded ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
@@ -598,7 +601,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             </div>
           `
       }
-      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId) : ""}
+      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded) : ""}
       <footer class="memo-card-actions">
         <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
         <button class="memo-action-button" type="button" data-action="commentMemo" title="评论">
@@ -707,14 +710,42 @@ function memoCardTagsTemplate(tags, options = {}) {
   return `<div class="memo-card-tags">${items.join("")}</div>`;
 }
 
-function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "") {
+function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "", commentsExpanded = false) {
   const commentContext = {
     ...renderContext,
     showLineNumbers: false,
   };
+  const editingIndex = editingCommentId
+    ? comments.findIndex((comment) => comment && comment.id === editingCommentId)
+    : -1;
+  const hasOverflow = comments.length > MEMO_COMMENT_PREVIEW_LIMIT;
+  const expanded = commentsExpanded || editingIndex >= MEMO_COMMENT_PREVIEW_LIMIT;
+  const visibleComments = hasOverflow && !expanded
+    ? comments.slice(0, MEMO_COMMENT_PREVIEW_LIMIT)
+    : comments;
+  const commentListClass = expanded ? "is-expanded" : "is-collapsed";
+  const commentItemsHTML = visibleComments
+    .map((comment) => memoCommentTemplate(comment, commentContext, editingCommentId))
+    .join("");
+  const hiddenCount = Math.max(0, comments.length - visibleComments.length);
+  const toggleLabel = expanded ? `收起到 ${MEMO_COMMENT_PREVIEW_LIMIT} 条` : `展开剩余 ${hiddenCount} 条评论`;
   return `
     <section class="memo-comments" aria-label="评论">
-      ${comments.length ? `<div class="memo-comment-list">${comments.map((comment) => memoCommentTemplate(comment, commentContext, editingCommentId)).join("")}</div>` : ""}
+      <div class="memo-comments-title">
+        <span>评论</span>
+        ${comments.length ? `<strong>${comments.length}</strong>` : ""}
+      </div>
+      ${comments.length ? `<div class="memo-comment-list ${commentListClass}">${commentItemsHTML}</div>` : ""}
+      ${
+        hasOverflow
+          ? `
+            <button class="memo-comment-list-toggle" type="button" data-action="toggleMemoComments" aria-expanded="${expanded ? "true" : "false"}">
+              <span>${toggleLabel}</span>
+              ${SVG.chevronDown}
+            </button>
+          `
+          : ""
+      }
       ${
         commenting
           ? `
