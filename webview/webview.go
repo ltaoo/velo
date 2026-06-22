@@ -26,6 +26,7 @@ func NormalizeEngine(engine Engine) Engine {
 type Handler func(message string) (id string, result string)
 type DragDropHandler func(event string, payload string)
 type ReopenHandler func()
+type CloseHandler func(name string)
 
 type BoxWebviewOptions struct {
 	ID                     string
@@ -46,6 +47,7 @@ type BoxWebviewOptions struct {
 	HandleMessage          Handler
 	HandleDragDrop         DragDropHandler
 	HandleReopen           ReopenHandler
+	HandleClose            CloseHandler
 	QuitOnLastWindowClosed bool
 	Engine                 Engine
 	ElectronCommand        string
