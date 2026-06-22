@@ -357,6 +357,7 @@ export function mountMemosHome(root) {
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
+    expandedCommentListMemoIds: new Set(),
     draftsLoaded: false,
     editorSettings: loadEditorSettings(),
     editPreviewVisible: false,
@@ -813,6 +814,9 @@ export function mountMemosHome(root) {
         break;
       case "toggleCommentEditPreview":
         toggleCommentEditPreview(commentId);
+        break;
+      case "toggleMemoComments":
+        toggleMemoComments(memoId);
         break;
       case "toggleComposerPreview":
         toggleComposerPreview();
@@ -2243,6 +2247,7 @@ export function mountMemosHome(root) {
     state.sourceDraft = "";
     state.sourceEditingId = "";
     if (!state.expandedMemoIds.has(memoId)) state.expandedMemoIds.add(memoId);
+    state.expandedCommentListMemoIds.add(memoId);
     renderFeed();
   }
 
@@ -2266,6 +2271,7 @@ export function mountMemosHome(root) {
     state.sourceDraft = "";
     state.sourceEditingId = "";
     if (comment.memoId && !state.expandedMemoIds.has(comment.memoId)) state.expandedMemoIds.add(comment.memoId);
+    if (comment.memoId) state.expandedCommentListMemoIds.add(comment.memoId);
     renderFeed();
   }
 
@@ -2302,6 +2308,7 @@ export function mountMemosHome(root) {
     return createMemoCommentInVault(memoId, content).then(
       function (comment) {
         upsertCommentInState(comment);
+        state.expandedCommentListMemoIds.add(memoId);
         state.commentingMemoId = "";
         state.commentDraft = "";
         state.commentPreviewVisible = false;
@@ -2336,6 +2343,7 @@ export function mountMemosHome(root) {
         state.commentEditingId = "";
         state.commentEditDraft = "";
         state.commentEditPreviewVisible = false;
+        if (comment.memoId) state.expandedCommentListMemoIds.add(comment.memoId);
         renderFeed();
         showToast("已保存评论");
         return { ok: true, message: "已保存评论" };
@@ -2444,6 +2452,16 @@ export function mountMemosHome(root) {
     }
     renderPinned();
     if (state.activeView === "memos") renderFeed();
+  }
+
+  function toggleMemoComments(memoId) {
+    if (!memoId) return;
+    if (state.expandedCommentListMemoIds.has(memoId)) {
+      state.expandedCommentListMemoIds.delete(memoId);
+    } else {
+      state.expandedCommentListMemoIds.add(memoId);
+    }
+    renderFeed();
   }
 
   function cancelEdit() {
@@ -3370,6 +3388,7 @@ export function mountMemosHome(root) {
         state.projects,
         {
           comments: commentsForMemo(memo.id),
+          commentsExpanded: state.expandedCommentListMemoIds.has(memo.id),
           commenting: state.commentingMemoId === memo.id,
           editingCommentId: state.commentEditingId,
           sourceDraft: state.sourceEditingId === memo.id ? state.sourceDraft : "",
@@ -5123,6 +5142,9 @@ export function mountDetachedMemoWindow(root, options = {}) {
   }
 
   function forgetDetachedWindowOpenState() {
+    if (state.windowSession && state.windowSession.forget) {
+      return state.windowSession.forget();
+    }
     if (typeof invoke !== "function" || !state.windowName) return Promise.resolve(null);
     return invoke("/api/window/opened/forget?name=" + encodeURIComponent(state.windowName), { method: "GET" }).catch(function () {});
   }

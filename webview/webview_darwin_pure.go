@@ -673,15 +673,19 @@ func cleanupWindow(nsWindow cocoa.ID) {
 		return
 	}
 	mapLock.Lock()
-	defer mapLock.Unlock()
-
 	wkWebView := windowWebViewMap[uintptr(nsWindow)]
 	delete(windowWebViewMap, uintptr(nsWindow))
 	delete(windowDelegateMap, uintptr(nsWindow))
 	if wkWebView == 0 {
+		mapLock.Unlock()
 		return
 	}
 
+	opts := webviewMap[uintptr(wkWebView)]
+	name := webviewNameMap[uintptr(wkWebView)]
+	if name == "" && opts != nil {
+		name = strings.TrimSpace(opts.Name)
+	}
 	delete(webviewMap, uintptr(wkWebView))
 	delete(nsWindowMap, uintptr(wkWebView))
 	if name := webviewNameMap[uintptr(wkWebView)]; name != "" {
@@ -695,6 +699,11 @@ func cleanupWindow(nsWindow cocoa.ID) {
 	}
 	if globalWebView == wkWebView {
 		globalWebView = 0
+	}
+	mapLock.Unlock()
+
+	if opts != nil && opts.HandleClose != nil {
+		go opts.HandleClose(name)
 	}
 }
 

@@ -114,6 +114,7 @@ func registerUpdateAndWindowRoutes(b *velo.Box, appUpdater *updater.AppUpdater) 
 			Height:     spec.Height,
 			EntryPage:  spec.EntryPage,
 			FrontendFS: appAssets.FrontendFS,
+			OnClose:    forgetPersistedOpenWindowOnClose(b.Store, nil),
 		})
 		return c.Ok(velo.H{"success": true})
 	})

@@ -424,6 +424,15 @@ func (b *electronBackend) handleEvent(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		b.states[name] = electronWindowState{X: event.X, Y: event.Y, Width: event.Width, Height: event.Height}
 		b.mu.Unlock()
+	case "window_closed":
+		b.mu.Lock()
+		opts := b.windows[name]
+		delete(b.windows, name)
+		delete(b.states, name)
+		b.mu.Unlock()
+		if opts != nil && opts.HandleClose != nil {
+			go opts.HandleClose(name)
+		}
 	case "drag_drop":
 		if opts := b.windowOptions(name); opts != nil && opts.HandleDragDrop != nil {
 			go opts.HandleDragDrop(event.Event, event.Payload)
@@ -693,6 +702,7 @@ function createWindow(windowConfig) {
   win.on("move", scheduleState);
   win.on("close", () => postWindowState(name, win));
   win.on("closed", () => {
+    postEvent({ type: "window_closed", name });
     windowsByName.delete(name);
     namesByWebContents.delete(win.webContents.id);
   });
