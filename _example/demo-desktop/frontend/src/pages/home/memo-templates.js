@@ -107,14 +107,10 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
 }
 
 function detachedMemoCommentsTemplate(comments, renderContext, editingCommentId = "", expandedCommentIds) {
-  const commentContext = {
-    ...renderContext,
-    showLineNumbers: false,
-  };
   return `
     <section class="memo-window-comments" aria-label="评论">
       <div class="memo-window-comments-title">评论</div>
-      <div class="memo-comment-list">${comments.map((comment) => detachedMemoCommentTemplate(comment, commentContext, editingCommentId, expandedCommentIds)).join("")}</div>
+      <div class="memo-comment-list">${comments.map((comment) => detachedMemoCommentTemplate(comment, renderContext, editingCommentId, expandedCommentIds)).join("")}</div>
     </section>
   `;
 }
@@ -124,7 +120,7 @@ function detachedMemoCommentTemplate(comment, renderContext, editingCommentId = 
   const editing = comment.id === editingCommentId;
   const expanded = expandedCommentIds && typeof expandedCommentIds.has === "function" ? expandedCommentIds.has(comment.id) : false;
   const expandLabel = expanded ? "收起" : "展开";
-  const content = renderMemoCommentContent(comment, renderContext);
+  const content = renderMemoCommentContent(comment, commentRenderContext(renderContext, comment));
   return `
     <article class="memo-comment memo-window-comment ${editing ? "is-editing" : ""}" data-comment-id="${escapeAttr(comment.id)}">
       <header class="memo-comment-head">
@@ -306,6 +302,10 @@ function shellTemplate() {
             <button class="memo-icon-text-button" type="button" data-action="openSlimMemos" title="打开精简版">
               ${SVG.list}
               <span>精简版</span>
+            </button>
+            <button class="memo-icon-text-button" type="button" data-action="openSlimGTD" title="打开精简代办窗口">
+              ${SVG.check}
+              <span>代办</span>
             </button>
             <button class="memo-icon-text-button" type="button" data-action="sortMemos" title="排序">
               ${SVG.sort}
@@ -711,10 +711,6 @@ function memoCardTagsTemplate(tags, options = {}) {
 }
 
 function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "", commentsExpanded = false) {
-  const commentContext = {
-    ...renderContext,
-    showLineNumbers: false,
-  };
   const editingIndex = editingCommentId
     ? comments.findIndex((comment) => comment && comment.id === editingCommentId)
     : -1;
@@ -725,7 +721,7 @@ function memoCommentSectionTemplate(comments, commenting, renderContext, editing
     : comments;
   const commentListClass = expanded ? "is-expanded" : "is-collapsed";
   const commentItemsHTML = visibleComments
-    .map((comment) => memoCommentTemplate(comment, commentContext, editingCommentId))
+    .map((comment) => memoCommentTemplate(comment, renderContext, editingCommentId))
     .join("");
   const hiddenCount = Math.max(0, comments.length - visibleComments.length);
   const toggleLabel = expanded ? `收起到 ${MEMO_COMMENT_PREVIEW_LIMIT} 条` : `展开剩余 ${hiddenCount} 条评论`;
@@ -771,7 +767,7 @@ function memoCommentSectionTemplate(comments, commenting, renderContext, editing
 function memoCommentTemplate(comment, renderContext, editingCommentId = "") {
   const time = comment.updatedAt || comment.createdAt;
   const editing = comment.id === editingCommentId;
-  const content = renderMemoCommentContent(comment, renderContext);
+  const content = renderMemoCommentContent(comment, commentRenderContext(renderContext, comment));
   return `
     <article class="memo-comment ${editing ? "is-editing" : ""}" data-comment-id="${escapeAttr(comment.id)}">
       <header class="memo-comment-head">
@@ -819,6 +815,21 @@ function renderMemoCommentContent(comment, renderContext) {
   }
 }
 
+function commentRenderContext(renderContext, comment) {
+  const commentId = String((comment && comment.id) || "").trim();
+  const memoId = String((comment && comment.memoId) || "").trim();
+  return {
+    ...renderContext,
+    readonly: false,
+    showLineNumbers: false,
+    sourceCommentId: commentId,
+    sourceId: commentId || (renderContext && renderContext.sourceId) || "",
+    sourceMemoId: memoId || (renderContext && renderContext.sourceMemoId) || (renderContext && renderContext.sourceId) || "",
+    sourceType: "comment",
+    stack: commentId ? [commentId] : (renderContext && renderContext.stack) || [],
+  };
+}
+
 function todoGroupTemplate(label, todos, renderContextFor, projects = []) {
   if (!todos.length) return "";
   return `
@@ -836,14 +847,15 @@ function todoTemplate(todo, renderContext, projects = []) {
   const visibility = VISIBILITY[todo.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const tags = extractTags(todo.memo.content);
   const projectBadge = projectBadgeTemplate(todo.memo.projectId, projects);
+  const commentAttr = todo.sourceCommentId ? ` data-comment-id="${escapeAttr(todo.sourceCommentId)}"` : "";
   return `
-    <article class="memo-todo-card ${todo.checked ? "is-complete" : ""}" data-memo-id="${escapeAttr(todo.memoId)}">
+    <article class="memo-todo-card ${todo.checked ? "is-complete" : ""}" data-memo-id="${escapeAttr(todo.memoId)}"${commentAttr}>
       <div class="memo-todo-check">
         <input type="checkbox" data-task-line="${todo.lineIndex}" ${todo.checked ? "checked" : ""} />
         <span>${inlineMarkdown(todo.text, renderContext)}</span>
       </div>
       <div class="memo-todo-source">
-        ${sourceMemoMarkerTemplate(todo.memoId)}
+        ${sourceReferenceMarkerTemplate(todo)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(todo.memo.createdAt)}">${formatRelativeDate(todo.memo.createdAt)}</time>
           ${projectBadge}
@@ -914,7 +926,7 @@ function taskCardTemplate(task, context) {
   const dueLabel = task.dueAt ? formatTaskDate(task.dueAt) : "";
   const startLabel = task.startAt ? formatTaskDate(task.startAt) : "";
   const completedLabel = complete && task.completedAt ? formatTaskDateTime(task.completedAt) : "";
-  const sourceMemoId = taskLinkedMemoId(task);
+  const source = taskLinkedSource(task);
   return `
     <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-task-id="${escapeAttr(task.id)}">
       <label class="memo-task-check">
@@ -935,7 +947,7 @@ function taskCardTemplate(task, context) {
           ${completedLabel ? `<time datetime="${escapeAttr(task.completedAt)}">完成 ${escapeHTML(completedLabel)}</time>` : ""}
           ${task.noteCount ? `<span>${task.noteCount} notes</span>` : ""}
           ${task.subtaskCount ? `<span>${task.subtaskCount} subtasks</span>` : ""}
-          ${sourceMemoId ? sourceMemoMarkerTemplate(sourceMemoId) : ""}
+          ${source.memoId ? sourceMemoMarkerTemplate(source.memoId, { commentId: source.commentId, type: source.type }) : ""}
           ${(task.contexts || []).slice(0, 3).map((item) => `<span>@${escapeHTML(item)}</span>`).join("")}
           ${(task.tags || []).slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
         </div>
@@ -943,20 +955,36 @@ function taskCardTemplate(task, context) {
       <div class="memo-task-actions">
         <button class="memo-action-button" type="button" data-action="addTaskNote" title="添加 note">${SVG.edit}</button>
         <button class="memo-action-button" type="button" data-action="copyTaskRef" title="复制引用">${SVG.link}</button>
+        <button class="memo-action-button is-danger" type="button" data-action="deleteTask" title="删除">${SVG.trash}</button>
       </div>
     </article>
   `;
 }
 
-function taskLinkedMemoId(task) {
+function taskLinkedSource(task) {
   const source = task && task.source ? task.source : {};
-  const memoId = String(source.memoId || "").trim();
-  return memoId;
+  return {
+    commentId: String(source.commentId || "").trim(),
+    memoId: String(source.memoId || "").trim(),
+    type: String(source.type || "").trim().toLowerCase(),
+  };
 }
 
-function sourceMemoMarkerTemplate(memoId) {
+function sourceReferenceMarkerTemplate(item) {
+  const memoId = String((item && (item.sourceMemoId || item.memoId)) || "").trim();
+  return sourceMemoMarkerTemplate(memoId, {
+    commentId: String((item && item.sourceCommentId) || "").trim(),
+    type: String((item && item.sourceType) || "").trim().toLowerCase(),
+  });
+}
+
+function sourceMemoMarkerTemplate(memoId, options = {}) {
+  const commentId = String((options && options.commentId) || "").trim();
+  const sourceType = String((options && options.type) || (commentId ? "comment" : "memo")).trim().toLowerCase();
+  const title = sourceType === "comment" ? "有关联评论" : "有关联 memo";
+  if (!memoId) return "";
   return `
-    <button class="memo-source-marker" type="button" data-action="openSourceMemo" data-memo-id="${escapeAttr(memoId)}" title="有关联 memo" aria-label="有关联 memo">
+    <button class="memo-source-marker" type="button" data-action="openSourceMemo" data-memo-id="${escapeAttr(memoId)}" data-source-memo-id="${escapeAttr(memoId)}" ${commentId ? `data-source-comment-id="${escapeAttr(commentId)}"` : ""} data-source-type="${escapeAttr(sourceType)}" title="${title}" aria-label="${title}">
       ${SVG.link}
     </button>
   `;
@@ -1076,6 +1104,7 @@ function gtdItemCardTemplate(item, context) {
         ${item.status === "open" ? `<button class="memo-action-button" type="button" data-action="triageGTDItem" title="标记已澄清">${SVG.check}</button>` : ""}
         ${!closed ? `<button class="memo-action-button" type="button" data-action="waitGTDItem" title="标记等待">${SVG.clock}</button>` : ""}
         ${!closed ? `<button class="memo-action-button" type="button" data-action="closeGTDItem" title="关闭">${SVG.archive}</button>` : ""}
+        <button class="memo-action-button is-danger" type="button" data-action="deleteGTDItem" title="删除">${SVG.trash}</button>
       </div>
     </article>
   `;
@@ -1188,7 +1217,7 @@ function linkTemplate(link) {
       </a>
       <button class="memo-action-button memo-link-copy-button" type="button" data-action="copyLink" title="复制链接" aria-label="复制链接">${SVG.copy}</button>
       <div class="memo-resource-source">
-        ${sourceMemoMarkerTemplate(link.memoId)}
+        ${sourceReferenceMarkerTemplate(link)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(link.memo.createdAt)}">${formatRelativeDate(link.memo.createdAt)}</time>
           <span>${SVG[visibility.icon]} ${visibility.label}</span>
@@ -1227,7 +1256,7 @@ function codeBlockTemplate(block) {
       </div>
       <pre class="memo-code-block-preview"><code>${escapeHTML(preview)}</code></pre>
       <div class="memo-resource-source">
-        ${sourceMemoMarkerTemplate(block.memoId)}
+        ${sourceReferenceMarkerTemplate(block)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(block.memo.createdAt)}">${formatRelativeDate(block.memo.createdAt)}</time>
           <span>${SVG[visibility.icon]} ${visibility.label}</span>
@@ -1273,7 +1302,7 @@ function resourceTemplate(resource) {
     <article class="memo-resource-card is-${resource.type}" data-memo-id="${escapeAttr(resource.memoId)}">
       ${target}
       <div class="memo-resource-source">
-        ${sourceMemoMarkerTemplate(resource.memoId)}
+        ${sourceReferenceMarkerTemplate(resource)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(resource.memo.createdAt)}">${formatRelativeDate(resource.memo.createdAt)}</time>
           <span>${SVG[visibility.icon]} ${visibility.label}</span>

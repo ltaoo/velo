@@ -148,13 +148,17 @@ export function codeBlockView(memo, lines, block, endLineIndex) {
     aliases,
     code,
     endLineIndex,
-    id: `${memo.id}:${block.startLineIndex}:${endLineIndex}:code`,
+    id: `${sourceId(memo)}:${block.startLineIndex}:${endLineIndex}:code`,
     label,
     language,
     lineIndex: block.startLineIndex,
     marked: Boolean(marker),
     memo,
-    memoId: memo.id,
+    memoId: sourceMemoId(memo),
+    sourceCommentId: sourceCommentId(memo),
+    sourceId: sourceId(memo),
+    sourceMemoId: sourceMemoId(memo),
+    sourceType: sourceType(memo),
     sourceText: sourceTextFromLines(lines, block.startLineIndex, "仅包含代码块的 memo"),
     syntax: "fenced",
     title,
@@ -257,16 +261,36 @@ export function uniqueStrings(items) {
 
 export function referenceView(memo, lines, lineIndex, index, reference) {
   return {
-    id: `${memo.id}:${lineIndex}:${index}:${reference.type}`,
+    id: `${sourceId(memo)}:${lineIndex}:${index}:${reference.type}`,
     label: reference.label,
     lineIndex,
     memo,
-    memoId: memo.id,
+    memoId: sourceMemoId(memo),
+    sourceCommentId: sourceCommentId(memo),
+    sourceId: sourceId(memo),
+    sourceMemoId: sourceMemoId(memo),
+    sourceType: sourceType(memo),
     sourceText: memoSourceTextForResource(lines, lineIndex),
     syntax: reference.syntax,
     type: reference.type,
     url: reference.url,
   };
+}
+
+function sourceId(memo) {
+  return String((memo && memo.sourceId) || (memo && memo.id) || "").trim();
+}
+
+function sourceMemoId(memo) {
+  return String((memo && memo.sourceMemoId) || (memo && memo.id) || "").trim();
+}
+
+function sourceCommentId(memo) {
+  return String((memo && memo.sourceCommentId) || "").trim();
+}
+
+function sourceType(memo) {
+  return String((memo && memo.sourceType) || "memo").trim().toLowerCase() || "memo";
 }
 
 export function memoSourceTextForResource(lines, lineIndex) {

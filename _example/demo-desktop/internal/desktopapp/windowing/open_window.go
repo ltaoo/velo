@@ -147,6 +147,12 @@ func BuildOpenWindowSpec(req OpenWindowRequest) WindowSpec {
 		spec.Title = "Memos"
 		spec.Width = 430
 		spec.Height = 640
+	case "/gtd-slim":
+		spec.EntryPage = "gtd-slim.html"
+		spec.Name = "gtd-slim"
+		spec.Title = "Todos"
+		spec.Width = 420
+		spec.Height = 640
 	}
 	return spec
 }

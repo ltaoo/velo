@@ -140,6 +140,15 @@ export function closeGTDItem(id) {
   });
 }
 
+export function deleteGTDItem(id) {
+  const itemId = normalizeGTDID(id);
+  if (!itemId) return Promise.reject(new Error("item id is required"));
+  return callNativeAPI("/api/gtd/items/delete", {
+    method: "POST",
+    args: { id: itemId },
+  });
+}
+
 export function loadGTDMilestones() {
   return callNativeAPI("/api/gtd/milestones", { method: "GET" }).then(function (data) {
     return Array.isArray(data.milestones) ? data.milestones.map(normalizeGTDMilestone).filter(Boolean) : [];

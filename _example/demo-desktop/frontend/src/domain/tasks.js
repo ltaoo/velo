@@ -141,6 +141,8 @@ export function normalizeTaskRepeatEnd(end) {
 export function normalizeTaskSource(source) {
   const value = source && typeof source === "object" ? source : {};
   return {
+    commentId: String(value.commentId || "").trim(),
+    commentPath: String(value.commentPath || "").trim(),
     line: Number.isFinite(Number(value.line)) ? Math.max(0, Number(value.line)) : 0,
     memoId: String(value.memoId || "").trim(),
     memoPath: String(value.memoPath || "").trim(),
