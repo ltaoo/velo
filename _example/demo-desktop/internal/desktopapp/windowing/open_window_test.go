@@ -47,3 +47,13 @@ func TestBuildOpenWindowSpecImagePreviewIncludesID(t *testing.T) {
 		t.Fatalf("spec = %#v, want image preview window", spec)
 	}
 }
+
+func TestBuildOpenWindowSpecGTDSlim(t *testing.T) {
+	spec := BuildOpenWindowSpec(OpenWindowRequest{Pathname: "/gtd-slim"})
+	if spec.Pathname != "/gtd-slim" {
+		t.Fatalf("pathname = %q, want /gtd-slim", spec.Pathname)
+	}
+	if spec.Name != "gtd-slim" || spec.EntryPage != "gtd-slim.html" || spec.Title != "Todos" || spec.Width != 420 || spec.Height != 640 {
+		t.Fatalf("spec = %#v, want gtd slim window", spec)
+	}
+}

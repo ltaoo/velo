@@ -25,6 +25,7 @@ import {
   completeTask,
   createTask,
   createTaskNote,
+  deleteTask,
   loadTasks,
   normalizeTaskSummary,
   updateTask,
@@ -33,6 +34,7 @@ import {
   closeGTDItem,
   createGTDItem,
   createGTDMilestone,
+  deleteGTDItem,
   loadGTDItems,
   loadGTDMilestones,
   normalizeGTDItem,
@@ -177,6 +179,42 @@ function copyInlineLinkFromAction(action, notify) {
     () => notify("已复制链接"),
     () => notify("复制失败"),
   );
+}
+
+function memoDocumentsWithComments(memos, comments, allMemos) {
+  const memoList = Array.isArray(memos) ? memos.filter(Boolean) : [];
+  const parentList = Array.isArray(allMemos) ? allMemos.filter(Boolean) : memoList;
+  const parentById = new Map(parentList.map((memo) => [memo.id, memo]));
+  const scopedMemoIds = new Set(memoList.map((memo) => memo.id));
+  const documents = memoList.slice();
+  (Array.isArray(comments) ? comments : []).forEach(function (comment) {
+    if (!comment || !comment.id || !comment.memoId || !scopedMemoIds.has(comment.memoId)) return;
+    const parent = parentById.get(comment.memoId);
+    if (!parent) return;
+    documents.push(memoCommentDocument(comment, parent));
+  });
+  return documents;
+}
+
+function memoCommentDocument(comment, parent) {
+  return {
+    archived: Boolean(parent && parent.archived),
+    content: String((comment && comment.content) || ""),
+    createdAt: (comment && comment.createdAt) || (parent && parent.createdAt) || new Date().toISOString(),
+    id: String((comment && comment.id) || ""),
+    memoId: String((comment && comment.memoId) || ""),
+    path: String((comment && comment.path) || ""),
+    pinned: false,
+    projectId: String((parent && parent.projectId) || ""),
+    references: Array.isArray(comment && comment.references) ? comment.references : [],
+    sourceCommentId: String((comment && comment.id) || ""),
+    sourceId: String((comment && comment.id) || ""),
+    sourceMemoId: String((comment && comment.memoId) || ""),
+    sourceType: "comment",
+    tags: Array.isArray(comment && comment.tags) ? comment.tags : [],
+    updatedAt: (comment && comment.updatedAt) || "",
+    visibility: (parent && parent.visibility) || DEFAULT_VISIBILITY,
+  };
 }
 
 function scrollMemoTocLine(control) {
@@ -840,6 +878,9 @@ export function mountMemosHome(root) {
       case "copyTaskRef":
         copyTaskRef(taskId);
         break;
+      case "deleteTask":
+        deleteExistingTask(taskId);
+        break;
       case "triageGTDItem":
         updateExistingGTDItem(gtdItemId, { status: "triaged" }, "已标记为已澄清");
         break;
@@ -848,6 +889,9 @@ export function mountMemosHome(root) {
         break;
       case "closeGTDItem":
         closeExistingGTDItem(gtdItemId);
+        break;
+      case "deleteGTDItem":
+        deleteExistingGTDItem(gtdItemId);
         break;
       case "activateGTDMilestone":
         updateExistingGTDMilestone(gtdMilestoneId, { status: "active" }, "里程碑已开始");
@@ -900,8 +944,11 @@ export function mountMemosHome(root) {
       case "openSlimMemos":
         openSlimMemos();
         break;
+      case "openSlimGTD":
+        openSlimGTD();
+        break;
       case "openSourceMemo":
-        openSourceMemo(memoId);
+        openSourceMemo(action.dataset.sourceMemoId || memoId, action.dataset.sourceCommentId || "");
         break;
       case "restoreMemo":
         updateMemo(memoId, { archived: false });
@@ -1295,6 +1342,26 @@ export function mountMemosHome(root) {
     );
   }
 
+  function openSlimGTD() {
+    if (typeof invoke !== "function") {
+      window.open("gtd-slim.html", "_blank", "noopener");
+      return;
+    }
+
+    invoke("/api/open_window?pathname=%2Fgtd-slim", { method: "GET" }).then(
+      function (resp) {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开精简代办失败");
+          return;
+        }
+        showToast("已打开精简代办");
+      },
+      function (err) {
+        showToast("打开精简代办失败: " + err);
+      },
+    );
+  }
+
   function detachMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
@@ -1437,7 +1504,7 @@ export function mountMemosHome(root) {
         };
       });
 
-    const codeResults = collectCodeBlocks(state.memos)
+    const codeResults = collectCodeBlocks(memoDocumentsWithComments(state.memos, state.comments, state.memos))
       .filter(function (block) {
         if (!query) return block.marked;
         return matchesSearchQuery(codeBlockSearchText(block), query);
@@ -1543,12 +1610,14 @@ export function mountMemosHome(root) {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
 
-  function focusMemo(memoId) {
+  function focusMemo(memoId, options = {}) {
     const memo = findMemo(memoId);
     if (!memo) {
       showToast("找不到引用的 memo");
       return;
     }
+    const commentId = String(options.commentId || "").trim();
+    if (commentId) state.expandedCommentListMemoIds.add(memo.id);
 
     state.activeView = "memos";
     state.activeFilter = memo.archived ? "archive" : "all";
@@ -1564,7 +1633,9 @@ export function mountMemosHome(root) {
     renderAll();
 
     window.requestAnimationFrame(function () {
-      const target = els.memoList.querySelector(`[data-memo-id="${escapeCSSIdent(memoId)}"]`);
+      const target = commentId
+        ? els.memoList.querySelector(`[data-comment-id="${escapeCSSIdent(commentId)}"]`)
+        : els.memoList.querySelector(`[data-memo-id="${escapeCSSIdent(memoId)}"]`);
       if (!target) return;
       target.scrollIntoView({ block: "center", behavior: "smooth" });
       target.classList.add("is-highlighted");
@@ -1576,8 +1647,8 @@ export function mountMemosHome(root) {
     });
   }
 
-  function openSourceMemo(memoId) {
-    focusMemo(memoId);
+  function openSourceMemo(memoId, commentId = "") {
+    focusMemo(memoId, { commentId });
   }
 
   function selectProjectFilter(value) {
@@ -1696,6 +1767,11 @@ export function mountMemosHome(root) {
     }
 
     if (event.target.matches("[data-task-line]")) {
+      const commentNode = closestElement(event.target, "[data-comment-id]");
+      if (commentNode) {
+        toggleCommentTask(commentNode.dataset.commentId, Number(event.target.dataset.taskLine), event.target.checked);
+        return;
+      }
       const memoNode = closestElement(event.target, "[data-memo-id]");
       if (!memoNode) return;
       toggleTask(memoNode.dataset.memoId, Number(event.target.dataset.taskLine), event.target.checked);
@@ -2104,6 +2180,23 @@ export function mountMemosHome(root) {
     );
   }
 
+  function deleteExistingGTDItem(itemId) {
+    const id = String(itemId || "").trim();
+    if (!id) return;
+    if (!window.confirm("删除这个 GTD 事项？")) return;
+    deleteGTDItem(id).then(
+      function () {
+        state.gtdItems = state.gtdItems.filter((entry) => entry.id !== id);
+        renderAll();
+        showToast("已删除事项");
+      },
+      function (err) {
+        showToast("删除事项失败: " + errorMessage(err));
+        refreshGTDFromVault();
+      },
+    );
+  }
+
   function toggleExistingGTDItemCompletion(itemId, checkbox) {
     const id = String(itemId || "").trim();
     if (!id || !checkbox) return;
@@ -2169,6 +2262,24 @@ export function mountMemosHome(root) {
         checkbox.checked = !checked;
         checkbox.disabled = false;
         showToast((checked ? "完成任务失败: " : "取消完成失败: ") + errorMessage(err));
+      },
+    );
+  }
+
+  function deleteExistingTask(taskId) {
+    const id = String(taskId || "").trim();
+    if (!id) return;
+    if (!window.confirm("删除这个代办？")) return;
+    deleteTask(id).then(
+      function () {
+        state.tasks = state.tasks.filter((entry) => entry.id !== id);
+        state.retainedCompletedTaskFilters.delete(id);
+        renderAll();
+        showToast("已删除代办");
+      },
+      function (err) {
+        showToast("删除代办失败: " + errorMessage(err));
+        refreshTasksFromVault();
       },
     );
   }
@@ -2313,6 +2424,7 @@ export function mountMemosHome(root) {
         state.commentDraft = "";
         state.commentPreviewVisible = false;
         renderFeed();
+        refreshTasksFromVault();
         if (options.source !== "vim-wq") showToast("已添加评论");
         return { ok: true, message: "已添加评论" };
       },
@@ -2345,6 +2457,7 @@ export function mountMemosHome(root) {
         state.commentEditPreviewVisible = false;
         if (comment.memoId) state.expandedCommentListMemoIds.add(comment.memoId);
         renderFeed();
+        refreshTasksFromVault();
         showToast("已保存评论");
         return { ok: true, message: "已保存评论" };
       },
@@ -2774,6 +2887,25 @@ export function mountMemosHome(root) {
     });
   }
 
+  function toggleCommentTask(commentId, lineIndex, checked) {
+    const comment = findComment(commentId);
+    if (!comment) return;
+    const lines = String(comment.content || "").split("\n");
+    if (!lines[lineIndex]) return;
+    lines[lineIndex] = updateTaskLine(lines[lineIndex], checked);
+    updateMemoCommentInVault(comment.id, { content: lines.join("\n") }).then(
+      function (updated) {
+        upsertCommentInState(updated);
+        renderAll();
+        refreshTasksFromVault();
+      },
+      function (err) {
+        showToast("更新评论代办失败: " + errorMessage(err));
+        renderAll();
+      },
+    );
+  }
+
   function deleteMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
@@ -2786,7 +2918,7 @@ export function mountMemosHome(root) {
   function deleteMemoWithOptions(memo, options) {
     const memoId = memo.id;
     const preserveTodos = options.todoCount > 0 && !options.deleteTodos;
-    const preservePromise = preserveTodos ? createMemoFromTodoItems(memo) : Promise.resolve(null);
+    const preservePromise = preserveTodos ? createMemoFromTodoItems(memo, commentsForMemo(memo.id)) : Promise.resolve(null);
 
     preservePromise.then(function (preservedMemo) {
       deleteMemoInVault(memoId, { cleanupAssets: options.deleteFiles, deleteTasks: options.deleteTodos }).then(
@@ -2824,20 +2956,22 @@ export function mountMemosHome(root) {
     });
   }
 
-  function createMemoFromTodoItems(memo) {
-    const lines = String(memo.content || "").replace(/\r\n/g, "\n").split("\n");
-    let activeFence = null;
-    const todoLines = lines.filter(function (line) {
-      const fence = parseMemoFenceLine(line);
-      if (activeFence) {
-        if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
-        return false;
-      }
-      if (fence) {
-        activeFence = fence;
-        return false;
-      }
-      return parseTaskLine(line);
+  function createMemoFromTodoItems(memo, comments = []) {
+    const todoLines = [memo].concat(Array.isArray(comments) ? comments : []).flatMap(function (source) {
+      const lines = String((source && source.content) || "").replace(/\r\n/g, "\n").split("\n");
+      let activeFence = null;
+      return lines.filter(function (line) {
+        const fence = parseMemoFenceLine(line);
+        if (activeFence) {
+          if (fence && isMemoFenceClosingLine(line, activeFence)) activeFence = null;
+          return false;
+        }
+        if (fence) {
+          activeFence = fence;
+          return false;
+        }
+        return parseTaskLine(line);
+      });
     });
     const content = todoLines.join("\n").trim();
     if (!content) return Promise.resolve(null);
@@ -2850,7 +2984,7 @@ export function mountMemosHome(root) {
 
   function confirmDeleteMemo(memo) {
     const fileCount = collectManagedResources([memo].concat(commentsForMemo(memo.id))).length;
-    const todoCount = collectTodos([memo]).length;
+    const todoCount = collectTodos([memo].concat(commentsForMemo(memo.id))).length;
 
     return new Promise(function (resolve) {
       const dialog = document.createElement("div");
@@ -2978,7 +3112,7 @@ export function mountMemosHome(root) {
   }
 
   function copyCodeBlock(action) {
-    copyCodeBlockFromAction(action, scopedMemos(), showToast);
+    copyCodeBlockFromAction(action, scopedMemoDocuments(), showToast);
   }
 
   function copyLink(action) {
@@ -3117,13 +3251,13 @@ export function mountMemosHome(root) {
     root.querySelectorAll("[data-view]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.view === state.activeView);
     });
-    const memos = scopedMemos();
+    const documents = scopedMemoDocuments();
     const todoStats = getTaskStats(scopedTasks());
-    const linkCount = collectLinks(memos).length;
-    const codeBlocks = collectCodeBlocks(memos);
+    const linkCount = collectLinks(documents).length;
+    const codeBlocks = collectCodeBlocks(documents);
     const codeSnippetCount = codeBlocks.filter((block) => block.marked).length;
     const codeBlockCount = codeBlocks.length;
-    const resourceCount = collectResources(memos).length;
+    const resourceCount = collectResources(documents).length;
     const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
     const activeMilestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
     els.todoNavCount.textContent = todoStats.open ? String(todoStats.open) : "";
@@ -3157,9 +3291,10 @@ export function mountMemosHome(root) {
     const taskStats = getTaskStats(scopedTasks());
     const openItemCount = scopedGTDItems().filter((item) => item.status !== "closed" && item.status !== "resolved").length;
     const milestoneCount = scopedGTDMilestones().filter((milestone) => milestone.status === "active" || milestone.status === "planned").length;
-    const linkCount = collectLinks(memos).length;
-    const codeSnippetCount = collectCodeBlocks(memos).filter((block) => block.marked).length;
-    const resourceStats = getResourceStats(memos);
+    const documents = scopedMemoDocuments();
+    const linkCount = collectLinks(documents).length;
+    const codeSnippetCount = collectCodeBlocks(documents).filter((block) => block.marked).length;
+    const resourceStats = getResourceStats(documents);
 
     els.stats.innerHTML = [
       statTemplate("全部", active.length),
@@ -3785,7 +3920,7 @@ export function mountMemosHome(root) {
 
   function visibleTodos() {
     const query = state.query.toLowerCase();
-    return collectTodos(scopedMemos())
+    return collectTodos(scopedMemoDocuments())
       .filter((todo) => {
         if (state.activeTag && !extractTags(todo.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -4075,7 +4210,7 @@ export function mountMemosHome(root) {
 
   function visibleLinks() {
     const query = state.query.toLowerCase();
-    return collectLinks(scopedMemos())
+    return collectLinks(scopedMemoDocuments())
       .filter((link) => {
         if (state.activeTag && !extractTags(link.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -4086,7 +4221,7 @@ export function mountMemosHome(root) {
 
   function visibleCodeBlocks() {
     const query = state.query.toLowerCase();
-    return collectCodeBlocks(scopedMemos())
+    return collectCodeBlocks(scopedMemoDocuments())
       .filter((block) => {
         if (state.activeTag && !extractTags(block.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -4125,7 +4260,7 @@ export function mountMemosHome(root) {
 
   function visibleResources() {
     const query = state.query.toLowerCase();
-    return collectResources(scopedMemos())
+    return collectResources(scopedMemoDocuments())
       .filter((resource) => {
         if (state.activeTag && !extractTags(resource.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
@@ -4142,6 +4277,10 @@ export function mountMemosHome(root) {
       return state.memos.filter((memo) => memo.projectId === state.activeProjectFilter);
     }
     return state.memos;
+  }
+
+  function scopedMemoDocuments() {
+    return memoDocumentsWithComments(scopedMemos(), state.comments, state.memos);
   }
 
   function projectMemoCount(projectId) {
@@ -4819,7 +4958,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
         copyDetachedMemoRef();
         break;
       case "copyCodeBlock":
-        copyCodeBlockFromAction(action, state.memos, showToast);
+        copyCodeBlockFromAction(action, detachedMemoDocuments(), showToast);
         break;
       case "copyInlineLink":
         event.preventDefault();
@@ -4832,6 +4971,13 @@ export function mountDetachedMemoWindow(root, options = {}) {
   }
 
   function handleChange(event) {
+    if (event.target.matches("[data-task-line]")) {
+      const commentNode = closestElement(event.target, "[data-comment-id]");
+      if (commentNode) {
+        toggleDetachedCommentTask(commentNode.dataset.commentId, Number(event.target.dataset.taskLine), event.target.checked);
+      }
+      return;
+    }
     if (event.target !== els.commentFileInput) return;
     const files = Array.from(els.commentFileInput.files || []);
     els.commentFileInput.value = "";
@@ -4888,6 +5034,32 @@ export function mountDetachedMemoWindow(root, options = {}) {
       state.commentExpandedIds.add(commentId);
     }
     renderDetachedMemo();
+  }
+
+  function toggleDetachedCommentTask(commentId, lineIndex, checked) {
+    const comment = state.comments.find((item) => item && item.id === commentId);
+    if (!comment || state.commentSaving) return;
+    const lines = String(comment.content || "").split("\n");
+    if (!lines[lineIndex]) return;
+    lines[lineIndex] = updateTaskLine(lines[lineIndex], checked);
+    state.commentSaving = true;
+    syncDetachedCommentForm();
+    updateMemoCommentInVault(comment.id, { content: lines.join("\n") }).then(
+      function (updated) {
+        const normalized = normalizeMemoCommentPayload(updated);
+        if (normalized) {
+          state.comments = state.comments.map((item) => item.id === normalized.id ? normalized : item);
+        }
+        renderDetachedMemo();
+      },
+      function (err) {
+        showToast("更新评论代办失败: " + errorMessage(err));
+        renderDetachedMemo();
+      },
+    ).finally(function () {
+      state.commentSaving = false;
+      syncDetachedCommentForm();
+    });
   }
 
   function startDetachedCommentEdit(commentId) {
@@ -4950,29 +5122,93 @@ export function mountDetachedMemoWindow(root, options = {}) {
   function deleteDetachedComment(commentId) {
     const comment = state.comments.find((item) => item && item.id === commentId);
     if (!comment || state.commentSaving) return;
-    if (!window.confirm("删除这条评论？")) return;
-    state.commentSaving = true;
-    syncDetachedCommentForm();
-    deleteMemoCommentInVault(comment.id, { cleanupAssets: true }).then(
-      function () {
-        state.comments = state.comments.filter((item) => item.id !== comment.id);
-        state.commentExpandedIds.delete(comment.id);
-        if (state.commentEditingId === comment.id) {
-          destroyDetachedCommentEditEditor({ preserveDraft: false });
-          state.commentEditingId = "";
-          state.commentEditDraft = "";
-          state.commentEditPreviewVisible = false;
-        }
-        renderDetachedMemo();
-        showToast("已删除评论");
-      },
-      function (err) {
-        showToast("删除评论失败: " + errorMessage(err));
-      },
-    ).finally(function () {
-      state.commentSaving = false;
+    confirmDetachedCommentDelete(comment).then(function (confirmed) {
+      if (!confirmed || state.commentSaving) return;
+      state.commentSaving = true;
       syncDetachedCommentForm();
+      deleteMemoCommentInVault(comment.id, { cleanupAssets: true }).then(
+        function () {
+          state.comments = state.comments.filter((item) => item.id !== comment.id);
+          state.commentExpandedIds.delete(comment.id);
+          if (state.commentEditingId === comment.id) {
+            destroyDetachedCommentEditEditor({ preserveDraft: false });
+            state.commentEditingId = "";
+            state.commentEditDraft = "";
+            state.commentEditPreviewVisible = false;
+          }
+          renderDetachedMemo();
+          showToast("已删除评论");
+        },
+        function (err) {
+          showToast("删除评论失败: " + errorMessage(err));
+        },
+      ).finally(function () {
+        state.commentSaving = false;
+        syncDetachedCommentForm();
+      });
     });
+  }
+
+  function confirmDetachedCommentDelete(comment) {
+    return new Promise(function (resolve) {
+      const existing = root.querySelector("[data-detached-comment-delete-dialog]");
+      if (existing) existing.remove();
+
+      const dialog = document.createElement("div");
+      dialog.className = "memo-delete-dialog";
+      dialog.dataset.detachedCommentDeleteDialog = "true";
+      dialog.innerHTML = detachedCommentDeleteDialogTemplate(comment);
+      root.appendChild(dialog);
+
+      function close(value) {
+        document.removeEventListener("keydown", handleDialogKeydown, true);
+        dialog.remove();
+        resolve(Boolean(value));
+      }
+
+      function handleDialogKeydown(event) {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        close(false);
+      }
+
+      dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) {
+          close(false);
+          return;
+        }
+        const action = closestElement(event.target, "[data-detached-comment-delete-action]");
+        if (!action || !dialog.contains(action)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        close(action.dataset.detachedCommentDeleteAction === "confirm");
+      });
+
+      document.addEventListener("keydown", handleDialogKeydown, true);
+      window.requestAnimationFrame(function () {
+        const cancel = dialog.querySelector('[data-detached-comment-delete-action="cancel"]');
+        if (cancel) cancel.focus();
+      });
+    });
+  }
+
+  function detachedCommentDeleteDialogTemplate(comment) {
+    return `
+      <section class="memo-delete-panel" role="dialog" aria-modal="true" aria-labelledby="memo-comment-delete-title">
+        <header class="memo-delete-head">
+          <span class="memo-delete-icon">${SVG.trash}</span>
+          <div>
+            <h2 id="memo-comment-delete-title">删除评论？</h2>
+            <p>${escapeHTML(compactText(comment.content || "", 72))}</p>
+          </div>
+        </header>
+        <footer class="memo-delete-actions">
+          <button class="memo-secondary-button" type="button" data-detached-comment-delete-action="cancel">取消</button>
+          <button class="memo-primary-button is-danger" type="button" data-detached-comment-delete-action="confirm">删除</button>
+        </footer>
+      </section>
+    `;
   }
 
   function insertDetachedCommentFiles(files) {
@@ -5071,6 +5307,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
         if (left === right) return a.id.localeCompare(b.id);
         return left - right;
       });
+  }
+
+  function detachedMemoDocuments() {
+    return memoDocumentsWithComments(state.memos, state.comments, state.memos);
   }
 
   function syncDetachedCommentForm() {

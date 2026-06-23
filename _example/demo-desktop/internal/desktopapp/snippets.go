@@ -18,39 +18,47 @@ var snippetLauncherShortcuts = []string{
 }
 
 type CodeSnippet struct {
-	Aliases    []string `json:"aliases"`
-	Code       string   `json:"code"`
-	Command    string   `json:"command"`
-	CreatedAt  string   `json:"createdAt"`
-	EndLine    int      `json:"endLine"`
-	ID         string   `json:"id"`
-	Language   string   `json:"language"`
-	Marked     bool     `json:"marked"`
-	MemoID     string   `json:"memoId"`
-	MemoPath   string   `json:"memoPath"`
-	MemoTitle  string   `json:"memoTitle"`
-	ProjectID  string   `json:"projectId,omitempty"`
-	SourceText string   `json:"sourceText"`
-	StartLine  int      `json:"startLine"`
-	Title      string   `json:"title"`
-	UpdatedAt  string   `json:"updatedAt"`
-	Visibility string   `json:"visibility"`
+	Aliases      []string `json:"aliases"`
+	Code         string   `json:"code"`
+	Command      string   `json:"command"`
+	CommentID    string   `json:"commentId,omitempty"`
+	CommentPath  string   `json:"commentPath,omitempty"`
+	CreatedAt    string   `json:"createdAt"`
+	EndLine      int      `json:"endLine"`
+	ID           string   `json:"id"`
+	Language     string   `json:"language"`
+	Marked       bool     `json:"marked"`
+	MemoID       string   `json:"memoId"`
+	MemoPath     string   `json:"memoPath"`
+	MemoTitle    string   `json:"memoTitle"`
+	ProjectID    string   `json:"projectId,omitempty"`
+	SourceMemoID string   `json:"sourceMemoId,omitempty"`
+	SourceType   string   `json:"sourceType,omitempty"`
+	SourceText   string   `json:"sourceText"`
+	StartLine    int      `json:"startLine"`
+	Title        string   `json:"title"`
+	UpdatedAt    string   `json:"updatedAt"`
+	Visibility   string   `json:"visibility"`
 }
 
 type StoredLink struct {
-	CreatedAt  string `json:"createdAt"`
-	ID         string `json:"id"`
-	Label      string `json:"label"`
-	Line       int    `json:"line"`
-	MemoID     string `json:"memoId"`
-	MemoPath   string `json:"memoPath"`
-	MemoTitle  string `json:"memoTitle"`
-	ProjectID  string `json:"projectId,omitempty"`
-	SourceText string `json:"sourceText"`
-	Syntax     string `json:"syntax"`
-	UpdatedAt  string `json:"updatedAt"`
-	URL        string `json:"url"`
-	Visibility string `json:"visibility"`
+	CommentID    string `json:"commentId,omitempty"`
+	CommentPath  string `json:"commentPath,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Line         int    `json:"line"`
+	MemoID       string `json:"memoId"`
+	MemoPath     string `json:"memoPath"`
+	MemoTitle    string `json:"memoTitle"`
+	ProjectID    string `json:"projectId,omitempty"`
+	SourceMemoID string `json:"sourceMemoId,omitempty"`
+	SourceType   string `json:"sourceType,omitempty"`
+	SourceText   string `json:"sourceText"`
+	Syntax       string `json:"syntax"`
+	UpdatedAt    string `json:"updatedAt"`
+	URL          string `json:"url"`
+	Visibility   string `json:"visibility"`
 }
 
 type snippetMarker struct {
@@ -154,6 +162,11 @@ func searchVaultSnippets(ctx *VaultContext, query string, limit int) ([]CodeSnip
 	if err != nil {
 		return nil, err
 	}
+	comments, err := listVaultMemoComments(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	memoByID := memoRecordsByID(memos)
 
 	directive, term := parseSnippetSearchQuery(query)
 	if !directive {
@@ -164,6 +177,19 @@ func searchVaultSnippets(ctx *VaultContext, query string, limit int) ([]CodeSnip
 	scored := []scoredSnippet{}
 	for _, memo := range memos {
 		for _, item := range collectMemoCodeSnippets(memo) {
+			score, ok := scoreSnippetSearch(item, needle)
+			if !ok {
+				continue
+			}
+			scored = append(scored, scoredSnippet{item: item, score: score})
+		}
+	}
+	for _, comment := range comments {
+		parent, ok := memoByID[comment.MemoID]
+		if !ok {
+			continue
+		}
+		for _, item := range collectMemoCommentCodeSnippets(comment, parent) {
 			score, ok := scoreSnippetSearch(item, needle)
 			if !ok {
 				continue
@@ -202,6 +228,11 @@ func searchVaultLinks(ctx *VaultContext, query string, limit int) ([]StoredLink,
 	if err != nil {
 		return nil, err
 	}
+	comments, err := listVaultMemoComments(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	memoByID := memoRecordsByID(memos)
 
 	directive, term := parseLinkSearchQuery(query)
 	if !directive {
@@ -212,6 +243,19 @@ func searchVaultLinks(ctx *VaultContext, query string, limit int) ([]StoredLink,
 	scored := []scoredLink{}
 	for _, memo := range memos {
 		for _, item := range collectMemoLinks(memo) {
+			score, ok := scoreLinkSearch(item, needle)
+			if !ok {
+				continue
+			}
+			scored = append(scored, scoredLink{item: item, score: score})
+		}
+	}
+	for _, comment := range comments {
+		parent, ok := memoByID[comment.MemoID]
+		if !ok {
+			continue
+		}
+		for _, item := range collectMemoCommentLinks(comment, parent) {
 			score, ok := scoreLinkSearch(item, needle)
 			if !ok {
 				continue
@@ -294,6 +338,8 @@ func scoreSnippetSearch(item CodeSnippet, needle string) (int, bool) {
 		item.SourceText,
 		item.MemoTitle,
 		item.MemoPath,
+		item.CommentPath,
+		item.SourceType,
 		item.Visibility,
 		item.ProjectID,
 	}, " "))
@@ -352,6 +398,8 @@ func scoreLinkSearch(item StoredLink, needle string) (int, bool) {
 		item.URL,
 		item.MemoTitle,
 		item.MemoPath,
+		item.CommentPath,
+		item.SourceType,
 		item.ProjectID,
 		item.Visibility,
 	}, " "))
@@ -428,6 +476,17 @@ func linkSortTime(item StoredLink) time.Time {
 	return time.Time{}
 }
 
+func memoRecordsByID(memos []MemoRecord) map[string]MemoRecord {
+	byID := map[string]MemoRecord{}
+	for _, memo := range memos {
+		if strings.TrimSpace(memo.ID) == "" {
+			continue
+		}
+		byID[memo.ID] = memo
+	}
+	return byID
+}
+
 func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 	lines := memoContentLines(memo.Content)
 	items := []CodeSnippet{}
@@ -472,6 +531,15 @@ func collectMemoCodeSnippets(memo MemoRecord) []CodeSnippet {
 	return items
 }
 
+func collectMemoCommentCodeSnippets(comment MemoCommentRecord, parent MemoRecord) []CodeSnippet {
+	source := memoRecordForCommentSource(comment, parent)
+	items := collectMemoCodeSnippets(source)
+	for index := range items {
+		items[index] = codeSnippetWithCommentSource(items[index], comment, parent)
+	}
+	return items
+}
+
 func collectMemoLinks(memo MemoRecord) []StoredLink {
 	lines := memoContentLines(memo.Content)
 	items := []StoredLink{}
@@ -492,6 +560,55 @@ func collectMemoLinks(memo MemoRecord) []StoredLink {
 		items = append(items, collectMemoLineLinks(memo, lines, maskMemoInlineCode(line), index)...)
 	}
 	return items
+}
+
+func collectMemoCommentLinks(comment MemoCommentRecord, parent MemoRecord) []StoredLink {
+	source := memoRecordForCommentSource(comment, parent)
+	items := collectMemoLinks(source)
+	for index := range items {
+		items[index] = storedLinkWithCommentSource(items[index], comment, parent)
+	}
+	return items
+}
+
+func memoRecordForCommentSource(comment MemoCommentRecord, parent MemoRecord) MemoRecord {
+	return MemoRecord{
+		Content:    comment.Content,
+		CreatedAt:  comment.CreatedAt,
+		ID:         comment.ID,
+		Path:       comment.Path,
+		ProjectID:  parent.ProjectID,
+		References: comment.References,
+		Tags:       comment.Tags,
+		UpdatedAt:  comment.UpdatedAt,
+		Visibility: parent.Visibility,
+	}
+}
+
+func codeSnippetWithCommentSource(item CodeSnippet, comment MemoCommentRecord, parent MemoRecord) CodeSnippet {
+	item.CommentID = comment.ID
+	item.CommentPath = comment.Path
+	item.MemoID = parent.ID
+	item.MemoPath = parent.Path
+	item.MemoTitle = memoTitleText(parent) + " / 评论"
+	item.ProjectID = parent.ProjectID
+	item.SourceMemoID = parent.ID
+	item.SourceType = "comment"
+	item.Visibility = parent.Visibility
+	return item
+}
+
+func storedLinkWithCommentSource(item StoredLink, comment MemoCommentRecord, parent MemoRecord) StoredLink {
+	item.CommentID = comment.ID
+	item.CommentPath = comment.Path
+	item.MemoID = parent.ID
+	item.MemoPath = parent.Path
+	item.MemoTitle = memoTitleText(parent) + " / 评论"
+	item.ProjectID = parent.ProjectID
+	item.SourceMemoID = parent.ID
+	item.SourceType = "comment"
+	item.Visibility = parent.Visibility
+	return item
 }
 
 func collectMemoLineLinks(memo MemoRecord, lines []string, line string, lineIndex int) []StoredLink {
@@ -535,19 +652,21 @@ func storedLinkView(memo MemoRecord, lines []string, lineIndex int, index int, s
 		title = linkDisplayName(target)
 	}
 	return StoredLink{
-		CreatedAt:  memo.CreatedAt,
-		ID:         memo.ID + ":" + strconv.Itoa(lineIndex) + ":" + strconv.Itoa(index) + ":link",
-		Label:      title,
-		Line:       lineIndex + 1,
-		MemoID:     memo.ID,
-		MemoPath:   memo.Path,
-		MemoTitle:  memoTitleText(memo),
-		ProjectID:  memo.ProjectID,
-		SourceText: sourceTextFromMemoLines(lines, lineIndex, "仅包含链接的 memo"),
-		Syntax:     syntax,
-		UpdatedAt:  memo.UpdatedAt,
-		URL:        target,
-		Visibility: memo.Visibility,
+		CreatedAt:    memo.CreatedAt,
+		ID:           memo.ID + ":" + strconv.Itoa(lineIndex) + ":" + strconv.Itoa(index) + ":link",
+		Label:        title,
+		Line:         lineIndex + 1,
+		MemoID:       memo.ID,
+		MemoPath:     memo.Path,
+		MemoTitle:    memoTitleText(memo),
+		ProjectID:    memo.ProjectID,
+		SourceMemoID: memo.ID,
+		SourceType:   "memo",
+		SourceText:   sourceTextFromMemoLines(lines, lineIndex, "仅包含链接的 memo"),
+		Syntax:       syntax,
+		UpdatedAt:    memo.UpdatedAt,
+		URL:          target,
+		Visibility:   memo.Visibility,
 	}
 }
 
@@ -579,23 +698,25 @@ func codeSnippetView(memo MemoRecord, lines []string, block activeCodeBlock, end
 		}
 	}
 	return CodeSnippet{
-		Aliases:    aliases,
-		Code:       code,
-		Command:    command,
-		CreatedAt:  memo.CreatedAt,
-		EndLine:    endIndex + 1,
-		ID:         memo.ID + ":" + strconv.Itoa(block.StartIndex) + ":" + strconv.Itoa(endIndex) + ":code",
-		Language:   language,
-		Marked:     marker != nil,
-		MemoID:     memo.ID,
-		MemoPath:   memo.Path,
-		MemoTitle:  memoTitleText(memo),
-		ProjectID:  memo.ProjectID,
-		SourceText: sourceTextFromMemoLines(lines, block.StartIndex, "仅包含代码块的 memo"),
-		StartLine:  block.StartIndex + 1,
-		Title:      title,
-		UpdatedAt:  memo.UpdatedAt,
-		Visibility: memo.Visibility,
+		Aliases:      aliases,
+		Code:         code,
+		Command:      command,
+		CreatedAt:    memo.CreatedAt,
+		EndLine:      endIndex + 1,
+		ID:           memo.ID + ":" + strconv.Itoa(block.StartIndex) + ":" + strconv.Itoa(endIndex) + ":code",
+		Language:     language,
+		Marked:       marker != nil,
+		MemoID:       memo.ID,
+		MemoPath:     memo.Path,
+		MemoTitle:    memoTitleText(memo),
+		ProjectID:    memo.ProjectID,
+		SourceMemoID: memo.ID,
+		SourceType:   "memo",
+		SourceText:   sourceTextFromMemoLines(lines, block.StartIndex, "仅包含代码块的 memo"),
+		StartLine:    block.StartIndex + 1,
+		Title:        title,
+		UpdatedAt:    memo.UpdatedAt,
+		Visibility:   memo.Visibility,
 	}
 }
 

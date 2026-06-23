@@ -585,6 +585,118 @@ func TestCreateVaultMemoAutoCreatesTaskFromTodoLine(t *testing.T) {
 	}
 }
 
+func TestCreateVaultMemoCommentAutoCreatesTaskFromTodoLine(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	project, err := createVaultProject(ctx, ProjectCreateRequest{Name: "Reply Project"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "Parent memo",
+		ProjectID:  project.ID,
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+
+	comment, err := createVaultMemoComment(ctx, MemoCommentCreateRequest{
+		Content: "补充\n- [ ] 评论代办 ::2026-06-09 #reply\n",
+		MemoID:  memo.ID,
+	})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if !strings.Contains(comment.Content, "- [ ] [[task:") {
+		t.Fatalf("comment content = %q, want task ref", comment.Content)
+	}
+	tasks, err := listVaultTasks(ctx)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want one task", tasks)
+	}
+	task := tasks[0]
+	if task.Title != "评论代办" || task.ProjectID != project.ID {
+		t.Fatalf("task = %#v, want comment task in project", task)
+	}
+	if task.Source.Type != "comment" || task.Source.MemoID != memo.ID || task.Source.CommentID != comment.ID || task.Source.Line != 2 {
+		t.Fatalf("task source = %#v, want comment source", task.Source)
+	}
+	if !strings.Contains(comment.Content, "[[task:"+task.ID+"|评论代办]]") {
+		t.Fatalf("comment content = %q, want task title alias", comment.Content)
+	}
+
+	updatedContent := strings.Replace(comment.Content, "- [ ]", "- [x]", 1)
+	updated, err := updateVaultMemoComment(ctx, MemoCommentUpdateRequest{ID: comment.ID, Content: &updatedContent})
+	if err != nil {
+		t.Fatalf("update comment: %v", err)
+	}
+	if !strings.Contains(updated.Content, "[[task:"+task.ID) {
+		t.Fatalf("updated comment content = %q, want same task ref", updated.Content)
+	}
+	completed, err := getVaultTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get completed task: %v", err)
+	}
+	if completed.Status != taskStatusCompleted {
+		t.Fatalf("task status = %q, want completed", completed.Status)
+	}
+}
+
+func TestSearchVaultSnippetsAndLinksIncludeMemoComments(t *testing.T) {
+	ctx, _, err := openVaultDirectory(t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	memo, err := createVaultMemo(ctx, MemoCreateRequest{
+		Content:    "Parent memo",
+		Visibility: "PRIVATE",
+	})
+	if err != nil {
+		t.Fatalf("create memo: %v", err)
+	}
+	comment, err := createVaultMemoComment(ctx, MemoCommentCreateRequest{
+		Content: strings.Join([]string{
+			"#snippet Comment Curl",
+			"```sh",
+			"curl https://example.com/api",
+			"```",
+			"https://example.com/docs",
+		}, "\n"),
+		MemoID: memo.ID,
+	})
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	snippets, err := searchVaultSnippets(ctx, "snippet curl", 10)
+	if err != nil {
+		t.Fatalf("search snippets: %v", err)
+	}
+	if len(snippets) != 1 {
+		t.Fatalf("snippets = %#v, want one comment snippet", snippets)
+	}
+	if snippets[0].SourceType != "comment" || snippets[0].MemoID != memo.ID || snippets[0].CommentID != comment.ID {
+		t.Fatalf("snippet source = %#v, want comment source", snippets[0])
+	}
+
+	links, err := searchVaultLinks(ctx, "link docs", 10)
+	if err != nil {
+		t.Fatalf("search links: %v", err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("links = %#v, want one comment link", links)
+	}
+	if links[0].SourceType != "comment" || links[0].MemoID != memo.ID || links[0].CommentID != comment.ID {
+		t.Fatalf("link source = %#v, want comment source", links[0])
+	}
+}
+
 func TestCreateVaultMemoAutoCreatesTaskWithExplicitTitle(t *testing.T) {
 	ctx, _, err := openVaultDirectory(t.TempDir(), true)
 	if err != nil {

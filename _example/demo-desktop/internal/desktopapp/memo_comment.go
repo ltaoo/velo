@@ -82,7 +82,12 @@ func createVaultMemoComment(ctx *VaultContext, req MemoCommentCreateRequest) (Me
 	if memoID == "" {
 		return MemoCommentRecord{}, fmt.Errorf("memo id is required")
 	}
-	if _, err := findMemoFilePath(ctx, memoID); err != nil {
+	memoPath, err := findMemoFilePath(ctx, memoID)
+	if err != nil {
+		return MemoCommentRecord{}, err
+	}
+	memo, err := readMemoFile(ctx, memoPath)
+	if err != nil {
 		return MemoCommentRecord{}, err
 	}
 	content := normalizeMemoContent(req.Content)
@@ -99,7 +104,11 @@ func createVaultMemoComment(ctx *VaultContext, req MemoCommentCreateRequest) (Me
 		UpdatedAt: "",
 	}
 	comment.Path = memoCommentRelativePath(comment)
-	comment.Tags = extractMemoTags(comment.Content)
+	originalTags := extractMemoTags(comment.Content)
+	if err := syncMemoCommentTaskLines(ctx, &comment, memo); err != nil {
+		return MemoCommentRecord{}, err
+	}
+	comment.Tags = uniqueStrings(append(extractMemoTags(comment.Content), originalTags...))
 	comment.References = extractMemoReferences(comment.Content)
 	if err := writeMemoCommentRecord(ctx, comment); err != nil {
 		return MemoCommentRecord{}, err
@@ -127,12 +136,21 @@ func updateVaultMemoComment(ctx *VaultContext, req MemoCommentUpdateRequest) (Me
 		}
 		comment.Content = content
 	}
-	if _, err := findMemoFilePath(ctx, comment.MemoID); err != nil {
+	memoPath, err := findMemoFilePath(ctx, comment.MemoID)
+	if err != nil {
+		return MemoCommentRecord{}, err
+	}
+	memo, err := readMemoFile(ctx, memoPath)
+	if err != nil {
 		return MemoCommentRecord{}, err
 	}
 	comment.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	comment.Path = relativeVaultPath(ctx, path)
-	comment.Tags = extractMemoTags(comment.Content)
+	originalTags := extractMemoTags(comment.Content)
+	if err := syncMemoCommentTaskLines(ctx, &comment, memo); err != nil {
+		return MemoCommentRecord{}, err
+	}
+	comment.Tags = uniqueStrings(append(extractMemoTags(comment.Content), originalTags...))
 	comment.References = extractMemoReferences(comment.Content)
 	if err := writeMemoCommentRecord(ctx, comment); err != nil {
 		return MemoCommentRecord{}, err

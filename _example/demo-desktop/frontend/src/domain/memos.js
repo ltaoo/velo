@@ -61,14 +61,34 @@ export function collectTodos(memos) {
         id: `${memo.id}:${lineIndex}`,
         lineIndex,
         memo,
-        memoId: memo.id,
+        memoId: sourceMemoId(memo),
         projectId: memo.projectId || "",
+        sourceCommentId: sourceCommentId(memo),
+        sourceId: sourceId(memo),
+        sourceMemoId: sourceMemoId(memo),
+        sourceType: sourceType(memo),
         sourceText: memoSourceText(lines, lineIndex),
         text: task.text,
       });
     });
   });
   return todos;
+}
+
+function sourceId(memo) {
+  return String((memo && memo.sourceId) || (memo && memo.id) || "").trim();
+}
+
+function sourceMemoId(memo) {
+  return String((memo && memo.sourceMemoId) || (memo && memo.id) || "").trim();
+}
+
+function sourceCommentId(memo) {
+  return String((memo && memo.sourceCommentId) || "").trim();
+}
+
+function sourceType(memo) {
+  return String((memo && memo.sourceType) || "memo").trim().toLowerCase() || "memo";
 }
 
 export function getTodoStats(memos) {

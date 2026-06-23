@@ -76,11 +76,13 @@ type TaskRepeatEnd struct {
 }
 
 type TaskSource struct {
-	Line     int    `json:"line,omitempty"`
-	MemoID   string `json:"memoId,omitempty"`
-	MemoPath string `json:"memoPath,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Type     string `json:"type,omitempty"`
+	CommentID   string `json:"commentId,omitempty"`
+	CommentPath string `json:"commentPath,omitempty"`
+	Line        int    `json:"line,omitempty"`
+	MemoID      string `json:"memoId,omitempty"`
+	MemoPath    string `json:"memoPath,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Type        string `json:"type,omitempty"`
 }
 
 type TaskLink struct {
@@ -482,9 +484,14 @@ func normalizeTaskRepeat(repeat TaskRepeat) TaskRepeat {
 
 func normalizeTaskSource(source TaskSource) TaskSource {
 	source.Type = strings.ToLower(strings.TrimSpace(source.Type))
+	source.CommentID = strings.TrimSpace(source.CommentID)
+	source.CommentPath = cleanOSSObjectPath(source.CommentPath)
 	source.MemoID = strings.TrimSpace(source.MemoID)
 	source.MemoPath = cleanOSSObjectPath(source.MemoPath)
 	source.Text = strings.TrimSpace(source.Text)
+	if source.Type == "" && (source.CommentID != "" || source.CommentPath != "") {
+		source.Type = "comment"
+	}
 	if source.Type == "" && (source.MemoID != "" || source.MemoPath != "" || source.Text != "") {
 		source.Type = "memo"
 	}

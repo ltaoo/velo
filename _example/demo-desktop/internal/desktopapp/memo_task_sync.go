@@ -8,11 +8,66 @@ import (
 
 var memoTaskRefPattern = regexp.MustCompile(`\[\[task:([A-Za-z0-9_-]+)(?:\|[^\]]*)?\]\]`)
 
+type taskLineSyncSource struct {
+	CommentID    string
+	CommentPath  string
+	MemoID       string
+	MemoPath     string
+	ParentTaskID string
+	ProjectID    string
+	Type         string
+}
+
 func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 	if memo == nil {
 		return nil
 	}
-	lines := strings.Split(normalizeMemoContent(memo.Content), "\n")
+	source := taskLineSyncSource{
+		MemoID:    memo.ID,
+		MemoPath:  memo.Path,
+		ProjectID: memo.ProjectID,
+		Type:      "memo",
+	}
+	if memo.Kind == "task_note" && memo.TaskID != "" {
+		source.ParentTaskID = memo.TaskID
+	}
+	content, changed, err := syncTaskLinesForSource(ctx, memo.Content, source)
+	if err != nil {
+		return err
+	}
+	if changed {
+		memo.Content = content
+	}
+	return nil
+}
+
+func syncMemoCommentTaskLines(ctx *VaultContext, comment *MemoCommentRecord, memo MemoRecord) error {
+	if comment == nil {
+		return nil
+	}
+	source := taskLineSyncSource{
+		CommentID:   comment.ID,
+		CommentPath: comment.Path,
+		MemoID:      memo.ID,
+		MemoPath:    memo.Path,
+		ProjectID:   memo.ProjectID,
+		Type:        "comment",
+	}
+	if memo.Kind == "task_note" && memo.TaskID != "" {
+		source.ParentTaskID = memo.TaskID
+	}
+	content, changed, err := syncTaskLinesForSource(ctx, comment.Content, source)
+	if err != nil {
+		return err
+	}
+	if changed {
+		comment.Content = content
+	}
+	return nil
+}
+
+func syncTaskLinesForSource(ctx *VaultContext, content string, source taskLineSyncSource) (string, bool, error) {
+	lines := strings.Split(normalizeMemoContent(content), "\n")
 	changed := false
 	parentChanged := false
 	var parent TaskRecord
@@ -40,7 +95,7 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 		}
 		if taskID := memoTaskRefID(parsed.Text); taskID != "" {
 			if err := syncExistingTaskLineState(ctx, taskID, parsed.Checked); err != nil {
-				return err
+				return "", false, err
 			}
 			continue
 		}
@@ -49,21 +104,15 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 		req := TaskCreateRequest{
 			DueAt:     metadata.DueAt,
 			Notes:     metadata.Notes,
-			ProjectID: memo.ProjectID,
-			Source: TaskSource{
-				Line:     index + 1,
-				MemoID:   memo.ID,
-				MemoPath: memo.Path,
-				Text:     line,
-				Type:     "memo",
-			},
-			Tags:  metadata.Tags,
-			Title: metadata.Title,
+			ProjectID: source.ProjectID,
+			Source:    taskSourceForLine(source, index+1, line),
+			Tags:      metadata.Tags,
+			Title:     metadata.Title,
 		}
-		if memo.Kind == "task_note" && memo.TaskID != "" {
+		if source.ParentTaskID != "" {
 			if !parentLoaded {
 				var err error
-				parent, err = getVaultTask(ctx, memo.TaskID)
+				parent, err = getVaultTask(ctx, source.ParentTaskID)
 				parentOK = err == nil
 				parentLoaded = true
 			}
@@ -72,19 +121,19 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 				req.ListID = parent.ListID
 				req.ParentID = parent.ID
 				req.Priority = parent.Priority
-				req.ProjectID = firstNonEmpty(parent.ProjectID, memo.ProjectID)
+				req.ProjectID = firstNonEmpty(parent.ProjectID, source.ProjectID)
 				req.Tags = uniqueStrings(append(parent.Tags, req.Tags...))
 			}
 		}
 
 		task, err := createVaultTask(ctx, req)
 		if err != nil {
-			return err
+			return "", false, err
 		}
 		if parsed.Checked {
 			task, err = completeVaultTask(ctx, task.ID)
 			if err != nil {
-				return err
+				return "", false, err
 			}
 		}
 		if parentOK {
@@ -98,14 +147,23 @@ func syncMemoTaskLines(ctx *VaultContext, memo *MemoRecord) error {
 
 	if parentChanged {
 		if err := writeTaskRecord(ctx, parent); err != nil {
-			return err
+			return "", false, err
 		}
 		_, _ = rebuildTaskIndex(ctx)
 	}
-	if changed {
-		memo.Content = strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), changed, nil
+}
+
+func taskSourceForLine(source taskLineSyncSource, lineNumber int, text string) TaskSource {
+	return TaskSource{
+		CommentID:   source.CommentID,
+		CommentPath: source.CommentPath,
+		Line:        lineNumber,
+		MemoID:      source.MemoID,
+		MemoPath:    source.MemoPath,
+		Text:        text,
+		Type:        firstNonEmpty(source.Type, "memo"),
 	}
-	return nil
 }
 
 func memoTaskRefID(text string) string {
