@@ -186,6 +186,8 @@ func Run(assets Assets) {
 
 	registerRoutes(b, logger, app_updater, inputSourceLock)
 	initClipboardReader(logger)
+	externalAPIServer := startExternalAPIServer(logger)
+	defer shutdownExternalAPIServer(externalAPIServer, logger)
 
 	fmt.Println("starting server...")
 
