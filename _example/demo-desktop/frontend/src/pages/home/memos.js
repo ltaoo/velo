@@ -411,6 +411,7 @@ export function mountMemosHome(root) {
     memoSearchOpen: false,
     memoSearchQuery: "",
     memoDrafts: [],
+    memoDialog: null,
     memos: loadMemos(),
     projects: loadProjects(),
     query: "",
@@ -443,6 +444,7 @@ export function mountMemosHome(root) {
   let commentEditorMemoId = "";
   let editEditor = null;
   let editEditorMemoId = "";
+  let memoDialogEditor = null;
 
   root.innerHTML = shellTemplate();
 
@@ -526,9 +528,12 @@ export function mountMemosHome(root) {
       if (commentEditor) commentEditor.destroy();
       if (commentEditEditor) commentEditEditor.destroy();
       if (editEditor) editEditor.destroy();
+      if (memoDialogEditor) memoDialogEditor.destroy();
       commentEditEditorCommentId = "";
       commentEditorMemoId = "";
       editEditorMemoId = "";
+      memoDialogEditor = null;
+      state.memoDialog = null;
       root.innerHTML = "";
     },
   };
@@ -623,11 +628,13 @@ export function mountMemosHome(root) {
       if (editEditor) syncEditDraftFromEditor();
       if (commentEditor) syncCommentDraftFromEditor();
       if (commentEditEditor) syncCommentEditDraftFromEditor();
+      if (memoDialogEditor) syncMemoDialogDraftFromEditor();
       if (composerEditor) composerEditor.destroy();
       els.composerHost.innerHTML = "";
       composerEditor = createComposerEditor(composerText);
       renderComposerStatus(composerEditor.getText());
 
+      if (state.memoDialog) renderMemoDialog();
       if (state.activeView === "memos" && (state.editingId || state.commentingMemoId || state.commentEditingId)) renderFeed();
       if (calendarChanged) renderCalendar();
       if (fileEditorChanged) renderAll();
@@ -681,6 +688,20 @@ export function mountMemosHome(root) {
       closeMemoSearchPalette();
       return;
     }
+
+    const memoDialogAction = closestElement(event.target, "[data-memo-dialog-action]");
+    if (memoDialogAction && root.contains(memoDialogAction)) {
+      event.preventDefault();
+      runMemoDialogAction(memoDialogAction.dataset.memoDialogAction || "");
+      return;
+    }
+
+    const memoDialog = closestElement(event.target, "[data-memo-dialog]");
+    if (memoDialog && event.target === memoDialog) {
+      if (!state.memoDialog || !state.memoDialog.saving) closeMemoDialog();
+      return;
+    }
+    if (memoDialog && root.contains(memoDialog)) return;
 
     const command = closestElement(event.target, "[data-command]");
     if (command && root.contains(command)) {
@@ -1693,6 +1714,15 @@ export function mountMemosHome(root) {
   }
 
   function handleKeydown(event) {
+    if (state.memoDialog && event.key === "Escape") {
+      const editorHost = closestElement(event.target, "[data-memo-dialog-editor-host]");
+      if (!editorHost && !state.memoDialog.saving) {
+        event.preventDefault();
+        closeMemoDialog();
+        return;
+      }
+    }
+
     if (state.memoSearchOpen) {
       handleMemoSearchKeydown(event);
       return;
@@ -1765,6 +1795,19 @@ export function mountMemosHome(root) {
       state.editProjectId = normalizeProjectID(event.target.value);
       return;
     }
+
+    if (event.target.matches("[data-memo-dialog-project]") && state.memoDialog) {
+      state.memoDialog.projectId = normalizeProjectID(event.target.value);
+      return;
+    }
+
+    if (event.target.matches("[data-memo-dialog-visibility]") && state.memoDialog) {
+      state.memoDialog.visibility = event.target.value || DEFAULT_VISIBILITY;
+      return;
+    }
+
+    const memoDialog = closestElement(event.target, "[data-memo-dialog]");
+    if (memoDialog && root.contains(memoDialog)) return;
 
     if (event.target.matches("[data-task-line]")) {
       const commentNode = closestElement(event.target, "[data-comment-id]");
@@ -2341,25 +2384,7 @@ export function mountMemosHome(root) {
   function startComment(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
-    if (commentEditor && state.commentingMemoId === memoId) {
-      commentEditor.focus();
-      return;
-    }
-    if (commentEditor) syncCommentDraftFromEditor();
-    state.commentingMemoId = memoId;
-    state.commentDraft = "";
-    state.commentPreviewVisible = false;
-    state.commentEditingId = "";
-    state.commentEditDraft = "";
-    state.commentEditPreviewVisible = false;
-    state.editingId = "";
-    state.editDraft = "";
-    state.editPreviewVisible = false;
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
-    if (!state.expandedMemoIds.has(memoId)) state.expandedMemoIds.add(memoId);
-    state.expandedCommentListMemoIds.add(memoId);
-    renderFeed();
+    openMemoDialog("comment", memo.id);
   }
 
   function startCommentEdit(commentId) {
@@ -2470,6 +2495,505 @@ export function mountMemosHome(root) {
     });
   }
 
+  function openMemoDialog(kind, memoId) {
+    const memo = findMemo(memoId);
+    if (!memo) return;
+    const dialogKind = kind === "edit" ? "edit" : "comment";
+    if (state.memoDialog && state.memoDialog.kind === dialogKind && state.memoDialog.memoId === memo.id && memoDialogEditor) {
+      memoDialogEditor.focus();
+      return;
+    }
+
+    closeMemoDialog({ silent: true });
+
+    const draft = dialogKind === "edit" ? findDraft(memoEditDraftId(memo.id)) : null;
+    state.commentingMemoId = "";
+    state.commentDraft = "";
+    state.commentPreviewVisible = false;
+    state.commentEditingId = "";
+    state.commentEditDraft = "";
+    state.commentEditPreviewVisible = false;
+    state.editingId = "";
+    state.editDraft = "";
+    state.editPreviewVisible = false;
+    state.memoDialog = {
+      draft: dialogKind === "edit" ? (draft ? draft.content : memo.content) : "",
+      kind: dialogKind,
+      memoId: memo.id,
+      previewVisible: false,
+      projectId: dialogKind === "edit"
+        ? normalizeProjectID(draft ? draft.projectId : memo.projectId)
+        : normalizeProjectID(memo.projectId),
+      saving: false,
+      visibility: dialogKind === "edit"
+        ? (draft ? draft.visibility || DEFAULT_VISIBILITY : memo.visibility || DEFAULT_VISIBILITY)
+        : memo.visibility || DEFAULT_VISIBILITY,
+    };
+    renderMemoDialog();
+    if (dialogKind === "edit" && draft) showToast("已恢复编辑草稿");
+  }
+
+  function closeMemoDialog(options = {}) {
+    if (memoDialogEditor) {
+      syncMemoDialogDraftFromEditor();
+      memoDialogEditor.destroy();
+      memoDialogEditor = null;
+    }
+    const dialog = root.querySelector("[data-memo-dialog]");
+    if (dialog) dialog.remove();
+    state.memoDialog = null;
+    if (options.message) showToast(options.message);
+    return Promise.resolve({ ok: true, message: options.message || "closed" });
+  }
+
+  function runMemoDialogAction(action) {
+    if (!state.memoDialog) return;
+    switch (action) {
+      case "cancel":
+        cancelMemoDialog();
+        break;
+      case "close":
+        closeMemoDialog();
+        break;
+      case "preview":
+        toggleMemoDialogPreview();
+        break;
+      case "save":
+        saveMemoDialog();
+        break;
+      default:
+        break;
+    }
+  }
+
+  function renderMemoDialog() {
+    const dialogState = state.memoDialog;
+    if (!dialogState) return;
+    const memo = findMemo(dialogState.memoId);
+    if (!memo) {
+      closeMemoDialog();
+      showToast("找不到 memo");
+      return;
+    }
+
+    if (memoDialogEditor) {
+      memoDialogEditor.destroy();
+      memoDialogEditor = null;
+    }
+    const existing = root.querySelector("[data-memo-dialog]");
+    if (existing) existing.remove();
+
+    const dialog = document.createElement("div");
+    dialog.className = "memo-dialog";
+    dialog.dataset.memoDialog = "true";
+    dialog.dataset.memoId = memo.id;
+    dialog.innerHTML = memoDialogTemplate(memo, dialogState);
+    root.appendChild(dialog);
+    mountMemoDialogEditor();
+    renderMemoDialogPreview();
+    renderMemoDialogSaving();
+    window.requestAnimationFrame(function () {
+      if (memoDialogEditor) memoDialogEditor.focus();
+    });
+  }
+
+  function mountMemoDialogEditor() {
+    const dialogState = state.memoDialog;
+    const dialog = root.querySelector("[data-memo-dialog]");
+    const memo = dialogState ? findMemo(dialogState.memoId) : null;
+    const host = dialog ? dialog.querySelector("[data-memo-dialog-editor-host]") : null;
+    if (!dialogState || !memo || !host) return;
+    const statusHost = dialog.querySelector("[data-memo-dialog-vim-status]");
+    memoDialogEditor = createMiniEditor(host, {
+      memoItems() {
+        return state.memos;
+      },
+      tagItems: editorTagItems,
+      onChange(value) {
+        if (!state.memoDialog) return;
+        state.memoDialog.draft = value;
+        renderMemoDialogPreview();
+      },
+      onCommit() {
+        return saveMemoDialog({ source: "vim-wq" });
+      },
+      onDiscard() {
+        if (state.memoDialog && state.memoDialog.kind === "edit") {
+          return discardMemoDialogEditDraft({ exit: true, message: "草稿已丢弃" });
+        }
+        return closeMemoDialog({ message: "评论已取消" });
+      },
+      onQuit() {
+        if (state.memoDialog && state.memoDialog.kind === "edit") return exitMemoDialogEdit();
+        return closeMemoDialog();
+      },
+      onSave() {
+        return writeMemoDialogDraft();
+      },
+      onSubmit() {
+        return saveMemoDialog();
+      },
+      onWriteDraft() {
+        return writeMemoDialogDraft();
+      },
+      placeholder: dialogState.kind === "edit" ? "编辑 memo..." : "添加评论...",
+      sourceMemoId: memo.id,
+      value: dialogState.draft,
+      vim: editorVimEnabled(),
+      vimStatusHost: statusHost,
+    });
+  }
+
+  function memoDialogTemplate(memo, dialogState) {
+    const editing = dialogState.kind === "edit";
+    const title = editing ? "修改 memo" : "评论";
+    const saveLabel = editing ? "保存" : "评论";
+    const description = compactText(memoTitle(memo), 88);
+    const editControls = editing
+      ? `
+        <div class="memo-dialog-meta-controls">
+          <label class="memo-select-wrap is-compact">
+            <select data-memo-dialog-project aria-label="编辑 Project">
+              ${projectOptionsTemplate(state.projects, dialogState.projectId)}
+            </select>
+            ${SVG.chevronDown}
+          </label>
+          <label class="memo-select-wrap is-compact">
+            <select data-memo-dialog-visibility aria-label="编辑可见性">
+              ${memoDialogVisibilityOptions(dialogState.visibility)}
+            </select>
+            ${SVG.chevronDown}
+          </label>
+        </div>
+      `
+      : "";
+
+    return `
+      <section class="memo-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="memo-dialog-title">
+        <header class="memo-dialog-head">
+          <div>
+            <h2 id="memo-dialog-title">${escapeHTML(title)}</h2>
+            <p>${escapeHTML(description)}</p>
+          </div>
+          <button class="memo-action-button" type="button" data-memo-dialog-action="close" title="关闭" aria-label="关闭">${SVG.x}</button>
+        </header>
+        <div class="memo-dialog-body">
+          <div class="memo-editor-switch memo-dialog-editor-switch">
+            <div class="memo-editor-host memo-dialog-editor-host" data-memo-dialog-editor-host data-editor-switch-host></div>
+            <section class="memo-editor-preview memo-dialog-preview" data-memo-dialog-preview hidden></section>
+          </div>
+        </div>
+        <footer class="memo-dialog-actions">
+          ${editControls}
+          <div class="memo-inline-status-line" data-memo-dialog-vim-status></div>
+          <button class="memo-secondary-button" type="button" data-memo-dialog-action="preview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
+          <button class="memo-secondary-button" type="button" data-memo-dialog-action="cancel">${SVG.x}<span>取消</span></button>
+          <button class="memo-primary-button" type="button" data-memo-dialog-action="save">${SVG.check}<span>${escapeHTML(saveLabel)}</span></button>
+        </footer>
+      </section>
+    `;
+  }
+
+  function memoDialogVisibilityOptions(selected) {
+    const value = selected || DEFAULT_VISIBILITY;
+    return Object.entries(VISIBILITY)
+      .map(([key, item]) => `<option value="${key}" ${key === value ? "selected" : ""}>${escapeHTML(item.label)}</option>`)
+      .join("");
+  }
+
+  function syncMemoDialogDraftFromEditor() {
+    if (!state.memoDialog || !memoDialogEditor) return;
+    state.memoDialog.draft = memoDialogEditor.getText();
+  }
+
+  function toggleMemoDialogPreview() {
+    if (!state.memoDialog) return;
+    syncMemoDialogDraftFromEditor();
+    state.memoDialog.previewVisible = !state.memoDialog.previewVisible;
+    renderMemoDialogPreview();
+    if (!state.memoDialog.previewVisible && memoDialogEditor) memoDialogEditor.focus();
+  }
+
+  function renderMemoDialogPreview() {
+    const dialogState = state.memoDialog;
+    const dialog = root.querySelector("[data-memo-dialog]");
+    if (!dialogState || !dialog) return;
+    renderEditorPreviewPanel(
+      dialog.querySelector("[data-memo-dialog-preview]"),
+      dialog.querySelector('[data-memo-dialog-action="preview"]'),
+      dialogState.previewVisible,
+      dialogState.draft,
+      memoRenderContext(dialogState.memoId, { readonly: true, showLineNumbers: dialogState.kind === "edit" }),
+    );
+  }
+
+  function setMemoDialogSaving(saving) {
+    if (!state.memoDialog) return;
+    state.memoDialog.saving = Boolean(saving);
+    renderMemoDialogSaving();
+  }
+
+  function renderMemoDialogSaving() {
+    const dialogState = state.memoDialog;
+    const dialog = root.querySelector("[data-memo-dialog]");
+    if (!dialogState || !dialog) return;
+    dialog.classList.toggle("is-saving", dialogState.saving);
+    dialog.querySelectorAll("[data-memo-dialog-action], [data-memo-dialog-project], [data-memo-dialog-visibility]").forEach(function (control) {
+      control.disabled = dialogState.saving;
+    });
+  }
+
+  function cancelMemoDialog() {
+    if (!state.memoDialog) return Promise.resolve({ ok: true, message: "closed" });
+    if (state.memoDialog.kind === "edit") {
+      return discardMemoDialogEditDraft({ exit: true, message: "编辑已取消" });
+    }
+    return closeMemoDialog({ message: "评论已取消" });
+  }
+
+  function saveMemoDialog(options = {}) {
+    if (!state.memoDialog) return Promise.resolve({ ok: false, message: "没有打开的弹窗" });
+    return state.memoDialog.kind === "edit"
+      ? saveMemoDialogEdit(options)
+      : saveMemoDialogComment(options);
+  }
+
+  function saveMemoDialogEdit(options = {}) {
+    const dialogState = state.memoDialog;
+    if (!dialogState) return Promise.resolve({ ok: false, message: "没有打开的弹窗" });
+    const memo = findMemo(dialogState.memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    if (dialogState.saving) return Promise.resolve({ ok: false, message: "正在保存" });
+    syncMemoDialogDraftFromEditor();
+    const content = String(dialogState.draft || "");
+    if (!content.trim()) {
+      showToast("内容不能为空");
+      if (memoDialogEditor) memoDialogEditor.focus();
+      return Promise.resolve({ ok: false, message: "内容不能为空" });
+    }
+
+    const memoId = memo.id;
+    setMemoDialogSaving(true);
+    return updateMemoInVault(memoId, {
+      content,
+      projectId: dialogState.projectId,
+      updatedAt: new Date().toISOString(),
+      visibility: dialogState.visibility,
+    }).then(
+      function () {
+        return reloadMemoFromVault(memoId);
+      },
+    ).then(
+      function () {
+        removeDraftFromState(memoEditDraftId(memoId));
+        deleteMemoDraftInVault(memoEditDraftId(memoId)).catch(function (err) {
+          showToast("清理草稿失败: " + errorMessage(err));
+        });
+        replaceMemoCardOnly(memoId);
+        closeMemoDialog();
+        refreshTasksFromVault({ render: false });
+        if (options.source !== "vim-wq") showToast("已保存");
+        return { ok: true, message: "已保存" };
+      },
+      function (err) {
+        showToast("保存失败: " + errorMessage(err));
+        return { ok: false, message: "保存失败: " + errorMessage(err) };
+      },
+    ).finally(function () {
+      if (state.memoDialog && state.memoDialog.memoId === memoId) setMemoDialogSaving(false);
+    });
+  }
+
+  function saveMemoDialogComment(options = {}) {
+    const dialogState = state.memoDialog;
+    if (!dialogState) return Promise.resolve({ ok: false, message: "没有打开的弹窗" });
+    const memo = findMemo(dialogState.memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    if (dialogState.saving) return Promise.resolve({ ok: false, message: "正在保存" });
+    syncMemoDialogDraftFromEditor();
+    const content = String(dialogState.draft || "");
+    if (!content.trim()) {
+      showToast("评论不能为空");
+      if (memoDialogEditor) memoDialogEditor.focus();
+      return Promise.resolve({ ok: false, message: "评论不能为空" });
+    }
+
+    const memoId = memo.id;
+    setMemoDialogSaving(true);
+    return createMemoCommentInVault(memoId, content).then(
+      function () {
+        return reloadMemoCommentsForMemo(memoId);
+      },
+    ).then(
+      function () {
+        state.expandedCommentListMemoIds.add(memoId);
+        replaceMemoCardOnly(memoId);
+        closeMemoDialog();
+        refreshTasksFromVault({ render: false });
+        if (options.source !== "vim-wq") showToast("已添加评论");
+        return { ok: true, message: "已添加评论" };
+      },
+      function (err) {
+        showToast("评论失败: " + errorMessage(err));
+        return { ok: false, message: "评论失败: " + errorMessage(err) };
+      },
+    ).finally(function () {
+      if (state.memoDialog && state.memoDialog.memoId === memoId) setMemoDialogSaving(false);
+    });
+  }
+
+  function writeMemoDialogDraft() {
+    const dialogState = state.memoDialog;
+    if (!dialogState || dialogState.kind !== "edit") {
+      return Promise.resolve({ ok: true, message: "comment draft retained" });
+    }
+    const memo = findMemo(dialogState.memoId);
+    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    syncMemoDialogDraftFromEditor();
+    const content = String(dialogState.draft || "");
+    if (!content.trim()) {
+      return discardMemoDialogEditDraft({ exit: false, message: "空草稿已清理" });
+    }
+    return upsertMemoDraftInVault({
+      baseUpdatedAt: memo.updatedAt || "",
+      content,
+      id: memoEditDraftId(memo.id),
+      kind: "memo-edit",
+      memoId: memo.id,
+      projectId: dialogState.projectId,
+      visibility: dialogState.visibility,
+    }).then(
+      function (draft) {
+        upsertDraftInState(draft);
+        if (state.memoDialog && state.memoDialog.memoId === memo.id) state.memoDialog.draft = content;
+        showToast("草稿已保存");
+        return { ok: true, message: "draft written" };
+      },
+      function (err) {
+        showToast("保存草稿失败: " + errorMessage(err));
+        return { ok: false, message: "保存草稿失败: " + errorMessage(err) };
+      },
+    );
+  }
+
+  function discardMemoDialogEditDraft(options = {}) {
+    const memoId = state.memoDialog ? state.memoDialog.memoId : "";
+    if (!memoId) return Promise.resolve({ ok: false, message: "找不到 memo" });
+    const draftId = memoEditDraftId(memoId);
+    removeDraftFromState(draftId);
+    if (options.exit) closeMemoDialog();
+    return deleteMemoDraftInVault(draftId).then(
+      function () {
+        if (options.message) showToast(options.message);
+        return { ok: true, message: options.message || "draft discarded" };
+      },
+      function (err) {
+        showToast("删除草稿失败: " + errorMessage(err));
+        return { ok: false, message: "删除草稿失败: " + errorMessage(err) };
+      },
+    );
+  }
+
+  function exitMemoDialogEdit() {
+    const dialogState = state.memoDialog;
+    if (!dialogState || dialogState.kind !== "edit") return closeMemoDialog();
+    const memo = findMemo(dialogState.memoId);
+    if (!memo) return closeMemoDialog();
+    syncMemoDialogDraftFromEditor();
+    const changed =
+      String(dialogState.draft || "") !== memo.content ||
+      normalizeProjectID(dialogState.projectId) !== normalizeProjectID(memo.projectId) ||
+      (dialogState.visibility || DEFAULT_VISIBILITY) !== (memo.visibility || DEFAULT_VISIBILITY);
+    if (!changed) return closeMemoDialog();
+    return writeMemoDialogDraft().then(function (result) {
+      if (result && result.ok === false) return result;
+      return closeMemoDialog();
+    });
+  }
+
+  function reloadMemoFromVault(memoId) {
+    const id = String(memoId || "").trim();
+    if (!id) return Promise.reject(new Error("memo id is required"));
+    return loadMemosFromVault().then(function (memos) {
+      const normalized = (Array.isArray(memos) ? memos : []).map(normalizeMemoPayload).filter(Boolean);
+      const memo = normalized.find((item) => item.id === id);
+      if (!memo) throw new Error("找不到更新后的 memo");
+      upsertMemoInState(memo);
+      saveMemos(state.memos);
+      return memo;
+    });
+  }
+
+  function reloadMemoCommentsForMemo(memoId) {
+    const id = String(memoId || "").trim();
+    if (!id) return Promise.reject(new Error("memo id is required"));
+    return loadMemoCommentsFromVault(id).then(function (comments) {
+      const normalized = (Array.isArray(comments) ? comments : []).map(normalizeMemoCommentPayload).filter(Boolean);
+      state.comments = state.comments.filter((comment) => comment && comment.memoId !== id).concat(normalized);
+      state.commentsLoaded = true;
+      return normalized;
+    });
+  }
+
+  function upsertMemoInState(memo) {
+    const normalized = normalizeMemoPayload(memo);
+    if (!normalized) return null;
+    const index = state.memos.findIndex((item) => item && item.id === normalized.id);
+    if (index >= 0) {
+      state.memos[index] = normalized;
+    } else {
+      state.memos.unshift(normalized);
+    }
+    state.memoRefIndex = null;
+    return normalized;
+  }
+
+  function replaceMemoCardOnly(memoId) {
+    const id = String(memoId || "").trim();
+    if (!id) return;
+    renderMemoChromeWithoutFeed();
+    if (state.activeView !== "memos") return;
+
+    const selector = `[data-memo-id="${escapeCSSIdent(id)}"]`;
+    const card = els.memoList.querySelector(selector);
+    const memos = visibleMemos();
+    const memo = memos.find((item) => item.id === id);
+    updateMemoFeedCount(memos.length);
+
+    if (!memo) {
+      if (card) card.remove();
+      if (!els.memoList.querySelector(".memo-card")) els.memoList.innerHTML = emptyFeedTemplate();
+      syncMemoExpandControls();
+      return;
+    }
+    if (!card) return;
+
+    const template = document.createElement("template");
+    template.innerHTML = safeMemoTemplate(memo).trim();
+    const nextCard = template.content.firstElementChild;
+    if (!nextCard) return;
+    card.replaceWith(nextCard);
+    syncMemoExpandControls();
+  }
+
+  function renderMemoChromeWithoutFeed() {
+    state.memoRefIndex = buildMemoReferenceIndex(state.memos);
+    renderProjects();
+    renderViewButtons();
+    renderFilterButtons();
+    renderCalendar();
+    renderStats();
+    renderTags();
+    renderPinned();
+    updateMemoFeedCount();
+  }
+
+  function updateMemoFeedCount(count) {
+    if (state.activeView !== "memos") return;
+    const total = typeof count === "number" ? count : visibleMemos().length;
+    els.feedCount.textContent = `${total} 条`;
+  }
+
   function deleteComment(commentId) {
     const comment = findComment(commentId);
     if (!comment || state.commentSaving) return;
@@ -2517,22 +3041,7 @@ export function mountMemosHome(root) {
   function startEdit(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
-    const draft = findDraft(memoEditDraftId(memoId));
-    state.commentingMemoId = "";
-    state.commentDraft = "";
-    state.commentPreviewVisible = false;
-    state.commentEditingId = "";
-    state.commentEditDraft = "";
-    state.commentEditPreviewVisible = false;
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
-    state.editingId = memoId;
-    state.editDraft = draft ? draft.content : memo.content;
-    state.editPreviewVisible = false;
-    state.editProjectId = draft ? normalizeProjectID(draft.projectId) : memo.projectId || "";
-    state.editVisibility = draft ? draft.visibility || DEFAULT_VISIBILITY : memo.visibility || DEFAULT_VISIBILITY;
-    renderFeed();
-    if (draft) showToast("已恢复编辑草稿");
+    openMemoDialog("edit", memo.id);
   }
 
   function startSourceEdit(memoId) {
@@ -3860,12 +4369,14 @@ export function mountMemosHome(root) {
     renderComposerStatus(draft.content || "");
   }
 
-  function refreshTasksFromVault() {
+  function refreshTasksFromVault(options = {}) {
+    const renderFeedContent = options.render !== false;
     state.tasksLoading = true;
     loadTasks().then(
       function (payload) {
         state.tasks = payload.tasks.map(normalizeTaskSummary).filter(Boolean);
-        renderAll();
+        if (renderFeedContent) renderAll();
+        else renderTaskChromeWithoutFeed();
       },
       function (err) {
         if (typeof globalThis.invoke === "function") {
@@ -3874,8 +4385,14 @@ export function mountMemosHome(root) {
       },
     ).finally(function () {
       state.tasksLoading = false;
-      renderAll();
+      if (renderFeedContent) renderAll();
+      else renderTaskChromeWithoutFeed();
     });
+  }
+
+  function renderTaskChromeWithoutFeed() {
+    renderViewButtons();
+    renderStats();
   }
 
   function refreshGTDFromVault() {
