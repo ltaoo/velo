@@ -2289,6 +2289,7 @@ body.is-fixed-window .memo-window-shell {
 .memo-icon-text-button svg,
 .memo-secondary-button svg,
 .memo-primary-button svg,
+.memo-dialog svg,
 .memo-delete-dialog svg {
   pointer-events: none;
 }
@@ -4860,6 +4861,109 @@ body.is-fixed-window .memo-window-shell {
   overflow: hidden;
 }
 
+.memo-dialog {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 1190;
+}
+
+.memo-dialog-panel {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: var(--memo-radius);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+  color: var(--FG-0);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(780px, calc(100vh - 36px));
+  max-width: 760px;
+  min-height: 360px;
+  overflow: hidden;
+  width: min(760px, 100%);
+}
+
+.memo-dialog-head {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.memo-dialog-head h2 {
+  font-size: var(--font-1xl);
+  line-height: 1.25;
+  margin: 0;
+}
+
+.memo-dialog-head p {
+  color: var(--FG-1);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.memo-dialog-body {
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.memo-dialog-editor-switch {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.memo-dialog-editor-host,
+.memo-dialog-preview {
+  min-height: 260px;
+}
+
+.memo-dialog-editor-host .ProseMirror,
+.memo-dialog-editor-host .memo-fallback-editor,
+.memo-dialog-preview {
+  max-height: min(58vh, 520px);
+  min-height: 260px;
+}
+
+.memo-dialog-actions {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 12px;
+}
+
+.memo-dialog-meta-controls {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.memo-dialog-actions .memo-inline-status-line {
+  margin-right: auto;
+}
+
+.memo-dialog.is-saving {
+  cursor: progress;
+}
+
 .memo-source-editor {
   background: var(--BG-0);
 }
@@ -6058,6 +6162,41 @@ body.gtd-slim-page #root {
   .memo-delete-actions {
     align-items: stretch;
     flex-direction: column-reverse;
+  }
+
+  .memo-dialog {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .memo-dialog-panel {
+    max-height: calc(100vh - 20px);
+    min-height: 0;
+    width: 100%;
+  }
+
+  .memo-dialog-head,
+  .memo-dialog-body,
+  .memo-dialog-actions {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .memo-dialog-meta-controls {
+    flex-basis: 100%;
+  }
+
+  .memo-dialog-meta-controls .memo-select-wrap,
+  .memo-dialog-actions .memo-primary-button,
+  .memo-dialog-actions .memo-secondary-button {
+    flex: 1 1 auto;
+  }
+
+  .memo-dialog-editor-host,
+  .memo-dialog-preview,
+  .memo-dialog-editor-host .ProseMirror,
+  .memo-dialog-editor-host .memo-fallback-editor {
+    min-height: 220px;
   }
 
   .memo-delete-actions .memo-primary-button,
