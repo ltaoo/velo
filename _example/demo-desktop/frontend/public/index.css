@@ -742,6 +742,46 @@ ol {
   width: min(390px, calc(100vw - 16px));
 }
 
+.memo-image-context-menu {
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(23, 32, 38, 0.16);
+  min-width: 150px;
+  padding: 4px;
+  position: fixed;
+  z-index: 1300;
+}
+
+.memo-image-context-option {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--FG-0);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.memo-image-context-option:hover,
+.memo-image-context-option:focus-visible {
+  background: var(--BG-1);
+  outline: none;
+}
+
+.memo-image-context-option svg {
+  flex: 0 0 auto;
+  height: 16px;
+  width: 16px;
+}
+
 .file-picker-option,
 .memo-ref-option,
 .tag-picker-option,

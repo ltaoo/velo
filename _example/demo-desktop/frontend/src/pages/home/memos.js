@@ -20,6 +20,7 @@ import {
   normalizeProjectID,
   normalizeProjectPayload,
 } from "../../domain/projects.js";
+import { callNativeAPI } from "../../domain/native.js";
 import { parseAssetReference } from "../../domain/storage.js";
 import {
   completeTask,
@@ -178,6 +179,145 @@ function copyInlineLinkFromAction(action, notify) {
   copyText(url).then(
     () => notify("已复制链接"),
     () => notify("复制失败"),
+  );
+}
+
+function bindMemoImageContextMenu(root, options = {}) {
+  let menu = null;
+  let imageTarget = null;
+
+  function handleContextMenu(event) {
+    const target = memoImageContextTarget(event.target);
+    if (!target || !root.contains(target)) return;
+
+    const payload = memoImageClipboardPayload(target);
+    if (!payload || (!payload.source && !payload.url && !payload.contentBase64)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    openMenu(event.clientX, event.clientY, target);
+  }
+
+  function openMenu(x, y, target) {
+    closeMenu();
+    imageTarget = target;
+    menu = document.createElement("div");
+    menu.className = "memo-image-context-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = `
+      <button class="memo-image-context-option" type="button" role="menuitem" data-image-context-action="copy">${SVG.copy}<span>复制图片</span></button>
+      <button class="memo-image-context-option" type="button" role="menuitem" data-image-context-action="preview">${SVG.image}<span>预览图片</span></button>
+    `;
+    menu.addEventListener("click", handleMenuClick);
+    document.body.appendChild(menu);
+    positionMenu(menu, x, y);
+    window.setTimeout(function () {
+      document.addEventListener("click", handleDocumentClick, true);
+      document.addEventListener("keydown", handleMenuKeydown, true);
+      window.addEventListener("blur", closeMenu);
+      window.addEventListener("resize", closeMenu);
+      window.addEventListener("scroll", closeMenu, true);
+    }, 0);
+  }
+
+  function handleDocumentClick(event) {
+    if (menu && menu.contains(event.target)) return;
+    closeMenu();
+  }
+
+  function handleMenuClick(event) {
+    const action = closestElement(event.target, "[data-image-context-action]");
+    if (!action || !menu || !menu.contains(action)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const target = imageTarget;
+    closeMenu();
+    if (!target) return;
+
+    switch (action.dataset.imageContextAction) {
+      case "copy":
+        copyMemoImageToClipboard(target, options.notify);
+        break;
+      case "preview":
+        if (typeof options.onPreview === "function") options.onPreview(target);
+        break;
+      default:
+        break;
+    }
+  }
+
+  function handleMenuKeydown(event) {
+    if (event.key === "Escape") closeMenu();
+  }
+
+  function closeMenu() {
+    document.removeEventListener("click", handleDocumentClick, true);
+    document.removeEventListener("keydown", handleMenuKeydown, true);
+    window.removeEventListener("blur", closeMenu);
+    window.removeEventListener("resize", closeMenu);
+    window.removeEventListener("scroll", closeMenu, true);
+    if (menu) {
+      menu.removeEventListener("click", handleMenuClick);
+      menu.remove();
+    }
+    menu = null;
+    imageTarget = null;
+  }
+
+  root.addEventListener("contextmenu", handleContextMenu);
+
+  return {
+    destroy() {
+      root.removeEventListener("contextmenu", handleContextMenu);
+      closeMenu();
+    },
+  };
+}
+
+function positionMenu(menu, x, y) {
+  const margin = 8;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin));
+  const top = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin));
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+}
+
+function memoImageContextTarget(target) {
+  const node = closestElement(target, "[data-image-preview-src]");
+  return node || null;
+}
+
+function memoImageClipboardPayload(element) {
+  const host = closestElement(element, "[data-image-preview-src]") || element;
+  const dataset = (host && host.dataset) || {};
+  const image = element && element.tagName === "IMG" ? element : host && host.querySelector && host.querySelector("img");
+  const url = String(dataset.imagePreviewSrc || (image && (image.getAttribute("src") || image.src)) || "").trim();
+  const source = String(dataset.imagePreviewSource || "").trim();
+  const title = String(dataset.imagePreviewTitle || (image && image.getAttribute("alt")) || "").trim();
+  return {
+    source,
+    title,
+    url,
+  };
+}
+
+function copyMemoImageToClipboard(element, notify) {
+  const payload = memoImageClipboardPayload(element);
+  const report = typeof notify === "function" ? notify : function () {};
+  if (!payload || (!payload.source && !payload.url)) return;
+
+  callNativeAPI("/api/clipboard/image/write", {
+    args: payload,
+    method: "POST",
+  }).then(
+    function () {
+      report("已复制图片");
+    },
+    function (err) {
+      report("复制图片失败: " + errorMessage(err));
+    },
   );
 }
 
@@ -484,6 +624,10 @@ export function mountMemosHome(root) {
   };
 
   composerEditor = createComposerEditor("");
+  const imageContextMenu = bindMemoImageContextMenu(root, {
+    notify: showToast,
+    onPreview: openImagePreview,
+  });
 
   renderAll();
   renderComposerStatus(composerEditor.getText());
@@ -520,6 +664,7 @@ export function mountMemosHome(root) {
       window.removeEventListener("blur", handleWindowBlur);
       window.removeEventListener("keydown", handleKeydown);
       window.removeEventListener("storage", handleStorage);
+      imageContextMenu.destroy();
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
       if (state.clipboardTimer) window.clearTimeout(state.clipboardTimer);
       if (state.clipboardLeaveTimer) window.clearTimeout(state.clipboardLeaveTimer);
@@ -4939,6 +5084,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
   });
   let detachedCommentEditor = createDetachedCommentEditor(state.commentDraft);
   let detachedCommentEditEditor = null;
+  const imageContextMenu = bindMemoImageContextMenu(root, {
+    notify: showToast,
+    onPreview: openDetachedImagePreview,
+  });
 
   renderFixedButton();
   applyFixedState();
@@ -4968,6 +5117,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
       root.removeEventListener("keydown", handleKeydown, true);
       root.removeEventListener("submit", handleSubmit);
       root.removeEventListener("copy", handleMemoRenderedCopy);
+      imageContextMenu.destroy();
       if (detachedCommentEditor) detachedCommentEditor.destroy();
       if (detachedCommentEditEditor) detachedCommentEditEditor.destroy();
       if (state.toastTimer) window.clearTimeout(state.toastTimer);
