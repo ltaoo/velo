@@ -10,11 +10,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/ltaoo/velo/asset"
@@ -56,6 +58,7 @@ type BoxContext struct {
 	query   map[string]string
 	headers interface{}
 	Writer  http.ResponseWriter
+	Request *http.Request
 }
 
 type H map[string]interface{}
@@ -713,7 +716,7 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 			Embedded:  frontendFS,
 			EntryPage: entryPage,
 		}))
-	} else if box.mode == ModeBridgeHttp {
+	} else if box.mode == ModeBridgeHttp || box.mode == ModeBridge || box.mode == ModeHttp {
 		mux.Handle("/", frontendserver.New(frontendserver.Options{
 			Root:      box.frontendDir,
 			EntryPage: entryPage,
@@ -768,7 +771,12 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			var args interface{}
 			if r.Method == "POST" {
-				json.NewDecoder(r.Body).Decode(&args)
+				contentType := strings.ToLower(r.Header.Get("Content-Type"))
+				if strings.Contains(contentType, "application/json") || contentType == "" {
+					json.NewDecoder(r.Body).Decode(&args)
+				} else if body, err := io.ReadAll(r.Body); err == nil {
+					args = body
+				}
 			}
 			query_params := make(map[string]string)
 			for key, values := range r.URL.Query() {
@@ -785,6 +793,7 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 				query:   query_params,
 				headers: r.Header,
 				Writer:  w,
+				Request: r,
 			}
 			result := handler(ctx)
 			if result != nil {
