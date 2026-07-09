@@ -427,6 +427,16 @@ export function memoBacklinkCount(context, memoId) {
   return incoming && incoming.has(memoId) ? incoming.get(memoId).length : 0;
 }
 
+export function extractProjectDirective(text) {
+  const searchable = memoSearchableText(text);
+  const match = searchable.match(/(^|\n)\s*\/project:([^\n]+)/);
+  return match ? match[2].trim() : null;
+}
+
+export function stripProjectDirective(text) {
+  return text.replace(/(^|\n)\s*\/project:[^\n]*/, "$1").replace(/^\n/, "");
+}
+
 export function compactText(value, length) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > length ? text.slice(0, length - 1) + "..." : text;

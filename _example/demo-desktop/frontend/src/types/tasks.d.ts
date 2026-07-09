@@ -9,6 +9,7 @@ export type TaskPriority = "none" | "low" | "medium" | "high";
 export interface TaskReminder {
   at?: string;
   base?: string;
+  fired?: boolean;
   offsetMinutes?: number;
   type: string;
 }

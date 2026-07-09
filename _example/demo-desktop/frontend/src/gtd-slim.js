@@ -83,6 +83,117 @@ function mountGTDSlim(root) {
     toggleTaskCompletion(taskNode.dataset.gtdSlimTaskId, event.target);
   });
 
+  root.addEventListener("click", function (event) {
+    const bellBtn = closestElement(event.target, "[data-gtd-slim-reminder-btn]");
+    if (bellBtn && root.contains(bellBtn)) {
+      const taskNode = closestElement(bellBtn, "[data-gtd-slim-task-id]");
+      if (taskNode) toggleReminderPopover(taskNode.dataset.gtdSlimTaskId, bellBtn);
+      return;
+    }
+    const quickOpt = closestElement(event.target, "[data-reminder-quick]");
+    if (quickOpt && root.contains(quickOpt)) {
+      const minutes = parseInt(quickOpt.dataset.reminderQuick, 10);
+      const popover = closestElement(quickOpt, "[data-reminder-popover]");
+      const taskId = popover ? popover.dataset.reminderPopover : "";
+      if (taskId && !isNaN(minutes)) addRelativeReminder(taskId, minutes);
+      return;
+    }
+    const deleteBtn = closestElement(event.target, "[data-reminder-delete]");
+    if (deleteBtn && root.contains(deleteBtn)) {
+      const popover = closestElement(deleteBtn, "[data-reminder-popover]");
+      const taskId = popover ? popover.dataset.reminderPopover : "";
+      const idx = parseInt(deleteBtn.dataset.reminderDelete, 10);
+      if (taskId && !isNaN(idx)) deleteReminder(taskId, idx);
+      return;
+    }
+    const absBtn = closestElement(event.target, "[data-reminder-abs-confirm]");
+    if (absBtn && root.contains(absBtn)) {
+      const popover = closestElement(absBtn, "[data-reminder-popover]");
+      const taskId = popover ? popover.dataset.reminderPopover : "";
+      const input = popover ? popover.querySelector("[data-reminder-abs-input]") : null;
+      if (taskId && input && input.value) addAbsoluteReminder(taskId, input.value);
+      return;
+    }
+    // Close open popovers on outside click.
+    const openPopover = root.querySelector("[data-reminder-popover]");
+    if (openPopover && !openPopover.contains(event.target)) {
+      openPopover.remove();
+    }
+  });
+
+  function toggleReminderPopover(taskId, anchor) {
+    const existing = root.querySelector("[data-reminder-popover]");
+    if (existing) {
+      existing.remove();
+      if (existing.dataset.reminderPopover === taskId) return;
+    }
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const popover = document.createElement("div");
+    popover.className = "gtd-slim-reminder-popover";
+    popover.setAttribute("data-reminder-popover", taskId);
+    popover.innerHTML = reminderPopoverContent(task);
+    anchor.parentElement.appendChild(popover);
+  }
+
+  function addRelativeReminder(taskId, minutes) {
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const reminders = (task.reminders || []).concat({
+      type: "relative",
+      base: "dueAt",
+      offsetMinutes: minutes,
+    });
+    updateTask(taskId, { reminders }).then(function (updated) {
+      const summary = normalizeTaskSummary(updated);
+      if (summary) state.tasks = state.tasks.map((t) => t.id === taskId ? summary : t);
+      closeReminderPopover();
+      showToast("已添加提醒");
+      render();
+    }, function (err) {
+      showToast("设置提醒失败: " + errorMessage(err));
+    });
+  }
+
+  function addAbsoluteReminder(taskId, datetimeValue) {
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const at = new Date(datetimeValue).toISOString();
+    const reminders = (task.reminders || []).concat({
+      type: "absolute",
+      at,
+    });
+    updateTask(taskId, { reminders }).then(function (updated) {
+      const summary = normalizeTaskSummary(updated);
+      if (summary) state.tasks = state.tasks.map((t) => t.id === taskId ? summary : t);
+      closeReminderPopover();
+      showToast("已添加提醒");
+      render();
+    }, function (err) {
+      showToast("设置提醒失败: " + errorMessage(err));
+    });
+  }
+
+  function deleteReminder(taskId, index) {
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task || !task.reminders) return;
+    const reminders = task.reminders.filter((_, i) => i !== index);
+    updateTask(taskId, { reminders }).then(function (updated) {
+      const summary = normalizeTaskSummary(updated);
+      if (summary) state.tasks = state.tasks.map((t) => t.id === taskId ? summary : t);
+      closeReminderPopover();
+      showToast("已删除提醒");
+      render();
+    }, function (err) {
+      showToast("删除提醒失败: " + errorMessage(err));
+    });
+  }
+
+  function closeReminderPopover() {
+    const existing = root.querySelector("[data-reminder-popover]");
+    if (existing) existing.remove();
+  }
+
   els.form.addEventListener("submit", function (event) {
     event.preventDefault();
     createTodo();
@@ -384,6 +495,7 @@ function taskTemplate(task) {
   const start = task.startAt ? taskDateLabel(task.startAt) : "";
   const dueState = taskDueState(task);
   const tags = (task.tags || []).slice(0, 2);
+  const hasReminders = task.reminders && task.reminders.length > 0;
   return `
     <article class="gtd-slim-task ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-gtd-slim-task-id="${escapeAttr(task.id)}">
       <label class="gtd-slim-check">
@@ -399,6 +511,11 @@ function taskTemplate(task) {
           ${task.listId && task.listId !== "inbox" ? `<span>${escapeHTML(task.listId)}</span>` : ""}
           ${tags.map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
         </div>
+      </div>
+      <div class="gtd-slim-task-actions">
+        <button class="gtd-slim-reminder-btn ${hasReminders ? "has-reminders" : ""}" type="button" data-gtd-slim-reminder-btn title="设置提醒" aria-label="设置提醒">
+          ${SVG.bell || "🔔"}
+        </button>
       </div>
     </article>
   `;
@@ -615,4 +732,53 @@ function formatToday() {
     month: "long",
     weekday: "long",
   });
+}
+
+function reminderPopoverContent(task) {
+  const reminders = task.reminders || [];
+  const quickOptions = [
+    [10, "到期前 10 分钟"],
+    [30, "到期前 30 分钟"],
+    [60, "到期前 1 小时"],
+    [1440, "到期前 1 天"],
+  ];
+  let html = '<div class="gtd-slim-reminder-popover-inner">';
+  html += '<div class="gtd-slim-reminder-popover-title">设置提醒</div>';
+  html += '<div class="gtd-slim-reminder-quick">';
+  for (const [minutes, label] of quickOptions) {
+    html += `<button type="button" class="gtd-slim-reminder-quick-btn" data-reminder-quick="${minutes}">${escapeHTML(label)}</button>`;
+  }
+  html += '</div>';
+  html += '<div class="gtd-slim-reminder-abs">';
+  html += '<input type="datetime-local" data-reminder-abs-input class="gtd-slim-reminder-abs-input" />';
+  html += '<button type="button" class="gtd-slim-reminder-abs-btn" data-reminder-abs-confirm>确定</button>';
+  html += '</div>';
+  if (reminders.length > 0) {
+    html += '<div class="gtd-slim-reminder-list">';
+    html += '<div class="gtd-slim-reminder-list-title">已设提醒</div>';
+    reminders.forEach(function (r, i) {
+      const label = reminderLabel(r);
+      html += `<div class="gtd-slim-reminder-item"><span>${escapeHTML(label)}</span><button type="button" data-reminder-delete="${i}" class="gtd-slim-reminder-delete" title="删除">×</button></div>`;
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function reminderLabel(reminder) {
+  if (reminder.type === "absolute" && reminder.at) {
+    try {
+      return new Date(reminder.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return reminder.at;
+    }
+  }
+  if (reminder.type === "relative" && reminder.offsetMinutes) {
+    const m = reminder.offsetMinutes;
+    if (m >= 1440 && m % 1440 === 0) return `到期前 ${m / 1440} 天`;
+    if (m >= 60 && m % 60 === 0) return `到期前 ${m / 60} 小时`;
+    return `到期前 ${m} 分钟`;
+  }
+  return "提醒";
 }

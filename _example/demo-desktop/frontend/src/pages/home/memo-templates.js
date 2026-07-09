@@ -953,6 +953,7 @@ function taskCardTemplate(task, context) {
         </div>
       </div>
       <div class="memo-task-actions">
+        <button class="memo-action-button" type="button" data-action="editTask" title="编辑任务">${SVG.clock}</button>
         <button class="memo-action-button" type="button" data-action="addTaskNote" title="添加 note">${SVG.edit}</button>
         <button class="memo-action-button" type="button" data-action="copyTaskRef" title="复制引用">${SVG.link}</button>
         <button class="memo-action-button is-danger" type="button" data-action="deleteTask" title="删除">${SVG.trash}</button>

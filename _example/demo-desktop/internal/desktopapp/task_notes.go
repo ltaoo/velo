@@ -8,6 +8,7 @@ import (
 )
 
 var taskLinePattern = regexp.MustCompile(`^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$`)
+var taskProjectDirectivePattern = regexp.MustCompile(`(?:^|\s)/project:([^\s]+)`)
 
 type TaskNoteCreateRequest struct {
 	Content    string `json:"content"`
@@ -31,10 +32,11 @@ type ParsedTaskLine struct {
 }
 
 type ParsedTaskText struct {
-	DueAt string
-	Notes string
-	Tags  []string
-	Title string
+	DueAt       string
+	Notes       string
+	ProjectName string
+	Tags        []string
+	Title       string
 }
 
 func createVaultTaskNote(ctx *VaultContext, req TaskNoteCreateRequest) (TaskRecord, MemoRecord, error) {
@@ -216,6 +218,7 @@ func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
 	tags := extractMemoTags(text)
 	dueAt := ""
 	explicitTitle := ""
+	projectName := ""
 	withoutTitleSyntax := rewriteTaskTextOutsideInlineCode(text, func(segment string) string {
 		if explicitTitle == "" {
 			if next, title, ok := removeTaskTitlePropertySyntax(segment); ok {
@@ -236,7 +239,11 @@ func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
 		if dueAt == "" {
 			dueAt = foundDueAt
 		}
-		return removeTaskTagSyntax(withoutDates)
+		withoutProject, foundProject := removeTaskProjectDirective(withoutDates)
+		if projectName == "" {
+			projectName = foundProject
+		}
+		return removeTaskTagSyntax(withoutProject)
 	})
 	notes := ""
 	title := cleanTaskTitleText(explicitTitle)
@@ -255,10 +262,11 @@ func parseTaskMetadataFromTodoText(text string) ParsedTaskText {
 		title = "Untitled task"
 	}
 	return ParsedTaskText{
-		DueAt: dueAt,
-		Notes: notes,
-		Tags:  tags,
-		Title: title,
+		DueAt:       dueAt,
+		Notes:       notes,
+		ProjectName: projectName,
+		Tags:        tags,
+		Title:       title,
 	}
 }
 
@@ -399,6 +407,15 @@ func rewriteTaskTextOutsideInlineCode(text string, rewrite func(string) string) 
 
 func removeTaskTagSyntax(text string) string {
 	return memoTagPattern.ReplaceAllString(text, " ")
+}
+
+func removeTaskProjectDirective(text string) (string, string) {
+	match := taskProjectDirectivePattern.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return text, ""
+	}
+	cleaned := taskProjectDirectivePattern.ReplaceAllString(text, " ")
+	return cleaned, strings.TrimSpace(match[1])
 }
 
 func removeTaskDateSyntax(text string) (string, string) {

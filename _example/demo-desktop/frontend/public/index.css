@@ -1003,8 +1003,8 @@ body.memo-window-page #root {
   border-radius: 10px;
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
   color: var(--FG-0);
-  display: grid;
-  grid-template-rows: 44px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-width: 0;
   overflow: hidden;
@@ -1101,10 +1101,10 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-window-body {
   background: var(--BG-2);
-  border-radius: 0 0 9px 9px;
+  flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 0 0 116px;
+  padding: 0;
 }
 
 .memo-window-card {
@@ -1129,15 +1129,12 @@ body.is-fixed-window .memo-window-shell {
 .memo-window-comment-form {
   align-items: flex-end;
   background: color-mix(in srgb, var(--BG-2) 88%, transparent);
-  bottom: 1px;
+  border-top: 1px solid var(--border);
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
   grid-template-columns: 38px minmax(0, 1fr) 38px 38px;
-  left: 1px;
   padding: 10px;
-  position: fixed;
-  right: 1px;
-  z-index: 20;
 }
 
 .memo-window-comment-tool {
@@ -1657,6 +1654,73 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-project-create {
   margin-top: 8px;
+}
+
+.memo-inline-prompt-overlay {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 9999;
+}
+
+.memo-inline-prompt-dialog {
+  background: var(--memo-surface, #fff);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+  padding: 20px;
+  width: 90%;
+}
+
+.memo-inline-prompt-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.memo-inline-prompt-input {
+  background: var(--memo-bg, #f5f5f5);
+  border: 1px solid var(--memo-border, #e0e0e0);
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.memo-inline-prompt-input:focus {
+  border-color: var(--memo-blue, #2563eb);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--memo-blue, #2563eb) 20%, transparent);
+}
+
+.memo-inline-prompt-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.memo-inline-prompt-cancel,
+.memo-inline-prompt-ok {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.memo-inline-prompt-cancel {
+  background: var(--memo-bg, #f5f5f5);
+  color: var(--memo-text-secondary, #666);
+}
+
+.memo-inline-prompt-ok {
+  background: var(--memo-blue, #2563eb);
+  color: #fff;
 }
 
 .memo-project-dot {
@@ -5285,7 +5349,6 @@ body.memo-slim-page {
 }
 
 .memo-slim-shell {
-  grid-template-rows: 44px minmax(0, 1fr);
 }
 
 .memo-slim-titlebar {
@@ -5293,16 +5356,20 @@ body.memo-slim-page {
 }
 
 .memo-slim-body {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
 .memo-slim-form {
   background: var(--BG-2);
-  border-bottom: 1px solid var(--border);
-  display: grid;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
   position: relative;
 }
@@ -5312,14 +5379,15 @@ body.memo-slim-page {
   border: 0;
   color: var(--FG-0);
   display: block;
+  flex: 1;
   font: inherit;
   line-height: 1.5;
-  max-height: 34vh;
-  min-height: 112px;
+  min-height: 0;
   outline: 0;
   overflow-wrap: anywhere;
+  overflow-y: auto;
   padding: 16px 56px 16px 16px;
-  resize: vertical;
+  resize: none;
   width: 100%;
   word-break: break-word;
 }
@@ -5372,7 +5440,9 @@ body.memo-slim-page {
 
 .memo-slim-list {
   display: grid;
+  flex: 0 0 auto;
   gap: 0;
+  max-height: 40vh;
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0 18px;
@@ -5442,7 +5512,6 @@ body.gtd-slim-page #root {
 }
 
 .gtd-slim-shell {
-  grid-template-rows: 44px minmax(0, 1fr);
 }
 
 .gtd-slim-titlebar {
@@ -5663,7 +5732,7 @@ body.gtd-slim-page #root {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-width: 0;
   padding: 11px 12px;
 }
@@ -6243,4 +6312,336 @@ body.gtd-slim-page #root {
   .memo-delete-actions .memo-secondary-button {
     width: 100%;
   }
+}
+
+/* Reminder UI */
+.gtd-slim-task-actions {
+  align-items: flex-start;
+  display: flex;
+  padding-top: 2px;
+  position: relative;
+}
+
+.gtd-slim-reminder-btn {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--FG-2);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  transition: opacity 0.15s, color 0.15s;
+  width: 22px;
+}
+
+.gtd-slim-reminder-btn svg {
+  fill: none;
+  height: 14px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 14px;
+}
+
+.gtd-slim-task:hover .gtd-slim-reminder-btn,
+.gtd-slim-reminder-btn.has-reminders {
+  opacity: 1;
+}
+
+.gtd-slim-reminder-btn.has-reminders {
+  color: var(--memo-accent);
+}
+
+.gtd-slim-reminder-btn:hover {
+  background: var(--BG-1);
+  color: var(--FG-0);
+}
+
+.gtd-slim-reminder-popover {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  min-width: 200px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: 28px;
+  z-index: 100;
+}
+
+.gtd-slim-reminder-popover-inner {
+  display: grid;
+  gap: 8px;
+}
+
+.gtd-slim-reminder-popover-title {
+  color: var(--FG-0);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.gtd-slim-reminder-quick {
+  display: grid;
+  gap: 2px;
+}
+
+.gtd-slim-reminder-quick-btn {
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--FG-0);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.gtd-slim-reminder-quick-btn:hover {
+  background: var(--BG-1);
+}
+
+.gtd-slim-reminder-abs {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.gtd-slim-reminder-abs-input {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--FG-0);
+  flex: 1;
+  font-size: var(--font-xs);
+  padding: 4px 6px;
+}
+
+.gtd-slim-reminder-abs-btn {
+  background: var(--memo-accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-size: var(--font-xs);
+  padding: 4px 10px;
+}
+
+.gtd-slim-reminder-list {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.gtd-slim-reminder-list-title {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.gtd-slim-reminder-item {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-xs);
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.gtd-slim-reminder-item span {
+  color: var(--FG-0);
+}
+
+.gtd-slim-reminder-delete {
+  background: none;
+  border: none;
+  color: var(--FG-2);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.gtd-slim-reminder-delete:hover {
+  color: var(--RED);
+}
+
+/* Task Edit Dialog */
+.task-edit-dialog {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 80vh;
+  max-width: 480px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.task-edit-dialog-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+
+.task-edit-dialog-header h3 {
+  color: var(--FG-0);
+  font-size: var(--font-md);
+  font-weight: 700;
+  margin: 0;
+}
+
+.task-edit-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.task-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.task-edit-field label {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.task-edit-field input[type="text"],
+.task-edit-field input[type="date"],
+.task-edit-field select {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--FG-0);
+  font-size: var(--font-sm);
+  padding: 8px 10px;
+}
+
+.task-edit-field-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.task-edit-reminders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-edit-reminders > label {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.task-edit-reminder-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-edit-reminder-chip {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--FG-0);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  padding: 5px 12px;
+  transition: background 0.12s;
+}
+
+.task-edit-reminder-chip:hover {
+  background: var(--memo-accent);
+  border-color: var(--memo-accent);
+  color: #fff;
+}
+
+.task-edit-reminder-custom {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.task-edit-reminder-custom input {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--FG-0);
+  flex: 1;
+  font-size: var(--font-xs);
+  padding: 6px 8px;
+}
+
+.task-edit-reminder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-edit-reminder-item {
+  align-items: center;
+  background: var(--BG-1);
+  border-radius: 6px;
+  display: flex;
+  font-size: var(--font-xs);
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.task-edit-reminder-item span {
+  color: var(--FG-0);
+}
+
+.task-edit-reminder-fired {
+  color: var(--FG-2);
+  font-size: var(--font-xs);
+}
+
+.task-edit-reminder-delete {
+  background: none;
+  border: none;
+  color: var(--FG-2);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: auto;
+  padding: 2px 4px;
+}
+
+.task-edit-reminder-delete:hover {
+  color: var(--RED);
+}
+
+.task-edit-reminder-empty {
+  color: var(--FG-2);
+  font-size: var(--font-xs);
+  margin: 0;
+}
+
+.task-edit-dialog-footer {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 14px 18px;
 }

@@ -249,13 +249,13 @@ function slimTemplate() {
         </div>
       </header>
       <main class="memo-window-body memo-slim-body velo-no-drag">
+        <section class="memo-slim-list" data-slim-list aria-label="Memo list"></section>
         <form class="memo-slim-form" data-slim-form>
           <textarea class="memo-slim-input" data-slim-input placeholder="记录 memo..." rows="4"></textarea>
           <button class="memo-slim-submit" type="submit" data-slim-submit title="发布" aria-label="发布">
             ${SVG.send}
           </button>
         </form>
-        <section class="memo-slim-list" data-slim-list aria-label="Memo list"></section>
       </main>
       <div class="memo-toast" data-toast role="status"></div>
     </div>

@@ -58,6 +58,7 @@ type TaskRecord struct {
 type TaskReminder struct {
 	At            string `json:"at,omitempty"`
 	Base          string `json:"base,omitempty"`
+	Fired         bool   `json:"fired,omitempty"`
 	OffsetMinutes int    `json:"offsetMinutes,omitempty"`
 	Type          string `json:"type"`
 }

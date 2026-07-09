@@ -189,6 +189,10 @@ func Run(assets Assets) {
 	externalAPIServer := startExternalAPIServer(logger)
 	defer shutdownExternalAPIServer(externalAPIServer, logger)
 
+	reminderScheduler := NewReminderScheduler(logger)
+	reminderScheduler.Start()
+	defer reminderScheduler.Stop()
+
 	fmt.Println("starting server...")
 
 	sm := shortcut.NewManager()

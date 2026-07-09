@@ -63,6 +63,7 @@ export function normalizeTaskSummary(task) {
     path: normalized.path,
     priority: normalized.priority,
     projectId: normalized.projectId,
+    reminders: normalized.reminders,
     source: normalized.source,
     startAt: normalized.startAt,
     status: normalized.status,

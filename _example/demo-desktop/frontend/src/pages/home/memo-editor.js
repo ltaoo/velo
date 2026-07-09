@@ -1700,7 +1700,7 @@ function createMemoTimePickerPlugin(editor) {
 
         if (event.key === "Escape") {
           event.preventDefault();
-          view.dispatch(view.state.tr.setMeta(key, { type: "close" }));
+          view.dispatch(view.state.tr.setMeta(key, { dismissTriggerFrom: true, type: "close" }));
           return true;
         }
 

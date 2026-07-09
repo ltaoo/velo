@@ -101,10 +101,17 @@ func syncTaskLinesForSource(ctx *VaultContext, content string, source taskLineSy
 		}
 
 		metadata := parseTaskMetadataFromTodoText(parsed.Text)
+		taskProjectID := source.ProjectID
+		if metadata.ProjectName != "" {
+			resolved, err := resolveOrCreateProjectByName(ctx, metadata.ProjectName)
+			if err == nil && resolved != "" {
+				taskProjectID = resolved
+			}
+		}
 		req := TaskCreateRequest{
 			DueAt:     metadata.DueAt,
 			Notes:     metadata.Notes,
-			ProjectID: source.ProjectID,
+			ProjectID: taskProjectID,
 			Source:    taskSourceForLine(source, index+1, line),
 			Tags:      metadata.Tags,
 			Title:     metadata.Title,

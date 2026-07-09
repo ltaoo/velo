@@ -1,6 +1,8 @@
 export const SVG = {
   archive:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"></rect><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>',
+  bell:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>',
   bold:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h6.2a3.3 3.3 0 0 1 0 6.6H7z"></path><path d="M7 11.6h7.2a3.7 3.7 0 0 1 0 7.4H7z"></path></svg>',
   check:

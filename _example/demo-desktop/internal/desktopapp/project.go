@@ -250,3 +250,24 @@ func normalizeProjectColor(value string) string {
 	}
 	return "#2563eb"
 }
+
+func resolveOrCreateProjectByName(ctx *VaultContext, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
+	}
+	file, err := loadVaultProjects(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, project := range file.Projects {
+		if !project.Archived && project.Name == name {
+			return project.ID, nil
+		}
+	}
+	created, err := createVaultProject(ctx, ProjectCreateRequest{Name: name})
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
