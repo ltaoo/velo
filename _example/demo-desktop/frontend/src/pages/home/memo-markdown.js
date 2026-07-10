@@ -178,12 +178,13 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
     if (task) {
       const sourceLineIndex = index + lineNumberOffset;
       const taskSourceAttrs = memoTaskSourceAttrs(context, sourceLineIndex);
+      const taskDetailAttrs = memoTaskDetailAttrs(context, sourceLineIndex);
       html += memoLineTemplate(
         lineNumber + lineNumberOffset,
         `
         <div class="memo-task-line">
           <input type="checkbox" ${context.readonly ? "disabled" : taskSourceAttrs} ${task.checked ? "checked" : ""} />
-          <span>${inlineMarkdown(task.text, context)}</span>
+          <span ${taskDetailAttrs}>${inlineMarkdown(task.text, context)}</span>
         </div>
       `,
         "is-task",
@@ -240,6 +241,19 @@ function memoTaskSourceAttrs(context, lineIndex) {
     sourceId ? `data-task-source-id="${escapeAttr(sourceId)}"` : "",
     sourceMemoId ? `data-task-source-memo-id="${escapeAttr(sourceMemoId)}"` : "",
     sourceCommentId ? `data-task-source-comment-id="${escapeAttr(sourceCommentId)}"` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function memoTaskDetailAttrs(context, lineIndex) {
+  const sourceId = String((context && context.sourceId) || "").trim();
+  const sourceMemoId = String((context && context.sourceMemoId) || sourceId).trim();
+  const sourceCommentId = String((context && context.sourceCommentId) || "").trim();
+  const sourceType = String((context && context.sourceType) || (sourceCommentId ? "comment" : "memo")).trim().toLowerCase() || "memo";
+  return [
+    `data-task-detail="${escapeAttr(lineIndex)}"`,
+    `data-task-detail-source-type="${escapeAttr(sourceType)}"`,
+    sourceMemoId ? `data-task-detail-memo-id="${escapeAttr(sourceMemoId)}"` : "",
+    sourceCommentId ? `data-task-detail-comment-id="${escapeAttr(sourceCommentId)}"` : "",
   ].filter(Boolean).join(" ");
 }
 

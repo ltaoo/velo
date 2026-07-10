@@ -299,6 +299,10 @@ function shellTemplate() {
             <p data-main-subtitle>捕捉、整理、回看</p>
           </div>
           <div class="memo-topbar-actions">
+            <button class="memo-icon-text-button" type="button" data-action="openTimeline" title="打开时间线窗口">
+              ${SVG.clock}
+              <span>时间线</span>
+            </button>
             <button class="memo-icon-text-button" type="button" data-action="openSlimMemos" title="打开精简版">
               ${SVG.list}
               <span>精简版</span>
@@ -561,23 +565,16 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
       <header class="memo-card-head">
-        <div class="memo-author">
-          <div class="memo-avatar">U</div>
-          <div>
-            <div class="memo-author-name">You</div>
-            <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
-          </div>
-        </div>
         <div class="memo-card-meta">
+          <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
+          ${projectBadge}
+          ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
+          ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
           <div class="memo-card-head-actions">
             <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
             <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口">${SVG.external}</button>
             <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
           </div>
-          <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
-          ${projectBadge}
-          ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
-          ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
         </div>
       </header>
       ${
@@ -616,6 +613,10 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             : `<button class="memo-action-button" type="button" data-action="archiveMemo" title="归档">${SVG.archive}</button>`
         }
         <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
+        <div class="memo-card-author-info">
+          <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+          <span class="memo-author-name">You</span>
+        </div>
       </footer>
     </article>
   `;

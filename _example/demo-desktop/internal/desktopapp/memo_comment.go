@@ -387,14 +387,14 @@ func sortMemoComments(comments []MemoCommentRecord) {
 		left := parseMemoTime(comments[i].CreatedAt)
 		right := parseMemoTime(comments[j].CreatedAt)
 		if left.Equal(right) {
-			return comments[i].ID < comments[j].ID
+			return comments[i].ID > comments[j].ID
 		}
 		if left.IsZero() {
-			return false
-		}
-		if right.IsZero() {
 			return true
 		}
-		return left.Before(right)
+		if right.IsZero() {
+			return false
+		}
+		return left.After(right)
 	})
 }

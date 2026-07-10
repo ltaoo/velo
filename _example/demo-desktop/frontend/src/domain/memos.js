@@ -110,6 +110,29 @@ export function parseTaskLine(line) {
   };
 }
 
+const TASK_TITLE_PREFIX_PAIRS = [
+  { open: "[", close: "]", requireGap: true },
+  { open: "【", close: "】", requireGap: false },
+  { open: "「", close: "」", requireGap: false },
+  { open: "『", close: "』", requireGap: false },
+];
+
+export function parseTaskTitleAndDesc(text) {
+  const trimmed = String(text || "").trim();
+  for (const pair of TASK_TITLE_PREFIX_PAIRS) {
+    if (!trimmed.startsWith(pair.open)) continue;
+    const closeIndex = trimmed.indexOf(pair.close, pair.open.length);
+    if (closeIndex < 0) continue;
+    const title = trimmed.slice(pair.open.length, closeIndex).trim();
+    if (!title) continue;
+    const after = trimmed.slice(closeIndex + pair.close.length);
+    if (pair.requireGap && after.length > 0 && !/^[\s:|\-,.;，。：；、]/.test(after)) continue;
+    const desc = after.replace(/^[\s:|\-，。：；、]+/, "").trim();
+    return { title, desc };
+  }
+  return { title: trimmed, desc: "" };
+}
+
 export function updateTaskLine(line, checked) {
   return String(line || "").replace(
     TASK_LINE_REGEX,

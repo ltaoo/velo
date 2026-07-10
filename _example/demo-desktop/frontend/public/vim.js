@@ -1043,6 +1043,55 @@
     return true;
   }
 
+  function indentLine(view, direction, count, repeatAction) {
+    const { state } = view;
+    if (!view.dispatch) return true;
+    const INDENT = "  ";
+    const times = Math.max(1, count || 1);
+    const block = textblockInfo(state, state.selection.from);
+    let tr = state.tr;
+    const text = block.node.textContent || "";
+
+    if (direction === "right") {
+      const insertStr = INDENT.repeat(times);
+      tr = tr.insertText(insertStr, block.start, block.start);
+    } else {
+      let removed = 0;
+      for (let i = 0; i < times; i += 1) {
+        const currentText = tr.doc.textBetween(
+          tr.mapping.map(block.start),
+          tr.mapping.map(block.end),
+        );
+        let charsToRemove = 0;
+        for (let c = 0; c < INDENT.length; c += 1) {
+          if (c < currentText.length && (currentText[c] === " " || currentText[c] === "\t")) {
+            charsToRemove += 1;
+          } else {
+            break;
+          }
+        }
+        if (charsToRemove === 0) break;
+        const start = tr.mapping.map(block.start);
+        tr = tr.delete(start, start + charsToRemove);
+        removed += charsToRemove;
+      }
+      if (removed === 0) {
+        view.dispatch(setVimMeta(state.tr, clearTransient({ message: "already at left edge" })));
+        return true;
+      }
+    }
+
+    const cursorPos = clamp(
+      firstNonBlankInBlock({ doc: tr.doc, selection: state.selection }, tr.mapping.map(state.selection.from)),
+      0,
+      tr.doc.content.size,
+    );
+    tr = tr.setSelection(textSelection(tr.doc, cursorPos, cursorPos));
+    tr = setVimMeta(tr, withRepeat(clearTransient(), repeatAction));
+    view.dispatch(tr.scrollIntoView());
+    return true;
+  }
+
   function linewisePasteNodes(state, text, count) {
     const paragraph = state.schema.nodes.paragraph;
     if (!paragraph) return [];
@@ -1258,6 +1307,8 @@
       if (action.key === "P") return pasteRegister(view, true, { ...action, count }, count);
       if (action.key === "J") return joinLines(view, count, { ...action, count });
       if (action.key === "~") return toggleCaseAtCursor(view, count, { ...action, count });
+      if (action.key === ">>") return indentLine(view, "right", count, { ...action, count });
+      if (action.key === "<<") return indentLine(view, "left", count, { ...action, count });
     }
 
     view.dispatch(setVimMeta(view.state.tr, { message: "repeat unsupported" }));
@@ -1641,6 +1692,20 @@
       return dispatchPending(state, view.dispatch, null, "unknown g" + key);
     }
 
+    if (pluginState.pending === ">") {
+      if (key === ">") {
+        return indentLine(view, "right", count, { type: "command", key: ">>", count });
+      }
+      return dispatchPending(state, view.dispatch, null, "unknown >" + key);
+    }
+
+    if (pluginState.pending === "<") {
+      if (key === "<") {
+        return indentLine(view, "left", count, { type: "command", key: "<<", count });
+      }
+      return dispatchPending(state, view.dispatch, null, "unknown <" + key);
+    }
+
     if (pluginState.pending === "d" || pluginState.pending === "y" || pluginState.pending === "c") {
       if (key === "f") {
         return dispatchFindPending(state, view.dispatch, "operator", pluginState.pending);
@@ -1664,6 +1729,8 @@
     }
 
     if (key === "g") return dispatchPending(state, view.dispatch, "g", "g");
+    if (key === ">") return dispatchPending(state, view.dispatch, ">", ">", true);
+    if (key === "<") return dispatchPending(state, view.dispatch, "<", "<", true);
     if (key === "G") return setCursor(state, view.dispatch, lastLineStart(state), clearTransient());
     if (key === "J") {
       return joinLines(view, count, { type: "command", key: "J", count });

@@ -153,6 +153,12 @@ func BuildOpenWindowSpec(req OpenWindowRequest) WindowSpec {
 		spec.Title = "Todos"
 		spec.Width = 420
 		spec.Height = 640
+	case "/timeline":
+		spec.EntryPage = "timeline-window.html"
+		spec.Name = "timeline"
+		spec.Title = "时间线"
+		spec.Width = 420
+		spec.Height = 640
 	}
 	return spec
 }

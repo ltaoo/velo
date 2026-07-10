@@ -348,7 +348,7 @@ function createMiniEditor(host, options) {
   }
 
   function syncEmptyState() {
-    host.classList.toggle("is-empty", editor.getText().trim().length === 0);
+    host.classList.toggle("is-empty", editor.getText().length === 0);
   }
 }
 

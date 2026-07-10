@@ -14,6 +14,7 @@ import {
   normalizeMemoPayload,
   parseMemoFenceLine,
   parseTaskLine,
+  parseTaskTitleAndDesc,
   stripProjectDirective,
   updateTaskLine,
 } from "../../domain/memos.js";
@@ -148,11 +149,38 @@ const CLIPBOARD_MIN_VISIBLE_MS = 1500;
 const DETACHED_WINDOW_STATE_POLL_INTERVAL = 250;
 const DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
 const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
+const FEED_PAGE_SIZE = 10;
 const memoTocHighlightTimers = new WeakMap();
 
 function normalizeTaskFilter(value) {
   const filter = String(value || "").trim().toLowerCase();
   return TASK_FILTERS.has(filter) ? filter : "today";
+}
+
+function extractTaskRefId(text) {
+  var match = String(text || "").match(/\[\[task:([^\]|]+)/);
+  return match ? match[1].trim() : "";
+}
+
+function stripTaskRefSyntax(text) {
+  return String(text || "").replace(/\[\[task:[^\]|]+\|?([^\]]*)\]\]/g, function (_m, label) {
+    return label.trim() || "";
+  }).trim();
+}
+
+function formatInlineTaskReminder(reminder) {
+  if (reminder.type === "absolute" && reminder.at) {
+    try {
+      return new Date(reminder.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch (_) { return reminder.at; }
+  }
+  if (reminder.type === "relative" && reminder.offsetMinutes) {
+    const m = reminder.offsetMinutes;
+    if (m >= 1440 && m % 1440 === 0) return "到期前 " + (m / 1440) + " 天";
+    if (m >= 60 && m % 60 === 0) return "到期前 " + (m / 60) + " 小时";
+    return "到期前 " + m + " 分钟";
+  }
+  return "提醒";
 }
 
 function loadTaskFilter() {
@@ -539,6 +567,7 @@ export function mountMemosHome(root) {
     highlightTimer: null,
     expandedMemoIds: new Set(),
     expandedCommentListMemoIds: new Set(),
+    feedPage: 1,
     draftsLoaded: false,
     editorSettings: loadEditorSettings(),
     editPreviewVisible: false,
@@ -650,6 +679,7 @@ export function mountMemosHome(root) {
   root.addEventListener("input", handleInput);
   root.addEventListener("change", handleChange);
   root.addEventListener("submit", handleSubmit);
+  els.memoList.parentElement.addEventListener("scroll", handleMemoListScroll);
   window.addEventListener("focus", handleWindowFocus);
   window.addEventListener("blur", handleWindowBlur);
   window.addEventListener("keydown", handleKeydown);
@@ -939,6 +969,14 @@ export function mountMemosHome(root) {
       return;
     }
 
+    const taskDetailTarget = closestElement(event.target, "[data-task-detail]");
+    if (taskDetailTarget && root.contains(taskDetailTarget)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openInlineTaskDetail(taskDetailTarget);
+      return;
+    }
+
     const memoRefTarget = closestElement(event.target, "[data-memo-ref-target]");
     if (memoRefTarget && root.contains(memoRefTarget)) {
       event.preventDefault();
@@ -1118,6 +1156,9 @@ export function mountMemosHome(root) {
         break;
       case "openSlimGTD":
         openSlimGTD();
+        break;
+      case "openTimeline":
+        openTimeline();
         break;
       case "openSourceMemo":
         openSourceMemo(action.dataset.sourceMemoId || memoId, action.dataset.sourceCommentId || "");
@@ -1544,6 +1585,26 @@ export function mountMemosHome(root) {
     );
   }
 
+  function openTimeline() {
+    if (typeof invoke !== "function") {
+      window.open("timeline-window.html", "_blank", "noopener");
+      return;
+    }
+
+    invoke("/api/open_window?pathname=%2Ftimeline", { method: "GET" }).then(
+      function (resp) {
+        if (!resp || resp.code !== 0) {
+          showToast((resp && resp.msg) || "打开时间线失败");
+          return;
+        }
+        showToast("已打开时间线");
+      },
+      function (err) {
+        showToast("打开时间线失败: " + err);
+      },
+    );
+  }
+
   function detachMemo(memoId) {
     const memo = findMemo(memoId);
     if (!memo) return;
@@ -1890,6 +1951,11 @@ export function mountMemosHome(root) {
   }
 
   function handleKeydown(event) {
+    if (root.querySelector("[data-inline-task-detail-dialog]") && event.key === "Escape") {
+      event.preventDefault();
+      closeInlineTaskDetailDialog();
+      return;
+    }
     if (root.querySelector("[data-task-edit-dialog]") && event.key === "Escape") {
       event.preventDefault();
       closeTaskEditDialog();
@@ -2762,6 +2828,190 @@ export function mountMemosHome(root) {
       return "到期前 " + m + " 分钟";
     }
     return "提醒";
+  }
+
+
+  // --- Inline Task Detail Dialog ---
+
+  function openInlineTaskDetail(target) {
+    const lineIndex = Number(target.dataset.taskDetail);
+    const sourceType = target.dataset.taskDetailSourceType || "memo";
+    const sourceMemoId = target.dataset.taskDetailMemoId || "";
+    const sourceCommentId = target.dataset.taskDetailCommentId || "";
+
+    let content = "";
+    let memo = null;
+    let comment = null;
+
+    if (sourceType === "comment" && sourceCommentId) {
+      comment = findComment(sourceCommentId);
+      content = comment ? String(comment.content || "") : "";
+      memo = comment ? findMemo(comment.memoId) : null;
+    } else if (sourceMemoId) {
+      memo = findMemo(sourceMemoId);
+      content = memo ? String(memo.content || "") : "";
+    }
+
+    const lines = content.split("\n");
+    const line = lines[lineIndex] || "";
+    const task = parseTaskLine(line);
+    if (!task) return;
+
+    // Try to find linked Task entity
+    const linkedTask = findLinkedTask(sourceMemoId, sourceCommentId, lineIndex);
+    if (linkedTask) {
+      // Fetch full task for reminders/notes
+      getTask(linkedTask.id).then(function (fullTask) {
+        renderInlineTaskDetailDialog(buildTaskDetailInfo(fullTask, memo));
+      }, function () {
+        renderInlineTaskDetailDialog(buildTaskDetailInfo(linkedTask, memo));
+      });
+      return;
+    }
+
+    // Check if task text contains a [[task:xxx|label]] reference
+    var taskRefId = extractTaskRefId(task.text);
+    if (taskRefId) {
+      getTask(taskRefId).then(function (fullTask) {
+        renderInlineTaskDetailDialog(buildTaskDetailInfo(fullTask, memo));
+      }, function () {
+        var parsed = parseTaskTitleAndDesc(stripTaskRefSyntax(task.text));
+        renderInlineTaskDetailDialog({
+          title: parsed.title,
+          desc: parsed.desc,
+          checked: task.checked,
+          completedAt: "",
+          createdAt: memo ? memo.createdAt : "",
+          reminders: [],
+          projectId: memo ? memo.projectId : "",
+          memoId: sourceMemoId,
+        });
+      });
+      return;
+    }
+
+    var parsed = parseTaskTitleAndDesc(task.text);
+    renderInlineTaskDetailDialog({
+      title: parsed.title,
+      desc: parsed.desc,
+      checked: task.checked,
+      completedAt: "",
+      createdAt: memo ? memo.createdAt : "",
+      reminders: [],
+      projectId: memo ? memo.projectId : "",
+      memoId: sourceMemoId,
+    });
+  }
+
+  function findLinkedTask(memoId, commentId, lineIndex) {
+    return state.tasks.find(function (task) {
+      if (!task || !task.source) return false;
+      if (commentId) {
+        return task.source.commentId === commentId && task.source.line === lineIndex;
+      }
+      return task.source.memoId === memoId && task.source.line === lineIndex;
+    }) || null;
+  }
+
+  function buildTaskDetailInfo(task, memo) {
+    return {
+      title: task.title || "",
+      desc: task.notes || "",
+      checked: task.status === "completed",
+      completedAt: task.completedAt || "",
+      createdAt: task.createdAt || (memo ? memo.createdAt : ""),
+      reminders: task.reminders || [],
+      projectId: task.projectId || (memo ? memo.projectId : ""),
+      memoId: task.source ? task.source.memoId : "",
+    };
+  }
+
+  function renderInlineTaskDetailDialog(info) {
+    closeInlineTaskDetailDialog();
+    const overlay = document.createElement("div");
+    overlay.className = "memo-dialog";
+    overlay.setAttribute("data-inline-task-detail-dialog", "");
+    overlay.innerHTML = inlineTaskDetailDialogTemplate(info);
+    root.appendChild(overlay);
+
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) closeInlineTaskDetailDialog();
+    });
+    overlay.addEventListener("click", function (event) {
+      const closeBtn = closestElement(event.target, "[data-inline-task-detail-close]");
+      if (closeBtn) closeInlineTaskDetailDialog();
+      const focusBtn = closestElement(event.target, "[data-inline-task-detail-focus-memo]");
+      if (focusBtn) {
+        closeInlineTaskDetailDialog();
+        focusMemo(info.memoId);
+      }
+    });
+  }
+
+  function closeInlineTaskDetailDialog() {
+    const existing = root.querySelector("[data-inline-task-detail-dialog]");
+    if (existing) existing.remove();
+  }
+
+  function inlineTaskDetailDialogTemplate(info) {
+    const statusLabel = info.checked ? "已完成" : "未完成";
+    const statusClass = info.checked ? "is-complete" : "is-open";
+    const createdLabel = info.createdAt ? formatInlineTaskDate(info.createdAt) : "";
+    const completedLabel = info.completedAt ? formatInlineTaskDate(info.completedAt) : "";
+    const project = info.projectName || (info.projectId ? projectLabel(info.projectId) : "");
+    const reminders = info.reminders || [];
+
+    return `
+      <div class="inline-task-detail-dialog">
+        <div class="inline-task-detail-header">
+          <span class="inline-task-detail-status ${statusClass}">${escapeHTML(statusLabel)}</span>
+          <button class="memo-action-button" type="button" data-inline-task-detail-close title="关闭">${SVG.x}</button>
+        </div>
+        <div class="inline-task-detail-body">
+          <div class="inline-task-detail-title">${escapeHTML(info.title)}</div>
+          ${info.desc ? `<div class="inline-task-detail-desc">${escapeHTML(info.desc)}</div>` : ""}
+          <div class="inline-task-detail-meta">
+            ${createdLabel ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">创建</span>
+              <span>${escapeHTML(createdLabel)}</span>
+            </div>
+            ` : ""}
+            ${completedLabel ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">完成</span>
+              <span>${escapeHTML(completedLabel)}</span>
+            </div>
+            ` : ""}
+            ${reminders.length ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">提醒</span>
+              <span>${reminders.map(function (r) { return escapeHTML(formatInlineTaskReminder(r)); }).join("、")}</span>
+            </div>
+            ` : ""}
+            ${project ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">项目</span>
+              <span>${escapeHTML(project)}</span>
+            </div>
+            ` : ""}
+          </div>
+        </div>
+        <div class="inline-task-detail-footer">
+          ${info.memoId ? `<button class="memo-secondary-button" type="button" data-inline-task-detail-focus-memo>定位 Memo</button>` : ""}
+          <button class="memo-primary-button" type="button" data-inline-task-detail-close>关闭</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function formatInlineTaskDate(isoString) {
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return isoString;
+    }
   }
 
 
@@ -4320,7 +4570,40 @@ export function mountMemosHome(root) {
     syncMemoExpandControls();
   }
 
+  function handleMemoListScroll() {
+    if (state.activeView !== "memos") return;
+    const container = els.memoList.parentElement;
+    if (!container) return;
+    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 80) {
+      const memos = visibleMemos();
+      const maxPage = Math.ceil(memos.length / FEED_PAGE_SIZE);
+      if (state.feedPage >= maxPage) return;
+      state.feedPage++;
+      appendFeedPage();
+    }
+  }
+
+  function appendFeedPage() {
+    const memos = visibleMemos();
+    const start = (state.feedPage - 1) * FEED_PAGE_SIZE;
+    const end = state.feedPage * FEED_PAGE_SIZE;
+    const page = memos.slice(start, end);
+    if (page.length === 0) return;
+
+    const hasMore = end < memos.length;
+    const existingLoader = els.memoList.querySelector(".memo-feed-load-more");
+    if (existingLoader) existingLoader.remove();
+
+    const fragment = document.createElement("div");
+    fragment.innerHTML = page.map((memo) => safeMemoTemplate(memo)).join("")
+      + (hasMore ? '<div class="memo-feed-load-more">加载更多...</div>' : "");
+    while (fragment.firstChild) {
+      els.memoList.appendChild(fragment.firstChild);
+    }
+  }
+
   function renderFeed() {
+    state.feedPage = 1;
     if (commentEditor) {
       if (state.commentingMemoId && state.commentingMemoId === commentEditorMemoId) {
         syncCommentDraftFromEditor();
@@ -4345,11 +4628,15 @@ export function mountMemosHome(root) {
     }
 
     const memos = visibleMemos();
+    const visibleCount = state.feedPage * FEED_PAGE_SIZE;
+    const paginated = memos.slice(0, visibleCount);
+    const hasMore = paginated.length < memos.length;
     els.feedCount.textContent = `${memos.length} 条`;
-    els.memoList.innerHTML = memos.length
-      ? memos
+    els.memoList.innerHTML = paginated.length
+      ? paginated
           .map((memo) => safeMemoTemplate(memo))
           .join("")
+          + (hasMore ? '<div class="memo-feed-load-more">加载更多...</div>' : "")
       : emptyFeedTemplate();
 
     if (state.editingId) {
@@ -4802,8 +5089,8 @@ export function mountMemosHome(root) {
       .sort(function (a, b) {
         const left = new Date(a.createdAt || 0).getTime() || 0;
         const right = new Date(b.createdAt || 0).getTime() || 0;
-        if (left === right) return a.id.localeCompare(b.id);
-        return left - right;
+        if (left === right) return b.id.localeCompare(a.id);
+        return right - left;
       });
   }
 
@@ -5953,6 +6240,14 @@ export function mountDetachedMemoWindow(root, options = {}) {
       return;
     }
 
+    const taskDetailTarget = closestElement(event.target, "[data-task-detail]");
+    if (taskDetailTarget && root.contains(taskDetailTarget)) {
+      event.preventDefault();
+      event.stopPropagation();
+      openDetachedInlineTaskDetail(taskDetailTarget);
+      return;
+    }
+
     const action = closestElement(event.target, "[data-action]");
     if (!action || !root.contains(action)) return;
 
@@ -5992,6 +6287,11 @@ export function mountDetachedMemoWindow(root, options = {}) {
   }
 
   function handleKeydown(event) {
+    if (event.key === "Escape" && root.querySelector("[data-inline-task-detail-dialog]")) {
+      event.preventDefault();
+      closeDetachedInlineTaskDetailDialog();
+      return;
+    }
     if (!isDetachedCommentEditorTarget(event.target)) return;
     if (event.isComposing) return;
     if (event.key !== "Enter") return;
@@ -6067,6 +6367,154 @@ export function mountDetachedMemoWindow(root, options = {}) {
       state.commentSaving = false;
       syncDetachedCommentForm();
     });
+  }
+
+  function openDetachedInlineTaskDetail(target) {
+    const lineIndex = Number(target.dataset.taskDetail);
+    const sourceType = target.dataset.taskDetailSourceType || "memo";
+    const sourceCommentId = target.dataset.taskDetailCommentId || "";
+    const sourceMemoId = target.dataset.taskDetailMemoId || "";
+
+    let content = "";
+    let memo = state.memo;
+    let comment = null;
+
+    if (sourceType === "comment" && sourceCommentId) {
+      comment = state.comments.find((item) => item && item.id === sourceCommentId);
+      content = comment ? String(comment.content || "") : "";
+    } else {
+      content = memo ? String(memo.content || "") : "";
+    }
+
+    const lines = content.split("\n");
+    const line = lines[lineIndex] || "";
+    const task = parseTaskLine(line);
+    if (!task) return;
+
+    // Check if task text contains a [[task:xxx|label]] reference
+    var taskRefId = extractTaskRefId(task.text);
+    if (taskRefId) {
+      getTask(taskRefId).then(function (fullTask) {
+        var info = {
+          title: fullTask.title || "",
+          desc: fullTask.notes || "",
+          checked: fullTask.status === "completed",
+          completedAt: fullTask.completedAt || "",
+          createdAt: fullTask.createdAt || (memo ? memo.createdAt : ""),
+          reminders: fullTask.reminders || [],
+          projectId: fullTask.projectId || (memo ? memo.projectId : ""),
+          memoId: sourceMemoId,
+        };
+        showDetachedTaskDetailOverlay(info);
+      }, function () {
+        var parsed = parseTaskTitleAndDesc(stripTaskRefSyntax(task.text));
+        showDetachedTaskDetailOverlay({
+          title: parsed.title,
+          desc: parsed.desc,
+          checked: task.checked,
+          completedAt: "",
+          createdAt: memo ? memo.createdAt : "",
+          reminders: [],
+          projectId: memo ? memo.projectId : "",
+          memoId: sourceMemoId,
+        });
+      });
+      return;
+    }
+
+    const parsed = parseTaskTitleAndDesc(task.text);
+    const info = {
+      title: parsed.title,
+      desc: parsed.desc,
+      checked: task.checked,
+      completedAt: "",
+      createdAt: memo ? memo.createdAt : "",
+      reminders: [],
+      projectId: memo ? memo.projectId : "",
+      memoId: sourceMemoId,
+    };
+
+    showDetachedTaskDetailOverlay(info);
+  }
+
+  function showDetachedTaskDetailOverlay(info) {
+    closeDetachedInlineTaskDetailDialog();
+    const overlay = document.createElement("div");
+    overlay.className = "memo-dialog";
+    overlay.setAttribute("data-inline-task-detail-dialog", "");
+    overlay.innerHTML = detachedInlineTaskDetailDialogTemplate(info);
+    root.appendChild(overlay);
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) closeDetachedInlineTaskDetailDialog();
+    });
+    overlay.addEventListener("click", function (event) {
+      const closeBtn = closestElement(event.target, "[data-inline-task-detail-close]");
+      if (closeBtn) closeDetachedInlineTaskDetailDialog();
+    });
+  }
+
+  function closeDetachedInlineTaskDetailDialog() {
+    const existing = root.querySelector("[data-inline-task-detail-dialog]");
+    if (existing) existing.remove();
+  }
+
+  function detachedInlineTaskDetailDialogTemplate(info) {
+    const statusLabel = info.checked ? "已完成" : "未完成";
+    const statusClass = info.checked ? "is-complete" : "is-open";
+    const createdLabel = info.createdAt ? formatDetachedInlineTaskDate(info.createdAt) : "";
+    const completedLabel = info.completedAt ? formatDetachedInlineTaskDate(info.completedAt) : "";
+    const project = info.projectName || "";
+    const reminders = info.reminders || [];
+    return `
+      <div class="inline-task-detail-dialog">
+        <div class="inline-task-detail-header">
+          <span class="inline-task-detail-status ${statusClass}">${escapeHTML(statusLabel)}</span>
+          <button class="memo-action-button" type="button" data-inline-task-detail-close title="关闭">${SVG.x}</button>
+        </div>
+        <div class="inline-task-detail-body">
+          <div class="inline-task-detail-title">${escapeHTML(info.title)}</div>
+          ${info.desc ? `<div class="inline-task-detail-desc">${escapeHTML(info.desc)}</div>` : ""}
+          <div class="inline-task-detail-meta">
+            ${createdLabel ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">创建</span>
+              <span>${escapeHTML(createdLabel)}</span>
+            </div>
+            ` : ""}
+            ${completedLabel ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">完成</span>
+              <span>${escapeHTML(completedLabel)}</span>
+            </div>
+            ` : ""}
+            ${reminders.length ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">提醒</span>
+              <span>${reminders.map(function (r) { return escapeHTML(formatInlineTaskReminder(r)); }).join("、")}</span>
+            </div>
+            ` : ""}
+            ${project ? `
+            <div class="inline-task-detail-row">
+              <span class="inline-task-detail-label">项目</span>
+              <span>${escapeHTML(project)}</span>
+            </div>
+            ` : ""}
+          </div>
+        </div>
+        <div class="inline-task-detail-footer">
+          <button class="memo-primary-button" type="button" data-inline-task-detail-close>关闭</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function formatDetachedInlineTaskDate(isoString) {
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return isoString;
+    }
   }
 
   function startDetachedCommentEdit(commentId) {
@@ -6311,8 +6759,8 @@ export function mountDetachedMemoWindow(root, options = {}) {
       .sort(function (a, b) {
         const left = new Date(a.createdAt || 0).getTime() || 0;
         const right = new Date(b.createdAt || 0).getTime() || 0;
-        if (left === right) return a.id.localeCompare(b.id);
-        return left - right;
+        if (left === right) return b.id.localeCompare(a.id);
+        return right - left;
       });
   }
 
