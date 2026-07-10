@@ -6,6 +6,12 @@ dist/
 !/velo.go
 _example/simple/build
 
+# Compiled binaries
+_example/demo-desktop/demo-desktop
+_example/demo-reader/reader
+_example/demo-im/demo-im
+_example/simple/_example/
+
 _example/**/*/data.json
 _example/**/*/storage.json
 _example/**/*/*.db
