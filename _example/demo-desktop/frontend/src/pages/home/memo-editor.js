@@ -708,9 +708,7 @@ function installFileDropHandler(host, editor) {
     if (!url) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!insertMarkdownLinkIntoEditor(editor, url)) {
-      insertPlainTextIntoEditor(editor, markdownLinkText(markdownLinkLabel(url), url));
-    }
+    insertPlainTextIntoEditor(editor, url);
     editor.focus();
   }
 
@@ -1169,6 +1167,15 @@ function createMemoSlashCommandPlugin(editor, options) {
       options.onRequestFiles(item.accept || "");
     } else if (item.action === "files") {
       requestFilesForEditor(editor, item.accept || "");
+    } else if (item.action === "link") {
+      navigator.clipboard.readText().then(function (text) {
+        var url = singlePlainURL(text);
+        if (!url) return;
+        if (!insertMarkdownLinkIntoEditor(editor, url)) {
+          insertPlainTextIntoEditor(editor, markdownLinkText(markdownLinkLabel(url), url));
+        }
+        editor.focus();
+      }).catch(function () {});
     }
     view.focus();
     return true;
@@ -1854,6 +1861,14 @@ function memoSlashCommands() {
       label: "上传图片",
       detail: "选择图片并插入 Markdown 图片",
       keywords: "image upload picture",
+      text: "",
+    },
+    {
+      action: "link",
+      icon: "LINK",
+      label: "插入链接",
+      detail: "将剪贴板中的链接粘贴为 Markdown 链接",
+      keywords: "link url 链接 粘贴 paste",
       text: "",
     },
   ];
@@ -2544,7 +2559,11 @@ function createFallbackEditor(host, options) {
     if (!url) return;
     event.preventDefault();
     event.stopPropagation();
-    insertMarkdownLinkIntoTextarea(textarea, url, options.onChange);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, start) + url + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = start + url.length;
+    if (options.onChange) options.onChange(textarea.value);
   }
   textarea.addEventListener("dragenter", onDragOver);
   textarea.addEventListener("dragover", onDragOver);

@@ -29,6 +29,102 @@ import {
 } from "./memo-markdown.js";
 import { escapeAttr, escapeHTML } from "./memo-utils.js";
 
+const KNOWN_HOST_FAVICONS = {
+  "github.com": { color: "#24292e", label: "Gh" },
+  "gitlab.com": { color: "#fc6d26", label: "Gl" },
+  "stackoverflow.com": { color: "#f48225", label: "SO" },
+  "google.com": { color: "#4285f4", label: "G" },
+  "youtube.com": { color: "#ff0000", label: "YT" },
+  "x.com": { color: "#0f1419", label: "X" },
+  "twitter.com": { color: "#1da1f2", label: "𝕏" },
+  "reddit.com": { color: "#ff4500", label: "R" },
+  "npmjs.com": { color: "#cb3837", label: "N" },
+  "medium.com": { color: "#000000", label: "M" },
+  "wikipedia.org": { color: "#000000", label: "W" },
+  "notion.so": { color: "#000000", label: "No" },
+  "figma.com": { color: "#a259ff", label: "Fg" },
+  "linear.app": { color: "#5e6ad2", label: "Li" },
+  "slack.com": { color: "#4a154b", label: "Sl" },
+  "discord.com": { color: "#5865f2", label: "Di" },
+  "nodejs.org": { color: "#339933", label: "NJ" },
+  "python.org": { color: "#3776ab", label: "Py" },
+  "react.dev": { color: "#087ea4", label: "Re" },
+  "vuejs.org": { color: "#4fc08d", label: "Vu" },
+  "golang.org": { color: "#00add8", label: "Go" },
+  "docker.com": { color: "#2496ed", label: "Dk" },
+  "kubernetes.io": { color: "#326ce5", label: "K8" },
+  "vercel.com": { color: "#000000", label: "Vc" },
+  "netlify.com": { color: "#00ad9f", label: "Ne" },
+  "supabase.com": { color: "#3ecf8e", label: "Su" },
+  "mdn.com": { color: "#000000", label: "MD" },
+  "aws.amazon.com": { color: "#ff9900", label: "AW" },
+  "arxiv.org": { color: "#b31b1b", label: "Ar" },
+  "pubmed.ncbi.nlm.nih.gov": { color: "#20558a", label: "PM" },
+};
+
+const HOST_COLORS = [
+  "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#f97316", "#6366f1", "#14b8a6",
+  "#e11d48", "#7c3aed", "#0ea5e9", "#84cc16", "#d946ef",
+];
+
+function parseHost(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    return { host, hostname: u.hostname };
+  } catch {
+    return { host: "", hostname: "" };
+  }
+}
+
+function hostFavicon(url) {
+  const { host, hostname } = parseHost(url);
+  if (!host) return `<span class="memo-link-favicon is-fallback">${SVG.link}</span>`;
+
+  const known = KNOWN_HOST_FAVICONS[host] || KNOWN_HOST_FAVICONS[hostname];
+  if (known) {
+    return `<span class="memo-link-favicon" style="background:${known.color}">${known.label}</span>`;
+  }
+
+  const parts = host.split(".");
+  const name = parts.length > 1 ? parts[parts.length - 2] : host;
+  const label = name.slice(0, 2).replace(/^./, (c) => c.toUpperCase());
+  let hash = 0;
+  for (let i = 0; i < host.length; i++) hash = (hash * 31 + host.charCodeAt(i)) | 0;
+  const color = HOST_COLORS[Math.abs(hash) % HOST_COLORS.length];
+  return `<span class="memo-link-favicon" style="background:${color}">${escapeHTML(label)}</span>`;
+}
+
+const LINK_DOMAIN_CHIPS = [
+  "github.com",
+  "stackoverflow.com",
+  "google.com",
+  "youtube.com",
+  "reddit.com",
+  "twitter.com",
+  "npmjs.com",
+  "medium.com",
+  "wikipedia.org",
+  "notion.so",
+];
+
+function linksDomainBarTemplate(activeDomain) {
+  const chips = LINK_DOMAIN_CHIPS.map((domain) => {
+    const isActive = activeDomain === domain;
+    return `<button class="memo-domain-chip${isActive ? " is-active" : ""}" type="button" data-action="filterLinksDomain" data-domain="${domain}">${domain}</button>`;
+  }).join("");
+
+  return `
+    <div class="memo-links-domain-bar">
+      <div class="memo-domain-input-wrap">
+        <input class="memo-domain-input" type="text" placeholder="按域名筛选..." data-action="filterLinksDomainInput" value="${escapeAttr(LINK_DOMAIN_CHIPS.includes(activeDomain) ? "" : activeDomain)}" autocomplete="off" />
+      </div>
+      <div class="memo-domain-chips">${chips}</div>
+    </div>
+  `;
+}
+
 const MEMO_COMMENT_PREVIEW_LIMIT = 3;
 
 function detachedMemoWindowTemplate() {
@@ -945,7 +1041,7 @@ function taskCardTemplate(task, context) {
           ${task.parentId ? `<span>子任务</span>` : ""}
           ${dueLabel ? `<time datetime="${escapeAttr(task.dueAt)}">截止 ${escapeHTML(dueLabel)}</time>` : ""}
           ${startLabel ? `<time datetime="${escapeAttr(task.startAt)}">开始 ${escapeHTML(startLabel)}</time>` : ""}
-          ${completedLabel ? `<time datetime="${escapeAttr(task.completedAt)}">完成 ${escapeHTML(completedLabel)}</time>` : ""}
+          ${completedLabel ? `<button class="memo-task-completed-time" type="button" data-action="editCompletedAt" data-completed-at="${escapeAttr(task.completedAt)}" title="点击编辑完成时间"><time datetime="${escapeAttr(task.completedAt)}">完成 ${escapeHTML(completedLabel)}</time></button>` : ""}
           ${task.noteCount ? `<span>${task.noteCount} notes</span>` : ""}
           ${task.subtaskCount ? `<span>${task.subtaskCount} subtasks</span>` : ""}
           ${source.memoId ? sourceMemoMarkerTemplate(source.memoId, { commentId: source.commentId, type: source.type }) : ""}
@@ -1205,27 +1301,17 @@ function gtdMilestoneStatusLabel(status) {
 }
 
 function linkTemplate(link) {
-  const visibility = VISIBILITY[link.memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
-  const tags = extractTags(link.memo.content);
   const href = safeUrl(link.url);
   return `
     <article class="memo-resource-card is-link" data-memo-id="${escapeAttr(link.memoId)}" data-link-url="${escapeAttr(link.url)}">
       <a class="memo-resource-target" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">
-        <span class="memo-resource-icon">${SVG.link}</span>
+        ${hostFavicon(link.url)}
         <span class="memo-resource-body">
           <span class="memo-resource-title">${escapeHTML(link.label || link.url)}</span>
           <span class="memo-resource-url">${escapeHTML(compactFileURL(link.url))}</span>
         </span>
       </a>
       <button class="memo-action-button memo-link-copy-button" type="button" data-action="copyLink" title="复制链接" aria-label="复制链接">${SVG.copy}</button>
-      <div class="memo-resource-source">
-        ${sourceReferenceMarkerTemplate(link)}
-        <div class="memo-todo-meta">
-          <time datetime="${escapeAttr(link.memo.createdAt)}">${formatRelativeDate(link.memo.createdAt)}</time>
-          <span>${SVG[visibility.icon]} ${visibility.label}</span>
-          ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
-        </div>
-      </div>
     </article>
   `;
 }
@@ -1504,7 +1590,9 @@ export {
   gtdMilestoneGroupTemplate,
   gtdMilestoneWorkspaceTemplate,
   linkTemplate,
+  linksDomainBarTemplate,
   memoTemplate,
+  parseHost,
   projectFilterTemplate,
   projectOptionsTemplate,
   resourceGroupTemplate,

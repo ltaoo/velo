@@ -270,13 +270,21 @@ function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endL
   const language = fence.language || "";
   const label = language || "代码";
   const code = codeLines.join("\n");
+  const collapsible = codeLines.length > 10;
+  const collapseButton = collapsible
+    ? `<button class="memo-action-button memo-code-collapse-button" type="button" data-action="toggleCodeCollapse" title="收起代码" aria-label="收起代码">${SVG.chevronDown}</button>`
+    : "";
+  const collapsibleClass = collapsible ? " memo-fenced-code-collapsible" : "";
   return `
-    <div class="memo-fenced-code-block" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
+    <div class="memo-fenced-code-block${collapsibleClass}" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
       <div class="memo-fenced-code-toolbar">
         <span class="memo-fenced-code-label">${escapeHTML(label)}</span>
-        <button class="memo-action-button memo-code-copy-button" type="button" data-action="copyCodeBlock" title="复制代码" aria-label="复制代码">
-          ${SVG.copy}
-        </button>
+        <div class="memo-fenced-code-actions">
+          ${collapseButton}
+          <button class="memo-action-button memo-code-copy-button" type="button" data-action="copyCodeBlock" title="复制代码" aria-label="复制代码">
+            ${SVG.copy}
+          </button>
+        </div>
       </div>
       <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
     </div>

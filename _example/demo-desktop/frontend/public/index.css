@@ -1575,15 +1575,23 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-1);
   height: 36px;
   justify-content: flex-start;
+  overflow: hidden;
   padding: 0 10px;
   text-align: left;
   width: 100%;
+}
+
+.memo-nav-button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .memo-nav-button strong {
   background: var(--BG-3);
   border-radius: 999px;
   color: var(--FG-1);
+  flex-shrink: 0;
   font-size: var(--font-xs);
   font-weight: 800;
   line-height: 1;
@@ -1976,9 +1984,20 @@ body.is-fixed-window .memo-window-shell {
   color: var(--FG-1);
   justify-content: space-between;
   min-height: 32px;
+  overflow: hidden;
   padding: 6px 8px;
   text-align: left;
   width: 100%;
+}
+
+.memo-tag-filter > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-tag-filter > span:last-child {
+  flex-shrink: 0;
 }
 
 .memo-pinned-item {
@@ -3173,6 +3192,34 @@ body.is-fixed-window .memo-window-shell {
   white-space: pre;
 }
 
+.memo-fenced-code-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.memo-code-collapse-button {
+  color: #cbd5e1;
+  flex: 0 0 auto;
+  height: 26px;
+  width: 26px;
+  transition: transform 0.2s ease;
+}
+
+.memo-code-collapse-button:hover {
+  background: #1f2937;
+  color: #ffffff;
+}
+
+.memo-fenced-code-collapsed .memo-code-collapse-button {
+  transform: rotate(-90deg);
+}
+
+.memo-fenced-code-collapsed .memo-fenced-code-body {
+  display: none;
+}
+
 .memo-line-body > .memo-code-line {
   border-radius: 0;
   line-height: 1.62;
@@ -3584,18 +3631,11 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-time-token {
   align-items: center;
-  background: var(--memo-accent-soft);
-  border: 1px solid var(--memo-accent-border);
-  border-radius: 6px;
   color: var(--memo-accent-strong);
   display: inline-flex;
-  font-size: var(--font-sm);
-  font-weight: 650;
-  gap: 5px;
-  line-height: 1.3;
-  margin: 0 1px;
-  max-width: min(260px, 100%);
-  padding: 2px 7px;
+  font-size: inherit;
+  gap: 4px;
+  line-height: inherit;
   vertical-align: baseline;
   white-space: nowrap;
 }
@@ -3603,12 +3643,13 @@ body.is-fixed-window .memo-window-shell {
 .memo-time-token svg {
   fill: none;
   flex: 0 0 auto;
-  height: 12px;
+  height: 0.9em;
+  opacity: 0.65;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-  width: 12px;
+  width: 0.9em;
 }
 
 .memo-time-token span {
@@ -4278,7 +4319,8 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-task-meta span,
-.memo-task-meta time {
+.memo-task-meta time,
+.memo-task-meta .memo-task-completed-time {
   align-items: center;
   background: var(--BG-1);
   border: 1px solid var(--border);
@@ -4321,6 +4363,73 @@ body.is-fixed-window .memo-window-shell {
   width: 14px;
 }
 
+.memo-task-completed-time {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.memo-task-completed-time:hover {
+  background: var(--memo-blue-soft);
+  border-color: var(--memo-blue);
+  color: var(--memo-blue);
+}
+
+.memo-task-completed-time time {
+  all: unset;
+}
+
+.memo-task-completed-time-edit {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.memo-task-completed-time-input {
+  background: var(--BG-0);
+  border: 1px solid var(--memo-blue);
+  border-radius: 999px;
+  color: var(--FG-0);
+  font: inherit;
+  font-size: var(--font-sm);
+  min-height: 24px;
+  padding: 0 8px;
+  width: 180px;
+}
+
+.memo-task-completed-time-confirm,
+.memo-task-completed-time-cancel {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.memo-task-completed-time-confirm svg,
+.memo-task-completed-time-cancel svg {
+  height: 14px;
+  width: 14px;
+}
+
+.memo-task-completed-time-confirm:hover {
+  background: var(--memo-green-soft, rgba(76, 175, 80, 0.1));
+  border-color: var(--memo-green, #4caf50);
+  color: var(--memo-green, #4caf50);
+}
+
+.memo-task-completed-time-cancel:hover {
+  background: var(--memo-red-soft, rgba(250, 81, 81, 0.1));
+  border-color: var(--memo-red, #fa5151);
+  color: var(--memo-red, #fa5151);
+}
+
 .memo-task-actions {
   display: flex;
   gap: 4px;
@@ -4346,6 +4455,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-resource-card.is-link {
+  gap: 0;
   justify-self: start;
   position: relative;
   width: min(100%, 560px);
@@ -4428,7 +4538,11 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-resource-card.is-link .memo-resource-target {
-  padding-right: 54px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-height: unset;
+  padding: 0 48px 0 0;
   width: 100%;
 }
 
@@ -4436,10 +4550,9 @@ body.is-fixed-window .memo-window-shell {
   opacity: 0;
   pointer-events: none;
   position: absolute;
-  right: 24px;
-  top: 22px;
-  transform: translateY(-2px);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  right: 12px;
+  top: 12px;
+  transition: opacity 0.16s ease;
 }
 
 .memo-resource-card.is-link:hover .memo-link-copy-button,
@@ -4447,7 +4560,95 @@ body.is-fixed-window .memo-window-shell {
 .memo-link-copy-button:focus-visible {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+}
+
+/* ---- domain filter bar ---- */
+
+.memo-links-domain-bar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.memo-domain-input-wrap {
+  min-width: 0;
+}
+
+.memo-domain-input {
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--FG-0);
+  font-size: var(--font-sm);
+  min-width: 0;
+  outline: none;
+  padding: 7px 12px;
+  width: 100%;
+}
+
+.memo-domain-input:focus {
+  border-color: var(--memo-accent-border);
+}
+
+.memo-domain-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memo-domain-chip {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--font-xs);
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 10px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.memo-domain-chip:hover {
+  background: var(--memo-blue-soft);
+  border-color: var(--memo-blue);
+  color: var(--memo-blue);
+}
+
+.memo-domain-chip.is-active {
+  background: var(--memo-blue-soft);
+  border-color: var(--memo-blue);
+  color: var(--memo-blue);
+}
+
+/* ---- link favicon ---- */
+
+.memo-link-favicon {
+  align-items: center;
+  border-radius: 6px;
+  color: #fff;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 800;
+  height: 32px;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  width: 32px;
+}
+
+.memo-link-favicon.is-fallback {
+  background: var(--BG-0);
+  border: 1px solid var(--border);
+  color: var(--memo-accent-strong);
+}
+
+.memo-link-favicon.is-fallback svg {
+  height: 16px;
+  width: 16px;
 }
 
 .memo-code-block-head {
@@ -5923,7 +6124,8 @@ body.gtd-slim-page #root {
 }
 
 .gtd-slim-task-meta span,
-.gtd-slim-task-meta time {
+.gtd-slim-task-meta time,
+.gtd-slim-task-meta .gtd-slim-completed-time {
   align-items: center;
   background: var(--BG-1);
   border: 1px solid var(--border);
@@ -5948,6 +6150,73 @@ body.gtd-slim-page #root {
   background: var(--memo-accent-soft);
   border-color: var(--memo-accent-border);
   color: var(--memo-accent-strong);
+}
+
+.gtd-slim-completed-time {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.gtd-slim-completed-time:hover {
+  background: var(--memo-blue-soft);
+  border-color: var(--memo-blue);
+  color: var(--memo-blue);
+}
+
+.gtd-slim-completed-time time {
+  all: unset;
+}
+
+.gtd-slim-completed-time-edit {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.gtd-slim-completed-time-input {
+  background: var(--BG-0);
+  border: 1px solid var(--memo-blue);
+  border-radius: 999px;
+  color: var(--FG-0);
+  font: inherit;
+  font-size: var(--font-xs);
+  min-height: 22px;
+  padding: 0 7px;
+  width: 170px;
+}
+
+.gtd-slim-completed-time-confirm,
+.gtd-slim-completed-time-cancel {
+  align-items: center;
+  background: var(--BG-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--FG-1);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.gtd-slim-completed-time-confirm svg,
+.gtd-slim-completed-time-cancel svg {
+  height: 12px;
+  width: 12px;
+}
+
+.gtd-slim-completed-time-confirm:hover {
+  background: var(--memo-green-soft, rgba(76, 175, 80, 0.1));
+  border-color: var(--memo-green, #4caf50);
+  color: var(--memo-green, #4caf50);
+}
+
+.gtd-slim-completed-time-cancel:hover {
+  background: var(--memo-red-soft, rgba(250, 81, 81, 0.1));
+  border-color: var(--memo-red, #fa5151);
+  color: var(--memo-red, #fa5151);
 }
 
 .gtd-slim-state {

@@ -96,6 +96,7 @@ import {
   emptyFeedTemplate,
   emptyFilesTemplate,
   emptyLinksTemplate,
+  linksDomainBarTemplate,
   emptyTasksTemplate,
   gtdItemCardTemplate,
   gtdItemGroupTemplate,
@@ -103,6 +104,7 @@ import {
   gtdMilestoneGroupTemplate,
   gtdMilestoneWorkspaceTemplate,
   linkTemplate,
+  parseHost,
   memoTemplate,
   projectFilterTemplate,
   projectOptionsTemplate,
@@ -150,6 +152,7 @@ const DETACHED_WINDOW_STATE_POLL_INTERVAL = 250;
 const DETACHED_WINDOW_STATE_SNAPSHOT_DEBOUNCE = 800;
 const TASK_FILTERS = new Set(["all", "completed", "inbox", "next", "overdue", "scheduled", "today"]);
 const FEED_PAGE_SIZE = 10;
+const LINKS_PAGE_SIZE = 20;
 const memoTocHighlightTimers = new WeakMap();
 
 function normalizeTaskFilter(value) {
@@ -568,6 +571,8 @@ export function mountMemosHome(root) {
     expandedMemoIds: new Set(),
     expandedCommentListMemoIds: new Set(),
     feedPage: 1,
+    linksDomainFilter: "",
+    linksPage: 1,
     draftsLoaded: false,
     editorSettings: loadEditorSettings(),
     editPreviewVisible: false,
@@ -912,6 +917,7 @@ export function mountMemosHome(root) {
       state.commentDraft = "";
       state.query = "";
       state.selectedCalendarDate = "";
+      state.linksDomainFilter = "";
       els.searchInput.value = "";
       renderAll();
       return;
@@ -1039,8 +1045,16 @@ export function mountMemosHome(root) {
         state.sourceEditingId = "";
         state.query = "";
         state.selectedCalendarDate = "";
+        state.linksDomainFilter = "";
         els.searchInput.value = "";
         renderAll();
+        break;
+      case "filterLinksDomain":
+        {
+          const domain = action.dataset.domain || "";
+          state.linksDomainFilter = state.linksDomainFilter === domain ? "" : domain;
+          renderLinks();
+        }
         break;
       case "copyMemo":
         copyMemo(memoId);
@@ -1072,6 +1086,9 @@ export function mountMemosHome(root) {
       case "copyCodeBlock":
         copyCodeBlock(action);
         break;
+      case "toggleCodeCollapse":
+        toggleCodeCollapse(action);
+        break;
       case "copyInlineLink":
         event.preventDefault();
         event.stopPropagation();
@@ -1087,6 +1104,9 @@ export function mountMemosHome(root) {
         break;
       case "deleteTask":
         deleteExistingTask(taskId);
+        break;
+      case "editCompletedAt":
+        editCompletedAtInline(action, taskId);
         break;
       case "editTask":
         openTaskEditDialog(taskId);
@@ -1945,6 +1965,13 @@ export function mountMemosHome(root) {
       return;
     }
 
+    if (event.target.matches("[data-action=\"filterLinksDomainInput\"]")) {
+      state.linksDomainFilter = event.target.value.trim();
+      clearTimeout(state._linksDomainTimer);
+      state._linksDomainTimer = setTimeout(() => renderLinks(), 300);
+      return;
+    }
+
     if (event.target.matches("[data-memo-source-yaml]")) {
       state.sourceDraft = event.target.value;
     }
@@ -2751,6 +2778,62 @@ export function mountMemosHome(root) {
     if (existing) existing.remove();
   }
 
+  function editCompletedAtInline(button, taskId) {
+    var currentValue = button.dataset.completedAt || "";
+    var date = taskDateValue(currentValue);
+    var localValue = "";
+    if (!Number.isNaN(date.getTime())) {
+      var y = date.getFullYear();
+      var m = String(date.getMonth() + 1).padStart(2, "0");
+      var d = String(date.getDate()).padStart(2, "0");
+      var h = String(date.getHours()).padStart(2, "0");
+      var min = String(date.getMinutes()).padStart(2, "0");
+      localValue = y + "-" + m + "-" + d + "T" + h + ":" + min;
+    }
+
+    var wrapper = document.createElement("span");
+    wrapper.className = "memo-task-completed-time-edit";
+    wrapper.innerHTML = '<input type="datetime-local" class="memo-task-completed-time-input" value="' + escapeAttr(localValue) + '" />' +
+      '<button type="button" class="memo-task-completed-time-confirm" title="确认">' + SVG.check + '</button>' +
+      '<button type="button" class="memo-task-completed-time-cancel" title="取消">' + SVG.x + '</button>';
+
+    button.replaceWith(wrapper);
+    var input = wrapper.querySelector("input");
+    input.focus();
+
+    function save() {
+      var newValue = input.value;
+      if (!newValue) return;
+      updateTask(taskId, { completedAt: new Date(newValue).toISOString() }).then(function (updated) {
+        var summary = normalizeTaskSummary(updated);
+        if (summary) state.tasks = state.tasks.map(function (t) { return t.id === taskId ? summary : t; });
+        renderAll();
+        showToast("完成时间已更新");
+      }, function (err) {
+        showToast("更新失败: " + errorMessage(err));
+        wrapper.replaceWith(button);
+      });
+    }
+
+    function cancel() {
+      wrapper.replaceWith(button);
+    }
+
+    wrapper.querySelector(".memo-task-completed-time-confirm").addEventListener("click", save);
+    wrapper.querySelector(".memo-task-completed-time-cancel").addEventListener("click", cancel);
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); save(); }
+      if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    });
+
+    input.addEventListener("blur", function () {
+      setTimeout(function () {
+        if (root.contains(wrapper)) cancel();
+      }, 150);
+    });
+  }
+
   function taskEditDialogTemplate(task) {
     const reminders = task.reminders || [];
     const dueVal = task.dueAt ? task.dueAt.slice(0, 10) : "";
@@ -2858,7 +2941,8 @@ export function mountMemosHome(root) {
     if (!task) return;
 
     // Try to find linked Task entity
-    const linkedTask = findLinkedTask(sourceMemoId, sourceCommentId, lineIndex);
+    // source.line is 1-based from backend; lineIndex is 0-based from rendering
+    const linkedTask = findLinkedTask(sourceMemoId, sourceCommentId, lineIndex + 1);
     if (linkedTask) {
       // Fetch full task for reminders/notes
       getTask(linkedTask.id).then(function (fullTask) {
@@ -4326,6 +4410,17 @@ export function mountMemosHome(root) {
     copyCodeBlockFromAction(action, scopedMemoDocuments(), showToast);
   }
 
+  function toggleCodeCollapse(action) {
+    const block = closestElement(action, ".memo-fenced-code-block");
+    if (!block) return;
+    const collapsed = block.classList.toggle("memo-fenced-code-collapsed");
+    const btn = block.querySelector(".memo-code-collapse-button");
+    if (btn) {
+      btn.title = collapsed ? "展开代码" : "收起代码";
+      btn.setAttribute("aria-label", collapsed ? "展开代码" : "收起代码");
+    }
+  }
+
   function copyLink(action) {
     const linkCard = closestElement(action, "[data-link-url]");
     const url = linkCard && linkCard.dataset ? linkCard.dataset.linkUrl : "";
@@ -4571,15 +4666,22 @@ export function mountMemosHome(root) {
   }
 
   function handleMemoListScroll() {
-    if (state.activeView !== "memos") return;
     const container = els.memoList.parentElement;
     if (!container) return;
     if (container.scrollTop + container.clientHeight >= container.scrollHeight - 80) {
-      const memos = visibleMemos();
-      const maxPage = Math.ceil(memos.length / FEED_PAGE_SIZE);
-      if (state.feedPage >= maxPage) return;
-      state.feedPage++;
-      appendFeedPage();
+      if (state.activeView === "memos") {
+        const memos = visibleMemos();
+        const maxPage = Math.ceil(memos.length / FEED_PAGE_SIZE);
+        if (state.feedPage >= maxPage) return;
+        state.feedPage++;
+        appendFeedPage();
+      } else if (state.activeView === "links") {
+        const links = visibleLinks();
+        const maxPage = Math.ceil(links.length / LINKS_PAGE_SIZE);
+        if (state.linksPage >= maxPage) return;
+        state.linksPage++;
+        appendLinksPage();
+      }
     }
   }
 
@@ -4596,6 +4698,25 @@ export function mountMemosHome(root) {
 
     const fragment = document.createElement("div");
     fragment.innerHTML = page.map((memo) => safeMemoTemplate(memo)).join("")
+      + (hasMore ? '<div class="memo-feed-load-more">加载更多...</div>' : "");
+    while (fragment.firstChild) {
+      els.memoList.appendChild(fragment.firstChild);
+    }
+  }
+
+  function appendLinksPage() {
+    const links = visibleLinks();
+    const start = (state.linksPage - 1) * LINKS_PAGE_SIZE;
+    const end = state.linksPage * LINKS_PAGE_SIZE;
+    const page = links.slice(start, end);
+    if (page.length === 0) return;
+
+    const hasMore = end < links.length;
+    const existingLoader = els.memoList.querySelector(".memo-feed-load-more");
+    if (existingLoader) existingLoader.remove();
+
+    const fragment = document.createElement("div");
+    fragment.innerHTML = page.map(linkTemplate).join("")
       + (hasMore ? '<div class="memo-feed-load-more">加载更多...</div>' : "");
     while (fragment.firstChild) {
       els.memoList.appendChild(fragment.firstChild);
@@ -4893,9 +5014,17 @@ export function mountMemosHome(root) {
       editEditorMemoId = "";
     }
 
+    state.linksPage = 1;
     const links = visibleLinks();
+    const visibleCount = state.linksPage * LINKS_PAGE_SIZE;
+    const paginated = links.slice(0, visibleCount);
+    const hasMore = paginated.length < links.length;
     els.feedCount.textContent = links.length ? `${links.length} 个链接` : "0 个链接";
-    els.memoList.innerHTML = links.length ? links.map(linkTemplate).join("") : emptyLinksTemplate();
+    els.memoList.innerHTML = linksDomainBarTemplate(state.linksDomainFilter)
+      + (paginated.length
+        ? paginated.map(linkTemplate).join("")
+          + (hasMore ? '<div class="memo-feed-load-more">加载更多...</div>' : "")
+        : emptyLinksTemplate());
   }
 
   function renderCodeBlocks() {
@@ -5498,9 +5627,14 @@ export function mountMemosHome(root) {
 
   function visibleLinks() {
     const query = state.query.toLowerCase();
+    const domainFilter = state.linksDomainFilter.toLowerCase();
     return collectLinks(scopedMemoDocuments())
       .filter((link) => {
         if (state.activeTag && !extractTags(link.memo.content).includes(state.activeTag)) return false;
+        if (domainFilter) {
+          const { host } = parseHost(link.url);
+          if (!host.includes(domainFilter)) return false;
+        }
         if (!query) return true;
         return `${link.label} ${link.url} ${link.sourceText} ${link.memo.content} ${link.memo.visibility}`.toLowerCase().includes(query);
       })
@@ -6261,6 +6395,9 @@ export function mountDetachedMemoWindow(root, options = {}) {
       case "copyCodeBlock":
         copyCodeBlockFromAction(action, detachedMemoDocuments(), showToast);
         break;
+      case "toggleCodeCollapse":
+        toggleCodeCollapse(action);
+        break;
       case "copyInlineLink":
         event.preventDefault();
         event.stopPropagation();
@@ -6376,7 +6513,7 @@ export function mountDetachedMemoWindow(root, options = {}) {
     const sourceMemoId = target.dataset.taskDetailMemoId || "";
 
     let content = "";
-    let memo = state.memo;
+    let memo = sourceMemoId ? state.memos.find(function (item) { return item && item.id === sourceMemoId; }) || state.memo : state.memo;
     let comment = null;
 
     if (sourceType === "comment" && sourceCommentId) {

@@ -114,6 +114,12 @@ function mountGTDSlim(root) {
       if (taskId && input && input.value) addAbsoluteReminder(taskId, input.value);
       return;
     }
+    const editCompletedBtn = closestElement(event.target, "[data-gtd-slim-edit-completed]");
+    if (editCompletedBtn && root.contains(editCompletedBtn)) {
+      const taskNode = closestElement(editCompletedBtn, "[data-gtd-slim-task-id]");
+      if (taskNode) editCompletedAtInline(taskNode.dataset.gtdSlimTaskId, editCompletedBtn);
+      return;
+    }
     // Close open popovers on outside click.
     const openPopover = root.querySelector("[data-reminder-popover]");
     if (openPopover && !openPopover.contains(event.target)) {
@@ -296,6 +302,53 @@ function mountGTDSlim(root) {
         showToast((checked ? "完成失败: " : "恢复失败: ") + errorMessage(err));
       },
     );
+  }
+
+  function editCompletedAtInline(taskId, button) {
+    var currentValue = button.getAttribute("datetime") || "";
+    var localValue = taskDateTimeLocalValue(currentValue);
+
+    var wrapper = document.createElement("span");
+    wrapper.className = "gtd-slim-completed-time-edit";
+    wrapper.innerHTML = '<input type="datetime-local" class="gtd-slim-completed-time-input" value="' + escapeAttr(localValue) + '" />' +
+      '<button type="button" class="gtd-slim-completed-time-confirm" title="确认">' + SVG.check + '</button>' +
+      '<button type="button" class="gtd-slim-completed-time-cancel" title="取消">' + SVG.x + '</button>';
+
+    button.replaceWith(wrapper);
+    var input = wrapper.querySelector("input");
+    input.focus();
+
+    function save() {
+      var newValue = input.value;
+      if (!newValue) return;
+      updateTask(taskId, { completedAt: new Date(newValue).toISOString() }).then(function (updated) {
+        var summary = normalizeTaskSummary(updated);
+        if (summary) state.tasks = state.tasks.map(function (t) { return t.id === taskId ? summary : t; });
+        render();
+        showToast("完成时间已更新");
+      }, function (err) {
+        showToast("更新失败: " + errorMessage(err));
+        wrapper.replaceWith(button);
+      });
+    }
+
+    function cancel() {
+      wrapper.replaceWith(button);
+    }
+
+    wrapper.querySelector(".gtd-slim-completed-time-confirm").addEventListener("click", save);
+    wrapper.querySelector(".gtd-slim-completed-time-cancel").addEventListener("click", cancel);
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); save(); }
+      if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    });
+
+    input.addEventListener("blur", function () {
+      setTimeout(function () {
+        if (root.contains(wrapper)) cancel();
+      }, 150);
+    });
   }
 
   function setFilter(filter) {
@@ -510,6 +563,7 @@ function taskTemplate(task) {
           ${start ? `<time datetime="${escapeAttr(task.startAt)}">开始 ${escapeHTML(start)}</time>` : ""}
           ${task.listId && task.listId !== "inbox" ? `<span>${escapeHTML(task.listId)}</span>` : ""}
           ${tags.map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
+          ${complete && task.completedAt ? `<button class="gtd-slim-completed-time" type="button" data-gtd-slim-edit-completed datetime="${escapeAttr(task.completedAt)}" title="点击编辑完成时间"><time datetime="${escapeAttr(task.completedAt)}">完成 ${escapeHTML(taskDateTimeLabel(task.completedAt))}</time></button>` : ""}
         </div>
       </div>
       <div class="gtd-slim-task-actions">
@@ -689,6 +743,28 @@ function taskDateLabel(value) {
     day: "numeric",
     month: "numeric",
   });
+}
+
+function taskDateTimeLabel(value) {
+  const date = taskDateValue(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  return date.toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "numeric",
+  });
+}
+
+function taskDateTimeLocalValue(value) {
+  const date = taskDateValue(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return y + "-" + m + "-" + d + "T" + h + ":" + min;
 }
 
 function taskDateValue(value) {
