@@ -1,4 +1,4 @@
-import { memoTitle, normalizeMemoPayload } from "./domain/memos.js";
+import { buildMemoReferenceIndex, memoTitle, normalizeMemoPayload } from "./domain/memos.js";
 import {
   loadMemoCommentsFromVault,
   normalizeMemoCommentPayload,
@@ -8,17 +8,19 @@ import {
   loadMemosFromVault,
 } from "./domain/memo-repository.js";
 import { renderMemoMarkdown } from "./pages/home/memo-markdown.js";
-import { forgetPersistedWindow, registerWindowSession, setPersistedWindowFixed } from "./window-state.js";
+import { relativeTimeTemplate } from "./pages/home/memo-date.js";
+import { loadTasks } from "./domain/tasks.js";
+import { registerWindowSession } from "./window-state.js";
 
 const SVG = {
-  pin:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5-4 4v5l-2 2-5-5-5-5 2-2h5z"></path><path d="m9 15-5 5"></path></svg>',
   clock:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
   memo:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>',
   comment:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+  check:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>',
 };
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -32,21 +34,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function mountTimelineWindow(root) {
   const PAGE_SIZE = 10;
-  const params = new URLSearchParams(window.location.search);
   const state = {
     comments: [],
     error: "",
-    fixed: params.get("fixed") === "1",
+    expandedItemIds: new Set(),
     loading: false,
+    memoRefIndex: null,
     memos: [],
     page: 1,
+    tasks: [],
     query: "",
     selectedDate: todayKey(),
     toastTimer: null,
   };
   registerWindowSession({
     entryPage: "timeline-window.html",
-    fixed: state.fixed,
     title: "时间线",
   });
 
@@ -54,21 +56,26 @@ function mountTimelineWindow(root) {
 
   const els = {
     dateLabel: root.querySelector("[data-timeline-date]"),
-    fixedButton: root.querySelector('[data-window-control="toggleFixed"]'),
     list: root.querySelector("[data-timeline-list]"),
     searchInput: root.querySelector("[data-timeline-search]"),
     toast: root.querySelector("[data-toast]"),
   };
 
   root.addEventListener("click", function (event) {
-    const control = closestElement(event.target, "[data-window-control]");
-    if (control && root.contains(control)) {
-      runWindowControl(control.dataset.windowControl);
-      return;
-    }
     const dateNav = closestElement(event.target, "[data-date-nav]");
     if (dateNav && root.contains(dateNav)) {
       navigateDate(dateNav.dataset.dateNav);
+      return;
+    }
+    const expandBtn = closestElement(event.target, "[data-action=\"toggleExpand\"]");
+    if (expandBtn && root.contains(expandBtn)) {
+      toggleItemExpand(expandBtn.dataset.expandId);
+      return;
+    }
+    const memoRef = closestElement(event.target, "[data-memo-ref-target]");
+    if (memoRef && root.contains(memoRef)) {
+      event.preventDefault();
+      openMemoInWindow(memoRef.dataset.memoRefTarget);
       return;
     }
   });
@@ -85,7 +92,6 @@ function mountTimelineWindow(root) {
 
   window.addEventListener("focus", refreshData);
 
-  applyFixedState();
   renderDateLabel();
   refreshData();
 
@@ -118,7 +124,7 @@ function mountTimelineWindow(root) {
     if (existingLoader) existingLoader.remove();
 
     const fragment = document.createElement("div");
-    fragment.innerHTML = pageItems.map(timelineItemTemplate).join("")
+    fragment.innerHTML = pageItems.map(function (item) { return timelineItemTemplate(item, state.expandedItemIds, state.memoRefIndex); }).join("")
       + (hasMore ? '<div class="timeline-load-more">加载更多...</div>' : "");
     while (fragment.firstChild) {
       els.list.appendChild(fragment.firstChild);
@@ -131,11 +137,14 @@ function mountTimelineWindow(root) {
     Promise.all([
       loadMemosFromVault(),
       loadMemoCommentsFromVault(),
+      loadTasks(),
     ]).then(
       function (results) {
         state.error = "";
         state.memos = results[0].map(normalizeMemoPayload).filter(Boolean);
         state.comments = results[1].map(normalizeMemoCommentPayload).filter(Boolean);
+        state.tasks = results[2].tasks || [];
+        state.memoRefIndex = buildMemoReferenceIndex(state.memos);
         renderTimeline();
       },
       function (err) {
@@ -145,6 +154,95 @@ function mountTimelineWindow(root) {
     ).finally(function () {
       state.loading = false;
       renderTimeline();
+    });
+  }
+
+  function toggleItemExpand(id) {
+    var isExpanded = state.expandedItemIds.has(id);
+    if (isExpanded) {
+      state.expandedItemIds.delete(id);
+    } else {
+      state.expandedItemIds.add(id);
+    }
+
+    var safeId = CSS.escape(id);
+    var button = root.querySelector(`[data-expand-id="${safeId}"]`);
+    var collapse = button ? button.closest(".memo-list-collapse") : null;
+    if (!collapse) return;
+
+    var content = collapse.querySelector(".memo-content");
+    if (!content) return;
+
+    var lineH = parseFloat(getComputedStyle(content).lineHeight);
+    var collapsedHeight = Math.round(lineH * 36);
+
+    // Cancel any in-progress transition
+    content.style.transition = "none";
+    content.offsetHeight; // flush
+    content.style.transition = "";
+
+    collapse.classList.remove("is-short");
+
+    if (isExpanded) {
+      // COLLAPSE: expanded → collapsed
+      content.style.maxHeight = content.scrollHeight + "px";
+      content.offsetHeight;
+      collapse.classList.remove("is-expanded");
+      collapse.classList.add("is-collapsed");
+      content.style.maxHeight = collapsedHeight + "px";
+
+      if (button) {
+        button.setAttribute("aria-expanded", "false");
+        var span = button.querySelector("span");
+        if (span) span.textContent = "展开";
+      }
+    } else {
+      // EXPAND: collapsed → expanded
+      content.style.maxHeight = collapsedHeight + "px";
+      content.offsetHeight;
+      collapse.classList.remove("is-collapsed");
+      collapse.classList.add("is-expanded");
+      content.style.maxHeight = content.scrollHeight + "px";
+
+      if (button) {
+        button.setAttribute("aria-expanded", "true");
+        var span2 = button.querySelector("span");
+        if (span2) span2.textContent = "收起";
+      }
+    }
+
+    content.addEventListener("transitionend", function handler() {
+      content.removeEventListener("transitionend", handler);
+      if (!collapse.classList.contains("is-collapsed")) {
+        content.style.maxHeight = "";
+      }
+      if (collapse.classList.contains("is-collapsed")) {
+        var lines = parseInt(collapse.dataset.memoLines, 10);
+        if (lines <= 36) {
+          collapse.classList.add("is-short");
+        }
+      }
+    });
+  }
+
+  function syncExpandControls() {
+    var items = root.querySelectorAll("[data-memo-collapse]");
+    items.forEach(function (item) {
+      var content = item.querySelector(".memo-content");
+      if (!content) return;
+      var lines = parseInt(item.dataset.memoLines, 10);
+      item.classList.remove("is-short");
+      if (item.classList.contains("is-collapsed")) {
+        if (lines <= 36) {
+          item.classList.add("is-short");
+          content.style.maxHeight = "";
+        } else {
+          var lineHeight = parseFloat(getComputedStyle(content).lineHeight);
+          content.style.maxHeight = Math.round(lineHeight * 36) + "px";
+        }
+      } else {
+        content.style.maxHeight = "";
+      }
     });
   }
 
@@ -192,8 +290,9 @@ function mountTimelineWindow(root) {
 
     const visible = allItems.slice(0, state.page * PAGE_SIZE);
     const hasMore = visible.length < allItems.length;
-    els.list.innerHTML = visible.map(timelineItemTemplate).join("")
+    els.list.innerHTML = visible.map(function (item) { return timelineItemTemplate(item, state.expandedItemIds, state.memoRefIndex); }).join("")
       + (hasMore ? '<div class="timeline-load-more">加载更多...</div>' : "");
+    setTimeout(syncExpandControls, 0);
   }
 
   function buildAllTimelineItems() {
@@ -229,6 +328,20 @@ function mountTimelineWindow(root) {
       });
     });
 
+    state.tasks.forEach(function (task) {
+      if (task.status !== "completed") return;
+      if (!task.completedAt) return;
+      if (memoDateKey(task.completedAt) !== dateKey) return;
+      items.push({
+        content: task.title,
+        createdAt: task.completedAt,
+        id: task.id,
+        parentMemoId: task.id,
+        parentTitle: "",
+        type: "task",
+      });
+    });
+
     items.sort(function (a, b) {
       const ta = new Date(a.createdAt).getTime() || 0;
       const tb = new Date(b.createdAt).getTime() || 0;
@@ -246,36 +359,32 @@ function mountTimelineWindow(root) {
     return items;
   }
 
-  function runWindowControl(control) {
-    switch (control) {
-      case "toggleFixed":
-        state.fixed = !state.fixed;
-        applyFixedState();
-        setPersistedWindowFixed(state.fixed).catch(function () {});
-        break;
-      default:
-        break;
-    }
-  }
-
-  function applyFixedState() {
-    renderFixedButton();
-    document.body.classList.toggle("is-fixed-window", state.fixed);
-    callNativeWindow("__velo/window/set_always_on_top", { onTop: state.fixed }).catch(function () {});
-  }
-
-  function renderFixedButton() {
-    if (!els.fixedButton) return;
-    els.fixedButton.classList.toggle("is-active", state.fixed);
-    els.fixedButton.setAttribute("aria-pressed", state.fixed ? "true" : "false");
-    els.fixedButton.setAttribute("title", state.fixed ? "取消固定" : "固定在所有窗口上方");
-  }
-
   function callNativeWindow(method, args) {
     if (typeof invoke !== "function") {
       return Promise.reject(new Error("go bridge not available"));
     }
     return invoke(method, { args: args || {} });
+  }
+
+  function openMemoInWindow(memoId) {
+    var target = state.memos.find(function (m) { return m && m.id === memoId; });
+    if (!target) {
+      showToast("找不到引用的 memo");
+      return;
+    }
+    if (typeof invoke !== "function") {
+      window.open("memo-window.html?id=" + encodeURIComponent(memoId), "_blank", "noopener");
+      return;
+    }
+    invoke("/api/memo-window/open", {
+      method: "POST",
+      args: {
+        memo: target,
+        memos: state.memos,
+      },
+    }).catch(function (err) {
+      showToast("打开 memo 失败: " + (err && err.message ? err.message : err));
+    });
   }
 
   function showToast(message) {
@@ -292,15 +401,6 @@ function mountTimelineWindow(root) {
 function timelineShellTemplate() {
   return `
     <div class="memo-window-shell timeline-shell velo-drag" data-velo-drag>
-      <header class="memo-window-titlebar timeline-titlebar velo-drag" data-velo-drag>
-        <div class="memo-window-native-controls" aria-hidden="true"></div>
-        <div class="memo-window-drag-region" aria-hidden="true"></div>
-        <div class="memo-window-title-actions">
-          <button class="memo-window-icon-button velo-no-drag" type="button" data-window-control="toggleFixed" title="固定在所有窗口上方" aria-label="固定在所有窗口上方" aria-pressed="false">
-            ${SVG.pin}
-          </button>
-        </div>
-      </header>
       <main class="memo-window-body timeline-body velo-no-drag">
         <div class="timeline-header">
           <div class="timeline-date-nav">
@@ -318,47 +418,73 @@ function timelineShellTemplate() {
   `;
 }
 
-function timelineItemTemplate(item) {
-  const time = formatTime(item.createdAt);
-  const typeIcon = item.type === "comment" ? SVG.comment : SVG.memo;
-  const typeLabel = item.type === "comment" ? "评论" : "memo";
+function timelineItemTemplate(item, expandedItemIds, memoRefIndex) {
+  const timeHTML = relativeTimeTemplate(item.createdAt);
+  var typeIcon, typeLabel;
+  if (item.type === "comment") {
+    typeIcon = SVG.comment;
+    typeLabel = "评论";
+  } else if (item.type === "task") {
+    typeIcon = SVG.check;
+    typeLabel = "完成任务";
+  } else {
+    typeIcon = SVG.memo;
+    typeLabel = "memo";
+  }
   const parentLabel = item.parentTitle && item.parentTitle.length > 20
     ? item.parentTitle.slice(0, 20) + "..."
     : item.parentTitle;
   const parentInfo = item.type === "comment" && item.parentTitle
     ? `<span class="timeline-item-parent">回复: ${escapeHTML(parentLabel)}</span>`
     : "";
-  const renderedContent = renderMemoMarkdown(item.content, {
-    readonly: true,
-    showLineNumbers: false,
-    sourceId: item.id,
-    sourceMemoId: item.type === "comment" ? item.parentMemoId : item.id,
-    sourceCommentId: item.type === "comment" ? item.id : "",
-    sourceType: item.type === "comment" ? "comment" : "memo",
-  });
+
+  var cardContent;
+  if (item.type === "task") {
+    cardContent = escapeHTML(item.content);
+  } else {
+    cardContent = renderMemoMarkdown(item.content, {
+      index: memoRefIndex || undefined,
+      readonly: true,
+      showLineNumbers: false,
+      sourceId: item.id,
+      sourceMemoId: item.type === "comment" ? item.parentMemoId : item.id,
+      sourceCommentId: item.type === "comment" ? item.id : "",
+      sourceType: item.type === "comment" ? "comment" : "memo",
+    });
+  }
+
+  var cardBody;
+  if (item.type === "task") {
+    cardBody = `<div class="timeline-item-card">
+      <div class="memo-content">${cardContent}</div>
+    </div>`;
+  } else {
+    const isExpanded = expandedItemIds && expandedItemIds.has(item.id);
+    const textLines = (item.content || "").split("\n").length;
+    cardBody = `<div class="timeline-item-card">
+      <div class="memo-list-collapse ${isExpanded ? "is-expanded" : "is-collapsed"}${!isExpanded && textLines <= 36 ? " is-short" : ""}" data-memo-collapse data-memo-lines="${textLines}">
+        <div class="memo-content">${cardContent}</div>
+        <button class="memo-expand-button" type="button" data-action="toggleExpand" data-expand-id="${escapeAttr(item.id)}" aria-expanded="${isExpanded ? "true" : "false"}">
+          <span>${isExpanded ? "收起" : "展开"}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+      </div>
+    </div>`;
+  }
 
   return `
-    <article class="timeline-item ${item.type === "comment" ? "is-comment" : ""}">
+    <article class="timeline-item ${item.type === "comment" ? "is-comment" : ""}${item.type === "task" ? " is-task" : ""}">
       <div class="timeline-item-dot"></div>
       <div class="timeline-item-body">
         <div class="timeline-item-head">
           <span class="timeline-item-type">${typeIcon}<span>${typeLabel}</span></span>
-          <time class="timeline-item-time" datetime="${escapeAttr(item.createdAt)}">${time}</time>
+          ${timeHTML}
         </div>
         ${parentInfo}
-        <div class="timeline-item-card">
-          <div class="memo-content">${renderedContent}</div>
-        </div>
+        ${cardBody}
       </div>
     </article>
   `;
-}
-
-function formatTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function todayKey() {

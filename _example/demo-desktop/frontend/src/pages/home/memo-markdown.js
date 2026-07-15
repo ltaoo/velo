@@ -183,7 +183,7 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
         lineNumber + lineNumberOffset,
         `
         <div class="memo-task-line">
-          <input type="checkbox" ${context.readonly ? "disabled" : taskSourceAttrs} ${task.checked ? "checked" : ""} />
+          <input type="checkbox" ${taskSourceAttrs} ${context.readonly ? "disabled" : ""} ${task.checked ? "checked" : ""} />
           <span ${taskDetailAttrs}>${inlineMarkdown(task.text, context)}</span>
         </div>
       `,
@@ -271,22 +271,46 @@ function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endL
   const label = language || "代码";
   const code = codeLines.join("\n");
   const collapsible = codeLines.length > 10;
-  const collapseButton = collapsible
-    ? `<button class="memo-action-button memo-code-collapse-button" type="button" data-action="toggleCodeCollapse" title="收起代码" aria-label="收起代码">${SVG.chevronDown}</button>`
-    : "";
-  const collapsibleClass = collapsible ? " memo-fenced-code-collapsible" : "";
+
+  if (!collapsible) {
+    return `
+      <div class="memo-fenced-code-block" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
+        <div class="memo-fenced-code-toolbar">
+          <span class="memo-fenced-code-label">${escapeHTML(label)}</span>
+          <div class="memo-fenced-code-actions">
+            <button class="memo-action-button memo-code-copy-button" type="button" data-action="copyCodeBlock" title="复制代码" aria-label="复制代码">
+              ${SVG.copy}
+            </button>
+          </div>
+        </div>
+        <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+      </div>
+    `;
+  }
+
+  const hiddenCount = codeLines.length - 10;
+
   return `
-    <div class="memo-fenced-code-block${collapsibleClass}" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
+    <div class="memo-fenced-code-block memo-fenced-code-collapsible memo-fenced-code-collapsed" ${blockId ? `data-code-block-id="${escapeAttr(blockId)}"` : ""}>
       <div class="memo-fenced-code-toolbar">
         <span class="memo-fenced-code-label">${escapeHTML(label)}</span>
         <div class="memo-fenced-code-actions">
-          ${collapseButton}
+          <button class="memo-action-button memo-code-collapse-button" type="button" data-action="toggleCodeCollapse" title="展开代码" aria-label="展开代码">${SVG.chevronDown}</button>
           <button class="memo-action-button memo-code-copy-button" type="button" data-action="copyCodeBlock" title="复制代码" aria-label="复制代码">
             ${SVG.copy}
           </button>
         </div>
       </div>
-      <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+      <div class="memo-fenced-code-viewport">
+        <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+      </div>
+      <div class="memo-fenced-code-overlay">
+        <div class="memo-fenced-code-overlay-gradient"></div>
+        <button class="memo-fenced-code-expand-btn" type="button" data-action="toggleCodeCollapse">
+          ${SVG.chevronDown}
+          <span>展开剩余 ${hiddenCount} 行</span>
+        </button>
+      </div>
     </div>
   `;
 }
@@ -515,6 +539,10 @@ function inlineMarkdownBase(value, context = {}) {
       return renderMemoFileToken({ label, url }, context);
     }
     return renderMemoLinkToken(label, url);
+  });
+  html = html.replace(/\b(https?:\/\/[^\s<>"`]+)/g, (_, url) => {
+    const href = safeUrl(url);
+    return `<a class="memo-auto-link" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${escapeHTML(url)}</a>`;
   });
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -822,7 +850,7 @@ function renderMemoImageBlock(resource) {
   const label = resource.label || fileDisplayName("", resource.url);
   const previewAttrs = imagePreviewAttrs(src, label, resource.url, label);
   return `
-    <figure class="memo-image-block" ${previewAttrs}>
+    <figure class="memo-image-block">
       <img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" ${previewAttrs} />
       ${label ? `<figcaption>${escapeHTML(label)}</figcaption>` : ""}
     </figure>

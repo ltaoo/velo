@@ -23,12 +23,18 @@ function formatRelativeDate(value) {
   if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
   if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
   if (diff < day * 7) return `${Math.floor(diff / day)} 天前`;
-  return date.toLocaleDateString();
+  return String(date.getFullYear()).padStart(4, "0")
+    + "-" + String(date.getMonth() + 1).padStart(2, "0")
+    + "-" + String(date.getDate()).padStart(2, "0");
 }
 
 function formatShortDate(value) {
   const date = new Date(value);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return String(date.getFullYear()).padStart(4, "0")
+    + "-" + String(date.getMonth() + 1).padStart(2, "0")
+    + "-" + String(date.getDate()).padStart(2, "0")
+    + " " + String(date.getHours()).padStart(2, "0")
+    + ":" + String(date.getMinutes()).padStart(2, "0");
 }
 
 function addMonths(date, delta) {
@@ -92,6 +98,32 @@ function dateFromKey(value) {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
+function relativeTimeTemplate(value) {
+  if (!value) return "";
+  var date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  var relative = formatRelativeDate(value);
+  var full = formatShortDate(value);
+  return '<time class="memo-relative-time" datetime="' + escapeAttr(value) + '" title="' + escapeAttr(full) + '">' + escapeHTML(relative) + '</time>';
+}
+
+function escapeHTML(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export {
   addMonths,
   calendarWeekdays,
@@ -103,5 +135,6 @@ export {
   memoDateCounts,
   memoDateKey,
   normalizeCalendarWeekStart,
+  relativeTimeTemplate,
   startOfMonth,
 };

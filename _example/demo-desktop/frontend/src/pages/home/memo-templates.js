@@ -643,13 +643,15 @@ function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
 
 function memoTemplate(memo, editingId, renderContext, expanded = false, projects = [], options = {}) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const showVisibility = memo.visibility && memo.visibility !== DEFAULT_VISIBILITY;
   const tags = extractTags(memo.content);
   const summary = memoCardSummaryTemplate(memo, tags, { interactiveTags: true });
   const archived = memo.archived;
   const editing = memo.id === editingId;
   const backlinks = memoBacklinkCount(renderContext, memo.id);
+  const textLines = (memo.content || "").split("\n").length;
   const expandLabel = expanded ? "收起" : "展开";
-  const projectBadge = projectBadgeTemplate(memo.projectId, projects);
+  const projectBadge = memo.projectId ? projectBadgeTemplate(memo.projectId, projects) : "";
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const commenting = options.commenting === true;
   const editingCommentId = String(options.editingCommentId || "");
@@ -661,8 +663,12 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   return `
     <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
       <header class="memo-card-head">
+        <div class="memo-card-author-info">
+          <span class="memo-author-name">You</span>
+          <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+        </div>
         <div class="memo-card-meta">
-          <span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>
+          ${showVisibility ? `<span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>` : ""}
           ${projectBadge}
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
@@ -681,14 +687,13 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             : `
             <div class="memo-card-reading ${toc ? "has-toc" : ""}">
               <div class="memo-card-reading-main">
-                <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-memo-collapse>
+                <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}${!expanded && textLines <= 36 ? " is-short" : ""}" data-memo-collapse data-memo-lines="${textLines}">
                   <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
                   <button class="memo-expand-button" type="button" data-action="toggleMemoExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
                     <span>${expandLabel}</span>
                     ${SVG.chevronDown}
                   </button>
                 </div>
-                ${summary}
               </div>
               ${toc}
             </div>
@@ -696,22 +701,21 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
       }
       ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded) : ""}
       <footer class="memo-card-actions">
-        <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
-        <button class="memo-action-button" type="button" data-action="commentMemo" title="评论">
-          ${SVG.comment}
-          ${comments.length ? `<span class="memo-action-count">${comments.length}</span>` : ""}
-        </button>
-        <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
-        <button class="memo-action-button" type="button" data-action="editMemoSource" title="编辑源数据" aria-label="编辑源数据">${SVG.code}</button>
-        ${
-          archived
-            ? `<button class="memo-action-button" type="button" data-action="restoreMemo" title="恢复">${SVG.restore}</button>`
-            : `<button class="memo-action-button" type="button" data-action="archiveMemo" title="归档">${SVG.archive}</button>`
-        }
-        <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
-        <div class="memo-card-author-info">
-          <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
-          <span class="memo-author-name">You</span>
+        ${summary}
+        <div class="memo-card-actions-buttons">
+          <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用">${SVG.link}</button>
+          <button class="memo-action-button" type="button" data-action="commentMemo" title="评论">
+            ${SVG.comment}
+            ${comments.length ? `<span class="memo-action-count">${comments.length}</span>` : ""}
+          </button>
+          <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
+          <button class="memo-action-button" type="button" data-action="editMemoSource" title="编辑源数据" aria-label="编辑源数据">${SVG.code}</button>
+          ${
+            archived
+              ? `<button class="memo-action-button" type="button" data-action="restoreMemo" title="恢复">${SVG.restore}</button>`
+              : `<button class="memo-action-button" type="button" data-action="archiveMemo" title="归档">${SVG.archive}</button>`
+          }
+          <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
         </div>
       </footer>
     </article>
@@ -764,12 +768,9 @@ function memoCardSummaryTemplate(memo, tags, options = {}) {
   const stats = memoCardStatItems(memo);
   const tagMarkup = memoCardTagsTemplate(tags, options);
   if (!stats.length && !tagMarkup) return "";
-
   return `
-    <div class="memo-card-summary">
-      ${stats.length ? `<div class="memo-card-stats">${stats.map(memoCardStatTemplate).join("")}</div>` : ""}
-      ${tagMarkup}
-    </div>
+    <div class="memo-card-stats">${stats.map(memoCardStatTemplate).join("")}</div>
+    ${tagMarkup}
   `;
 }
 
@@ -1017,8 +1018,9 @@ function taskGroupTemplate(label, tasks, context) {
 
 function taskCardTemplate(task, context) {
   const projects = (context && context.projects) || [];
-  const projectBadge = projectBadgeTemplate(task.projectId, projects);
+  const projectBadge = task.projectId ? projectBadgeTemplate(task.projectId, projects) : "";
   const priority = task.priority || "none";
+  const priorityLabel = priority !== "none" ? taskPriorityLabel(priority) : "";
   const complete = task.status === "completed";
   const dueLabel = task.dueAt ? formatTaskDate(task.dueAt) : "";
   const startLabel = task.startAt ? formatTaskDate(task.startAt) : "";
@@ -1033,7 +1035,7 @@ function taskCardTemplate(task, context) {
       <div class="memo-task-body">
         <div class="memo-task-title-row">
           <strong>${escapeHTML(task.title)}</strong>
-          <span class="memo-task-priority">${taskPriorityLabel(priority)}</span>
+          ${priorityLabel ? `<span class="memo-task-priority">${priorityLabel}</span>` : ""}
         </div>
         <div class="memo-task-meta">
           ${projectBadge}
@@ -1098,21 +1100,24 @@ function emptyTasksTemplate() {
   `;
 }
 
+function formatDateTime(date) {
+  return String(date.getFullYear()).padStart(4, "0")
+    + "-" + String(date.getMonth() + 1).padStart(2, "0")
+    + "-" + String(date.getDate()).padStart(2, "0")
+    + " " + String(date.getHours()).padStart(2, "0")
+    + ":" + String(date.getMinutes()).padStart(2, "0");
+}
+
 function formatTaskDate(value) {
   const date = taskDateValue(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString();
+  return formatDateTime(date);
 }
 
 function formatTaskDateTime(value) {
   const date = taskDateValue(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "numeric",
-  });
+  return formatDateTime(date);
 }
 
 function taskDateValue(value) {
@@ -1195,6 +1200,7 @@ function gtdItemCardTemplate(item, context) {
           ${item.linkedTaskIds.length ? `<span>${item.linkedTaskIds.length} tasks</span>` : ""}
           ${item.linkedMemoIds.length ? `<span>${item.linkedMemoIds.length} memos</span>` : ""}
           ${(item.labels || []).slice(0, 4).map((label) => `<span>#${escapeHTML(label)}</span>`).join("")}
+          ${item.createdAt ? `<time datetime="${escapeAttr(item.createdAt)}">创建 ${formatRelativeDate(item.createdAt)}</time>` : ""}
         </div>
         ${item.decision ? `<p class="memo-task-note">${escapeHTML(item.decision)}</p>` : ""}
       </div>
@@ -1477,12 +1483,7 @@ function clipboardCapturedAtLabel(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString([], {
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "numeric",
-  });
+  return formatDateTime(date);
 }
 
 function editTemplate(memo, projects = []) {

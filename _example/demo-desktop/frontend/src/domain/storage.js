@@ -121,7 +121,9 @@ export function resolveAssetUrl(value, settings) {
   const asset = parseAssetReference(value);
   if (!asset) return String(value || "").trim();
   const storage = cloudStorageById(settings, asset.storageId);
-  if (!storage) return "";
+  if (!storage) {
+    return "/api/oss/assets?storageId=" + encodeURIComponent(asset.storageId) + "&path=" + encodeURIComponent(String(asset.key || "").replace(/^\/+/, ""));
+  }
   return publicCloudStorageObjectUrl(storage, asset.key);
 }
 

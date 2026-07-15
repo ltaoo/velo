@@ -650,11 +650,11 @@ function sortTasksForFilter(a, b, filter) {
     if (a.status === "completed") return 1;
     if (b.status === "completed") return -1;
   }
-  const due = taskTimeValue(a.dueAt || a.startAt) - taskTimeValue(b.dueAt || b.startAt);
-  if (due !== 0) return due;
+  const created = taskTimeValue(b.createdAt) - taskTimeValue(a.createdAt);
+  if (created !== 0) return created;
   const priority = taskPriorityWeight(b.priority) - taskPriorityWeight(a.priority);
   if (priority !== 0) return priority;
-  return taskTimeValue(b.updatedAt || b.createdAt) - taskTimeValue(a.updatedAt || a.createdAt);
+  return taskTimeValue(b.updatedAt) - taskTimeValue(a.updatedAt);
 }
 
 function defaultDueForFilter(filter) {
