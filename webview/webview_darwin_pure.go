@@ -69,9 +69,11 @@ func init() {
 	cocoa.RegisterClassPair(appDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloAppDelegate registered")
 
-	// Register VeloWindowDelegate class for named-window cleanup on close.
+	// Register VeloWindowDelegate class for named-window cleanup on close and focus/blur events.
 	windowDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloWindowDelegate", 0)
 	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowWillClose:"), windowWillClose, "v@:@")
+	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidBecomeKey:"), windowDidBecomeKey, "v@:@")
+	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidResignKey:"), windowDidResignKey, "v@:@")
 	cocoa.RegisterClassPair(windowDelegateClass)
 	fmt.Fprintln(os.Stderr, "DEBUG: VeloWindowDelegate registered")
 
@@ -120,6 +122,35 @@ func applicationShouldHandleReopen(self, _cmd, app, hasVisibleWindows uintptr) u
 func windowWillClose(self, _cmd, notification uintptr) {
 	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
 	cleanupWindow(nsWindow)
+}
+
+func windowDidBecomeKey(self, _cmd, notification uintptr) {
+	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
+	emitWindowFocusEvent(nsWindow, true)
+}
+
+func windowDidResignKey(self, _cmd, notification uintptr) {
+	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
+	emitWindowFocusEvent(nsWindow, false)
+}
+
+func emitWindowFocusEvent(nsWindow cocoa.ID, focused bool) {
+	mapLock.RLock()
+	wkWebView := windowWebViewMap[uintptr(nsWindow)]
+	mapLock.RUnlock()
+
+	if wkWebView == 0 {
+		return
+	}
+
+	eventType := "__velo_window_blur"
+	if focused {
+		eventType = "__velo_window_focus"
+	}
+
+	sendWebViewMessage(wkWebView, map[string]interface{}{
+		"type": eventType,
+	})
 }
 
 func veloWebViewAcceptsFirstMouse(self, _cmd, event uintptr) uintptr {
@@ -883,10 +914,11 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		nsWindow.Send(cocoa.RegisterName("setTitlebarAppearsTransparent:"), true)
 		nsWindow.Send(cocoa.RegisterName("setTitleVisibility:"), 1) // NSWindowTitleHidden
 
-		// Transparent window background
+		// Use windowBackgroundColor for a native-looking light border instead of
+		// clearColor, so the dark window shadow doesn't show through as a black edge.
 		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"),
-			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
-		nsWindow.Send(cocoa.RegisterName("setOpaque:"), false)
+			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("windowBackgroundColor")))
+		nsWindow.Send(cocoa.RegisterName("setOpaque:"), true)
 	}
 	if opts.HideTrafficLights {
 		hideTrafficLights(nsWindow)
