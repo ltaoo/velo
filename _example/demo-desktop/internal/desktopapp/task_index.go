@@ -25,6 +25,7 @@ type TaskIndexEntry struct {
 	ParentID     string     `json:"parentId,omitempty"`
 	Path         string     `json:"path"`
 	Priority     string     `json:"priority"`
+	Private      bool       `json:"private"`
 	ProjectID    string     `json:"projectId,omitempty"`
 	Source       TaskSource `json:"source"`
 	StartAt      string     `json:"startAt,omitempty"`
@@ -33,6 +34,7 @@ type TaskIndexEntry struct {
 	Tags         []string   `json:"tags"`
 	Title        string     `json:"title"`
 	UpdatedAt    string     `json:"updatedAt"`
+	Visibility   string     `json:"visibility"`
 }
 
 type TaskEvent struct {
@@ -126,6 +128,7 @@ func taskIndexEntry(task TaskRecord) TaskIndexEntry {
 		ParentID:     task.ParentID,
 		Path:         task.Path,
 		Priority:     task.Priority,
+		Private:      task.Private,
 		ProjectID:    task.ProjectID,
 		Source:       task.Source,
 		StartAt:      task.StartAt,
@@ -134,6 +137,7 @@ func taskIndexEntry(task TaskRecord) TaskIndexEntry {
 		Tags:         task.Tags,
 		Title:        task.Title,
 		UpdatedAt:    task.UpdatedAt,
+		Visibility:   task.Visibility,
 	}
 }
 

@@ -3,6 +3,7 @@ import { normalizeProjectID } from "./projects.js";
 export const DEFAULT_VISIBILITY = "PRIVATE";
 
 export const VISIBILITY = {
+  SECRET: { label: "私密", icon: "lock" },
   PRIVATE: { label: "仅自己", icon: "lock" },
   PROTECTED: { label: "工作区", icon: "shield" },
   PUBLIC: { label: "公开", icon: "globe" },
@@ -21,6 +22,7 @@ export function normalizeMemoPayload(memo) {
     id,
     kind: String(memo.kind || "").trim(),
     pinned: Boolean(memo.pinned),
+    private: Boolean(memo.private),
     projectId: normalizeProjectID(memo.projectId),
     taskId: String(memo.taskId || "").trim(),
     updatedAt: memo.updatedAt || "",

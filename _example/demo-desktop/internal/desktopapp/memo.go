@@ -19,6 +19,7 @@ type MemoRecord struct {
 	Kind       string   `json:"kind,omitempty"`
 	Path       string   `json:"path"`
 	Pinned     bool     `json:"pinned"`
+	Private    bool     `json:"private"`
 	ProjectID  string   `json:"projectId,omitempty"`
 	References []string `json:"references"`
 	Tags       []string `json:"tags"`
@@ -29,6 +30,7 @@ type MemoRecord struct {
 
 type MemoCreateRequest struct {
 	Content    string `json:"content"`
+	Private    bool   `json:"private"`
 	ProjectID  string `json:"projectId,omitempty"`
 	Visibility string `json:"visibility"`
 }
@@ -40,6 +42,7 @@ type MemoUpdateRequest struct {
 	ID         string  `json:"id"`
 	Kind       *string `json:"kind,omitempty"`
 	Pinned     *bool   `json:"pinned"`
+	Private    *bool   `json:"private"`
 	ProjectID  *string `json:"projectId,omitempty"`
 	TaskID     *string `json:"taskId,omitempty"`
 	UpdatedAt  *string `json:"updatedAt"`
@@ -115,6 +118,7 @@ func createVaultMemo(ctx *VaultContext, req MemoCreateRequest) (MemoRecord, erro
 		CreatedAt:  now,
 		ID:         newMemoID(),
 		Pinned:     false,
+		Private:    req.Private,
 		ProjectID:  projectID,
 		UpdatedAt:  "",
 		Visibility: normalizeMemoVisibility(req.Visibility),
@@ -165,6 +169,9 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 	if req.Visibility != nil {
 		memo.Visibility = normalizeMemoVisibility(*req.Visibility)
 	}
+	if req.Private != nil {
+		memo.Private = *req.Private
+	}
 	if req.Pinned != nil {
 		memo.Pinned = *req.Pinned
 	}
@@ -209,6 +216,7 @@ func updateVaultMemo(ctx *VaultContext, req MemoUpdateRequest) (MemoRecord, erro
 func shouldTouchMemoUpdatedAt(req MemoUpdateRequest) bool {
 	return req.Content != nil ||
 		req.Visibility != nil ||
+		req.Private != nil ||
 		req.Pinned != nil ||
 		req.Archived != nil ||
 		req.ProjectID != nil

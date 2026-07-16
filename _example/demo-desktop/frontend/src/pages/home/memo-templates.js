@@ -284,6 +284,12 @@ function activeViewMeta(view) {
       subtitle: "从所有 memo 中汇总文件和图片",
       title: "文件",
     },
+    images: {
+      hideComposer: true,
+      searchPlaceholder: "搜索图片或来源 memo",
+      subtitle: "从所有 memo 中汇总图片，瀑布流展示",
+      title: "图片",
+    },
     codeblocks: {
       hideComposer: true,
       searchPlaceholder: "搜索代码片段、别名、命令或来源 memo",
@@ -370,6 +376,7 @@ function shellTemplate() {
             ${viewNavButtonTemplate("links", "超链接", SVG.link, "data-link-nav-count")}
             ${viewNavButtonTemplate("codeblocks", "代码片段", SVG.code, "data-code-nav-count")}
             ${viewNavButtonTemplate("files", "文件", SVG.paperclip, "data-file-nav-count")}
+            ${viewNavButtonTemplate("images", "图片", SVG.image, "data-image-nav-count")}
             ${viewNavButtonTemplate("clipboard", "粘贴板", SVG.copy, "data-clipboard-nav-count")}
           </nav>
         </div>
@@ -435,16 +442,19 @@ function shellTemplate() {
               </select>
               ${SVG.chevronDown}
             </label>
-            <label class="memo-select-wrap">
-              <span class="memo-select-icon">${SVG.lock}</span>
-              <select data-visibility-select aria-label="可见性">
-                ${visibilityOptionsTemplate(DEFAULT_VISIBILITY)}
-              </select>
-              ${SVG.chevronDown}
-            </label>
+            <span class="memo-visibility-group">
+              <label class="memo-select-wrap">
+                <span class="memo-select-icon">${SVG.lock}</span>
+                <select data-visibility-select aria-label="可见性">
+                  ${visibilityOptionsTemplate(DEFAULT_VISIBILITY)}
+                </select>
+                ${SVG.chevronDown}
+              </label>
+            </span>
           </div>
           <div class="memo-editor-switch memo-composer-switch">
             <div class="memo-editor-host" data-composer-host data-editor-switch-host></div>
+            <span class="memo-composer-draft-status" data-composer-draft-status hidden>已存草稿</span>
             <section class="memo-editor-preview memo-composer-preview" data-composer-preview hidden></section>
           </div>
           <div class="memo-composer-toolbar">
@@ -643,7 +653,11 @@ function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
 
 function memoTemplate(memo, editingId, renderContext, expanded = false, projects = [], options = {}) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
+  const isSecret = memo.private && (memo.visibility || DEFAULT_VISIBILITY) === "PRIVATE";
+  const displayVisibility = isSecret ? (VISIBILITY.SECRET || visibility) : visibility;
   const showVisibility = memo.visibility && memo.visibility !== DEFAULT_VISIBILITY;
+  const isPrivateVisible = memo.private && !options.privateUnlocked;
+  const cardClass = `memo-card ${memo.pinned ? "is-pinned" : ""} ${memo.archived ? "is-archived" : ""} ${isPrivateVisible ? "is-private" : ""}`;
   const tags = extractTags(memo.content);
   const summary = memoCardSummaryTemplate(memo, tags, { interactiveTags: true });
   const archived = memo.archived;
@@ -661,14 +675,15 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const toc = !editing && !sourceEditing && expanded ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
 
   return `
-    <article class="memo-card ${memo.pinned ? "is-pinned" : ""} ${archived ? "is-archived" : ""}" data-memo-id="${escapeAttr(memo.id)}">
+    <article class="${cardClass}" data-memo-id="${escapeAttr(memo.id)}">
+      ${isPrivateVisible ? privateOverlayTemplate(displayVisibility.label) : ""}
       <header class="memo-card-head">
         <div class="memo-card-author-info">
           <span class="memo-author-name">You</span>
           <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
         </div>
         <div class="memo-card-meta">
-          ${showVisibility ? `<span class="memo-visibility">${SVG[visibility.icon]} ${visibility.label}</span>` : ""}
+          ${showVisibility ? `<span class="memo-visibility">${SVG[displayVisibility.icon]} ${displayVisibility.label}</span>` : ""}
           ${projectBadge}
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
@@ -699,7 +714,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             </div>
           `
       }
-      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded) : ""}
+      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded, { privateUnlocked: options.privateUnlocked, commentVisibility: options.commentVisibility }) : ""}
       <footer class="memo-card-actions">
         ${summary}
         <div class="memo-card-actions-buttons">
@@ -808,7 +823,7 @@ function memoCardTagsTemplate(tags, options = {}) {
   return `<div class="memo-card-tags">${items.join("")}</div>`;
 }
 
-function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "", commentsExpanded = false) {
+function memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId = "", commentsExpanded = false, options = {}) {
   const editingIndex = editingCommentId
     ? comments.findIndex((comment) => comment && comment.id === editingCommentId)
     : -1;
@@ -819,7 +834,7 @@ function memoCommentSectionTemplate(comments, commenting, renderContext, editing
     : comments;
   const commentListClass = expanded ? "is-expanded" : "is-collapsed";
   const commentItemsHTML = visibleComments
-    .map((comment) => memoCommentTemplate(comment, renderContext, editingCommentId))
+    .map((comment) => memoCommentTemplate(comment, renderContext, editingCommentId, { privateUnlocked: options.privateUnlocked }))
     .join("");
   const hiddenCount = Math.max(0, comments.length - visibleComments.length);
   const toggleLabel = expanded ? `收起到 ${MEMO_COMMENT_PREVIEW_LIMIT} 条` : `展开剩余 ${hiddenCount} 条评论`;
@@ -850,6 +865,7 @@ function memoCommentSectionTemplate(comments, commenting, renderContext, editing
               </div>
               <div class="memo-inline-actions memo-comment-actions">
                 <div class="memo-inline-status-line" data-comment-vim-status></div>
+                <select class="memo-comment-visibility-select" data-comment-visibility-select aria-label="评论可见范围">${visibilityOptionsTemplate(options.commentVisibility || DEFAULT_VISIBILITY)}</select>
                 <button class="memo-secondary-button" type="button" data-action="toggleCommentPreview" aria-pressed="false">${SVG.eye}<span>预览</span></button>
                 <button class="memo-secondary-button" type="button" data-action="cancelComment">${SVG.x}<span>取消</span></button>
                 <button class="memo-primary-button" type="button" data-action="saveComment">${SVG.check}<span>评论</span></button>
@@ -862,12 +878,15 @@ function memoCommentSectionTemplate(comments, commenting, renderContext, editing
   `;
 }
 
-function memoCommentTemplate(comment, renderContext, editingCommentId = "") {
+function memoCommentTemplate(comment, renderContext, editingCommentId = "", options = {}) {
   const time = comment.updatedAt || comment.createdAt;
   const editing = comment.id === editingCommentId;
   const content = renderMemoCommentContent(comment, commentRenderContext(renderContext, comment));
+  const isPrivateVisible = comment.private && !options.privateUnlocked;
+  const commentClass = `memo-comment ${editing ? "is-editing" : ""} ${isPrivateVisible ? "is-private" : ""}`;
   return `
-    <article class="memo-comment ${editing ? "is-editing" : ""}" data-comment-id="${escapeAttr(comment.id)}">
+    <article class="${commentClass}" data-comment-id="${escapeAttr(comment.id)}">
+      ${isPrivateVisible ? privateOverlayTemplate("仅自己可见") : ""}
       <header class="memo-comment-head">
         <div class="memo-avatar memo-comment-avatar">U</div>
         <div>
@@ -987,6 +1006,7 @@ function taskWorkspaceTemplate(options) {
           <option value="high">高</option>
         </select>
         <input name="dueAt" type="date" aria-label="截止日期" />
+        <select name="visibility" aria-label="可见范围">${visibilityOptionsTemplate(DEFAULT_VISIBILITY)}</select>
         <button class="memo-primary-button" type="submit">${SVG.plus}<span>添加</span></button>
       </form>
       <div class="memo-task-tabs" role="tablist" aria-label="Task filters">
@@ -1026,8 +1046,11 @@ function taskCardTemplate(task, context) {
   const startLabel = task.startAt ? formatTaskDate(task.startAt) : "";
   const completedLabel = complete && task.completedAt ? formatTaskDateTime(task.completedAt) : "";
   const source = taskLinkedSource(task);
+  const isPrivateVisible = task.private && !(context && context.privateUnlocked);
+  const taskClass = `memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)} ${isPrivateVisible ? "is-private" : ""}`;
   return `
-    <article class="memo-task-card ${complete ? "is-complete" : ""} is-priority-${escapeAttr(priority)}" data-task-id="${escapeAttr(task.id)}">
+    <article class="${taskClass}" data-task-id="${escapeAttr(task.id)}">
+      ${isPrivateVisible ? privateOverlayTemplate("仅自己可见") : ""}
       <label class="memo-task-check">
         <input type="checkbox" data-task-complete ${complete ? "checked" : ""} />
         <span></span>
@@ -1399,7 +1422,7 @@ function resourceTemplate(resource) {
         ${sourceReferenceMarkerTemplate(resource)}
         <div class="memo-todo-meta">
           <time datetime="${escapeAttr(resource.memo.createdAt)}">${formatRelativeDate(resource.memo.createdAt)}</time>
-          <span>${SVG[visibility.icon]} ${visibility.label}</span>
+          ${resource.memo.visibility && resource.memo.visibility !== DEFAULT_VISIBILITY ? `<span>${SVG[visibility.icon]} ${visibility.label}</span>` : `<span>${SVG[visibility.icon]}</span>`}
           ${tags.slice(0, 3).map((tag) => `<span>#${escapeHTML(tag)}</span>`).join("")}
         </div>
       </div>
@@ -1415,6 +1438,52 @@ function resourcePreviewTemplate(resource) {
       <img src="${escapeAttr(src)}" alt="${escapeAttr(resource.label || "image")}" loading="lazy" />
     </span>
   `;
+}
+
+function imageGridTemplate(images) {
+  if (!images.length) return emptyImagesTemplate();
+  return `
+    <div class="memo-image-grid">
+      ${images.map(imageCardTemplate).join("")}
+    </div>
+  `;
+}
+
+function imageCardTemplate(resource) {
+  const src = safeImageUrl(resource.url);
+  if (!src) return "";
+  return `
+    <article
+      class="memo-image-card"
+      data-image-preview-src="${escapeAttr(src)}"
+      data-image-preview-title="${escapeAttr(resource.label || "")}"
+      data-memo-id="${escapeAttr(resource.memoId)}"
+    >
+      <img src="${escapeAttr(src)}" alt="${escapeAttr(resource.label || "image")}" loading="lazy" />
+      <div class="memo-image-card-info">
+        <span class="memo-image-card-name">${escapeHTML(resource.label || fileNameFromPath(resource.url))}</span>
+        <span class="memo-image-card-source">${escapeHTML(compactFileURL(resource.url))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function emptyImagesTemplate() {
+  return `
+    <div class="memo-empty" role="status">
+      <div class="memo-empty-icon">${SVG.image}</div>
+      <p>当前没有图片</p>
+      <p class="memo-empty-text">在 memo 中添加图片附件，它们会汇总到这里</p>
+    </div>
+  `;
+}
+
+function fileNameFromPath(filePath) {
+  if (!filePath) return "";
+  var parts = String(filePath).replace(/\\/g, "/").split("/");
+  var name = parts[parts.length - 1];
+  if (name) return name;
+  return "";
 }
 
 function clipboardCurrentTemplate(item, options = {}) {
@@ -1503,7 +1572,7 @@ function editTemplate(memo, projects = []) {
         </label>
         <label class="memo-select-wrap is-compact">
           <select data-edit-visibility aria-label="编辑可见性">
-            ${visibilityOptionsTemplate(memo.visibility)}
+            ${visibilityOptionsTemplate(memo.private && memo.visibility === "PRIVATE" ? "SECRET" : memo.visibility)}
           </select>
           ${SVG.chevronDown}
         </label>
@@ -1559,8 +1628,39 @@ function emptyFilesTemplate() {
   return `
     <div class="memo-empty-state">
       <div class="memo-empty-icon">${SVG.paperclip}</div>
-      <h2>没有匹配的文件或图片</h2>
+      <h2>没有匹配的文件</h2>
       <button class="memo-secondary-button" type="button" data-action="clearFilters">查看全部</button>
+    </div>
+  `;
+}
+
+function privateOverlayTemplate(label) {
+  const text = label || "仅自己可见";
+  return `
+    <div class="private-overlay" data-action="unlockPrivate" title="点击解锁查看私密内容">
+      <div class="private-overlay-icon">${SVG.lock}</div>
+      <span class="private-overlay-text">${escapeHTML(text)}</span>
+    </div>
+  `;
+}
+
+function pinDialogTemplate(mode, errorMessage) {
+  const isSetPin = mode === "set";
+  const title = isSetPin ? "设置隐私 PIN" : "输入 PIN 解锁";
+  const buttonLabel = isSetPin ? "设置" : "解锁";
+  const errorHtml = errorMessage ? `<div class="pin-dialog-error">${escapeHTML(errorMessage)}</div>` : "";
+  return `
+    <div class="pin-dialog-backdrop" data-pin-backdrop>
+      <div class="pin-dialog-card">
+        <h2 class="pin-dialog-title">${title}</h2>
+        <p class="pin-dialog-desc">${isSetPin ? "请设置一个至少 4 位的 PIN 以保护私密内容" : "请输入 PIN 查看私密内容"}</p>
+        ${errorHtml}
+        <input class="pin-dialog-input" type="password" maxlength="16" placeholder="输入 PIN" data-pin-input autofocus />
+        <div class="pin-dialog-actions">
+          <button class="memo-secondary-button" type="button" data-action="cancelPinDialog">取消</button>
+          <button class="memo-primary-button" type="button" data-action="submitPin">${buttonLabel}</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1582,6 +1682,7 @@ export {
   emptyCodeBlocksTemplate,
   emptyFeedTemplate,
   emptyFilesTemplate,
+  emptyImagesTemplate,
   emptyLinksTemplate,
   emptyTasksTemplate,
   emptyTodosTemplate,
@@ -1590,17 +1691,23 @@ export {
   gtdItemWorkspaceTemplate,
   gtdMilestoneGroupTemplate,
   gtdMilestoneWorkspaceTemplate,
+  imageGridTemplate,
   linkTemplate,
   linksDomainBarTemplate,
+  memoCommentTemplate,
   memoTemplate,
   parseHost,
+  pinDialogTemplate,
+  privateOverlayTemplate,
   projectFilterTemplate,
   projectOptionsTemplate,
   resourceGroupTemplate,
+  resourceTemplate,
   shellTemplate,
   statTemplate,
   taskCardTemplate,
   taskGroupTemplate,
   taskWorkspaceTemplate,
   todoGroupTemplate,
+  visibilityOptionsTemplate,
 };

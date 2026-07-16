@@ -6,9 +6,11 @@ export interface MemoCommentRecord {
   id: string;
   memoId: MemoID;
   path: string;
+  private?: boolean;
   references: string[];
   tags: string[];
   updatedAt: string;
+  visibility: string;
 }
 
 export interface MemoCommentDeleteOptions {
@@ -21,7 +23,7 @@ export declare function normalizeMemoCommentPayload(comment: unknown): MemoComme
 
 export declare function loadMemoCommentsFromVault(memoId?: MemoID | string): Promise<MemoCommentRecord[]>;
 
-export declare function createMemoCommentInVault(memoId: MemoID | string, content: string): Promise<MemoCommentRecord>;
+export declare function createMemoCommentInVault(memoId: MemoID | string, content: string, visibility?: string, isPrivate?: boolean): Promise<MemoCommentRecord>;
 
 export declare function updateMemoCommentInVault(id: string, patch: Partial<MemoCommentRecord>): Promise<MemoCommentRecord>;
 

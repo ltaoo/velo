@@ -11,9 +11,11 @@ export function normalizeMemoCommentPayload(comment) {
     id,
     memoId,
     path: String(comment.path || ""),
+    private: Boolean(comment.private),
     references: Array.isArray(comment.references) ? comment.references.map(String).filter(Boolean) : [],
     tags: Array.isArray(comment.tags) ? comment.tags.map(String).filter(Boolean) : [],
     updatedAt: comment.updatedAt || "",
+    visibility: comment.visibility || "PRIVATE",
   };
 }
 
@@ -35,9 +37,11 @@ export function loadMemoCommentsFromVault(memoId = "") {
   });
 }
 
-export function createMemoCommentInVault(memoId, content) {
+export function createMemoCommentInVault(memoId, content, visibility, isPrivate) {
   const targetMemoId = String(memoId || "").trim();
   const text = String(content || "");
+  const vis = visibility || "PRIVATE";
+  const priv = Boolean(isPrivate);
   if (!targetMemoId) return Promise.reject(new Error("memo id is required"));
   if (!text.trim()) return Promise.reject(new Error("comment content is required"));
 
@@ -48,7 +52,9 @@ export function createMemoCommentInVault(memoId, content) {
       createdAt: now,
       id: createMemoCommentId(),
       memoId: targetMemoId,
+      private: priv,
       updatedAt: "",
+      visibility: vis,
     });
     const comments = [comment].filter(Boolean).concat(loadLocalMemoComments());
     saveLocalMemoComments(comments);
@@ -60,6 +66,8 @@ export function createMemoCommentInVault(memoId, content) {
     args: {
       content: text,
       memoId: targetMemoId,
+      private: priv,
+      visibility: vis,
     },
   }).then(function (resp) {
     if (!resp || resp.code !== 0 || !resp.data || !resp.data.comment) {
@@ -90,6 +98,7 @@ export function updateMemoCommentInVault(id, patch) {
 
   const args = { id: commentId };
   if (Object.prototype.hasOwnProperty.call(patch, "content")) args.content = patch.content;
+  if (Object.prototype.hasOwnProperty.call(patch, "private")) args.private = Boolean(patch.private);
   return globalThis.invoke("/api/memo-comments/update", {
     method: "POST",
     args,

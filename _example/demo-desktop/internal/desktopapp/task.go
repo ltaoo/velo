@@ -41,6 +41,7 @@ type TaskRecord struct {
 	ParentID      string         `json:"parentId,omitempty"`
 	Path          string         `json:"path"`
 	Priority      string         `json:"priority"`
+	Private       bool           `json:"private"`
 	ProjectID     string         `json:"projectId,omitempty"`
 	Reminders     []TaskReminder `json:"reminders"`
 	Repeat        TaskRepeat     `json:"repeat"`
@@ -53,6 +54,7 @@ type TaskRecord struct {
 	Timezone      string         `json:"timezone"`
 	Title         string         `json:"title"`
 	UpdatedAt     string         `json:"updatedAt"`
+	Visibility    string         `json:"visibility"`
 }
 
 type TaskReminder struct {
@@ -101,22 +103,24 @@ type TaskNoteRef struct {
 }
 
 type TaskCreateRequest struct {
-	Contexts  []string       `json:"contexts"`
-	DueAt     string         `json:"dueAt"`
-	Links     []TaskLink     `json:"links"`
-	ListID    string         `json:"listId"`
-	Notes     string         `json:"notes"`
-	NoteRefs  []TaskNoteRef  `json:"noteRefs"`
-	ParentID  string         `json:"parentId"`
-	Priority  string         `json:"priority"`
-	ProjectID string         `json:"projectId"`
-	Reminders []TaskReminder `json:"reminders"`
-	Repeat    TaskRepeat     `json:"repeat"`
-	Source    TaskSource     `json:"source"`
-	StartAt   string         `json:"startAt"`
-	Tags      []string       `json:"tags"`
-	Timezone  string         `json:"timezone"`
-	Title     string         `json:"title"`
+	Contexts   []string       `json:"contexts"`
+	DueAt      string         `json:"dueAt"`
+	Links      []TaskLink     `json:"links"`
+	ListID     string         `json:"listId"`
+	Notes      string         `json:"notes"`
+	NoteRefs   []TaskNoteRef  `json:"noteRefs"`
+	ParentID   string         `json:"parentId"`
+	Priority   string         `json:"priority"`
+	Private    bool           `json:"private"`
+	ProjectID  string         `json:"projectId"`
+	Reminders  []TaskReminder `json:"reminders"`
+	Repeat     TaskRepeat     `json:"repeat"`
+	Source     TaskSource     `json:"source"`
+	StartAt    string         `json:"startAt"`
+	Tags       []string       `json:"tags"`
+	Timezone   string         `json:"timezone"`
+	Title      string         `json:"title"`
+	Visibility string         `json:"visibility"`
 }
 
 type TaskUpdateRequest struct {
@@ -131,6 +135,7 @@ type TaskUpdateRequest struct {
 	NoteRefs    *[]TaskNoteRef  `json:"noteRefs"`
 	ParentID    *string         `json:"parentId"`
 	Priority    *string         `json:"priority"`
+	Private     *bool           `json:"private"`
 	ProjectID   *string         `json:"projectId"`
 	Reminders   *[]TaskReminder `json:"reminders"`
 	Repeat      *TaskRepeat     `json:"repeat"`
@@ -141,6 +146,7 @@ type TaskUpdateRequest struct {
 	Tags        *[]string       `json:"tags"`
 	Timezone    *string         `json:"timezone"`
 	Title       *string         `json:"title"`
+	Visibility  *string         `json:"visibility"`
 }
 
 type TaskIDRequest struct {
@@ -210,6 +216,7 @@ func createVaultTask(ctx *VaultContext, req TaskCreateRequest) (TaskRecord, erro
 		NoteRefs:      normalizeTaskNoteRefs(req.NoteRefs),
 		ParentID:      sanitizeTaskID(req.ParentID),
 		Priority:      normalizeTaskPriority(req.Priority),
+		Private:       req.Private,
 		ProjectID:     projectID,
 		Reminders:     normalizeTaskReminders(req.Reminders),
 		Repeat:        normalizeTaskRepeat(req.Repeat),
@@ -222,6 +229,7 @@ func createVaultTask(ctx *VaultContext, req TaskCreateRequest) (TaskRecord, erro
 		Timezone:      normalizeTaskTimezone(req.Timezone),
 		Title:         title,
 		UpdatedAt:     now,
+		Visibility:    normalizeTaskVisibility(req.Visibility),
 	}
 	task.Path = taskRelativePath(task)
 	if err := writeTaskRecord(ctx, task); err != nil {
@@ -331,6 +339,12 @@ func updateVaultTask(ctx *VaultContext, req TaskUpdateRequest) (TaskRecord, erro
 	}
 	if req.CancelledAt != nil {
 		task.CancelledAt = normalizeTaskTime(*req.CancelledAt)
+	}
+	if req.Visibility != nil {
+		task.Visibility = normalizeTaskVisibility(*req.Visibility)
+	}
+	if req.Private != nil {
+		task.Private = *req.Private
 	}
 	task.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	task.Path = taskRelativePath(task)
@@ -544,7 +558,12 @@ func normalizeTaskRecord(task TaskRecord) TaskRecord {
 	task.NoteRefs = normalizeTaskNoteRefs(task.NoteRefs)
 	task.Notes = normalizeMemoContent(task.Notes)
 	task.Title = strings.TrimSpace(task.Title)
+	task.Visibility = normalizeTaskVisibility(task.Visibility)
 	return task
+}
+
+func normalizeTaskVisibility(value string) string {
+	return normalizeMemoVisibility(value)
 }
 
 func normalizeTaskNoteRefs(refs []TaskNoteRef) []TaskNoteRef {

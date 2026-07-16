@@ -521,6 +521,14 @@
       <button class="manager-button" type="button" data-action="file-refresh">刷新</button>
       <button class="manager-button" type="button" data-action="file-mkdir">新建文件夹</button>
       <button class="manager-button is-primary" type="button" data-action="file-upload">上传文件</button>
+      <select class="manager-select" data-type-filter style="max-width:120px">
+        <option value="">全部</option>
+        <option value="image">图片</option>
+        <option value="document">文档</option>
+        <option value="code">代码</option>
+        <option value="archive">压缩包</option>
+        <option value="other">其他</option>
+      </select>
       <div class="manager-message" data-manager-message></div>
       <div class="manager-path" data-file-path>/</div>
     </div>
@@ -564,6 +572,7 @@
         openMenuId: "",
         selectedStorageId: requestedStorageId,
         settings: normalizeSettings(null),
+        typeFilter: "",
       };
 
       loadConfig().then(function (settings) {
@@ -621,7 +630,14 @@
           return;
         }
         if (action.dataset.action === "file-preview") {
-          openPreviewWindow(action.dataset.filePath || "");
+          var filePath = action.dataset.filePath || "";
+          var fileUrl = action.dataset.fileUrl || "";
+          var fileType = action.dataset.fileType || "";
+          if (isImageType(fileType)) {
+            openImagePreview(fileUrl, fileNameFromPath(filePath));
+          } else {
+            openPreviewWindow(filePath);
+          }
           return;
         }
         if (action.dataset.action === "file-open-url") {
@@ -654,6 +670,13 @@
         scheduleWindowSessionSnapshot();
         render();
         loadFiles(selectedStoragePrefix());
+      });
+
+      var typeFilter = document.querySelector("[data-type-filter]");
+      typeFilter.addEventListener("change", function () {
+        state.typeFilter = typeFilter.value;
+        state.openMenuId = "";
+        render();
       });
 
       function loadConfig() {
@@ -759,15 +782,21 @@
           fileList.innerHTML = '<div class="manager-empty">点击刷新读取当前 Bucket</div>';
           return;
         }
-        if (!state.items.length) {
-          fileList.innerHTML = '<div class="manager-empty">当前目录为空</div>';
+        var filtered = state.items;
+        if (state.typeFilter) {
+          filtered = state.items.filter(function (item) {
+            return fileCategory(normalizeFileItem(item)) === state.typeFilter;
+          });
+        }
+        if (!filtered.length) {
+          fileList.innerHTML = '<div class="manager-empty">' + (state.typeFilter ? '当前分类无匹配文件' : '当前目录为空') + '</div>';
           return;
         }
         fileList.innerHTML = [
           '<div class="manager-row is-header">',
           '<span>名称</span><span>类型</span><span>大小</span><span>修改时间</span><span></span>',
           '</div>',
-          state.items.map(renderFileRow).join(""),
+          filtered.map(renderFileRow).join(""),
         ].join("");
       }
 
@@ -781,12 +810,16 @@
         var menuId = menuIdForPath(path);
         var actions = [];
         if (!isDir) {
-          actions.push('<button class="manager-action" type="button" data-action="file-preview" data-file-path="' + escapeAttr(path) + '">预览</button>');
+          if (isImageType(type)) {
+            actions.push('<button class="manager-action" type="button" data-action="file-preview" data-file-path="' + escapeAttr(path) + '" data-file-url="' + escapeAttr(item.url) + '" data-file-type="' + escapeAttr(type) + '">预览</button>');
+          } else {
+            actions.push('<button class="manager-action" type="button" data-action="file-preview" data-file-path="' + escapeAttr(path) + '">预览</button>');
+          }
         }
         actions.push(renderMoreMenu(item, menuId));
         return [
           '<div class="manager-row">',
-          '<button class="manager-name" type="button" data-action="' + action + '" data-file-path="' + escapeAttr(path) + '">',
+          '<button class="manager-name" type="button" data-action="' + action + '" data-file-path="' + escapeAttr(path) + '"' + (!isDir ? ' data-file-url="' + escapeAttr(item.url) + '" data-file-type="' + escapeAttr(type) + '"' : '') + '>',
           '<span class="manager-kind" aria-hidden="true">' + (isDir ? "DIR" : "FILE") + '</span>',
           '<span class="manager-name-text">' + escapeHTML(name) + '</span>',
           '</button>',
@@ -1192,6 +1225,34 @@
         if (type === "folder") return "folder";
         if (type.indexOf("/") >= 0) return type.split("/")[1] || type;
         return type;
+      }
+
+      function isImageType(type) {
+        return (type || "").toLowerCase().indexOf("image/") === 0;
+      }
+
+      function fileCategory(item) {
+        if (item.isDir) return "folder";
+        var type = (item.type || "").toLowerCase();
+        var name = (item.name || "").toLowerCase();
+        if (type.indexOf("image/") === 0 || /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(name)) return "image";
+        if (type === "application/pdf" || /\.pdf$/i.test(name)) return "document";
+        if (/\.(docx?|xlsx?|pptx?|txt|rtf|csv|md|markdown)$/i.test(name)) return "document";
+        if (/\.(zip|rar|7z|tar|gz|bz2|xz)$/i.test(name)) return "archive";
+        if (type.indexOf("text/") === 0 || /\.(log|sql|html?|css|jsx?|tsx?|json|xml|ya?ml|toml|ini|conf|cfg|sh|bash|zsh|py|rb|php|java|kt|swift|rs|go|c|cpp|h|hpp)$/i.test(name)) return "code";
+        return "other";
+      }
+
+      function openImagePreview(imageUrl, title) {
+        if (!imageUrl) return;
+        state.openMenuId = "";
+        render();
+        var params = "pathname=" + encodeURIComponent("/image-preview") + "&previewSrc=" + encodeURIComponent(imageUrl) + "&previewTitle=" + encodeURIComponent(title || "");
+        return callStorage(OPEN_WINDOW_API + "?" + params, "GET").then(function () {
+          setMessage("已打开图片预览", "ready");
+        }, function (err) {
+          setMessage("打开图片预览失败: " + errorMessage(err), "warning");
+        });
       }
 
       function formatBytes(value) {

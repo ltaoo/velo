@@ -2171,6 +2171,12 @@ body.is-fixed-window .memo-window-shell {
   font-weight: 700;
 }
 
+.memo-visibility-group {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
 .memo-select-wrap {
   align-items: center;
   background: var(--BG-1);
@@ -2298,6 +2304,17 @@ body.is-fixed-window .memo-window-shell {
 
 .memo-editor-switch {
   min-width: 0;
+  position: relative;
+}
+
+.memo-composer-draft-status {
+  color: var(--FG-2);
+  font-size: 12px;
+  pointer-events: none;
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  z-index: 2;
 }
 
 .memo-editor-preview {
@@ -3908,7 +3925,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-file-block.has-editor-open {
-  padding-right: clamp(152px, 42%, 232px);
+  /* action button is overlay — no padding reserved */
 }
 
 .memo-file-block:hover {
@@ -3939,7 +3956,17 @@ body.is-fixed-window .memo-window-shell {
   transform: translateY(-50%);
   transition: opacity 140ms ease, border-color 140ms ease, background-color 140ms ease;
   white-space: nowrap;
-  z-index: 2;
+  z-index: 3;
+}
+
+.memo-file-open-vscode::before {
+  content: '';
+  position: absolute;
+  inset: -4px -8px -4px -120px;
+  background: linear-gradient(to right, transparent 0%, var(--BG-0) 55%, var(--BG-0) 100%);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .memo-file-open-vscode svg {
@@ -3961,6 +3988,10 @@ body.is-fixed-window .memo-window-shell {
 .memo-file-open-vscode:hover {
   background: var(--memo-accent-soft);
   border-color: var(--memo-accent-border);
+}
+
+.memo-file-open-vscode:hover::before {
+  background: linear-gradient(to right, transparent 0%, var(--memo-accent-soft) 55%, var(--memo-accent-soft) 100%);
 }
 
 .memo-file-open-vscode:disabled {
@@ -4030,7 +4061,7 @@ body.is-fixed-window .memo-window-shell {
   grid-template-columns: auto minmax(0, 1fr);
   min-height: 58px;
   min-width: 0;
-  padding: 10px 48px 10px 12px;
+  padding: 10px 12px;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -4654,7 +4685,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-resource-target.has-editor-open {
-  padding-right: clamp(152px, 42%, 232px);
+  /* action button is overlay — no padding reserved */
 }
 
 .memo-resource-target:hover {
@@ -4667,7 +4698,7 @@ body.is-fixed-window .memo-window-shell {
   border: 0;
   border-radius: 0;
   min-height: unset;
-  padding: 0 48px 0 0;
+  padding: 0;
   width: 100%;
 }
 
@@ -4860,6 +4891,83 @@ body.is-fixed-window .memo-window-shell {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Image Grid (waterfall / masonry) ── */
+
+.memo-list.is-image-grid {
+  padding: 0 4px;
+}
+
+.memo-image-grid {
+  column-count: 4;
+  column-gap: 12px;
+}
+
+.memo-image-card {
+  background: var(--BG-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  break-inside: avoid;
+  cursor: pointer;
+  display: block;
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.16s ease;
+}
+
+.memo-image-card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.memo-image-card img {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.memo-image-card-info {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px 11px;
+}
+
+.memo-image-card-name {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-image-card-source {
+  color: var(--FG-1);
+  font-size: var(--font-xs);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .memo-image-grid {
+    column-count: 3;
+  }
+}
+
+@media (max-width: 860px) {
+  .memo-image-grid {
+    column-count: 2;
+  }
+}
+
+@media (max-width: 560px) {
+  .memo-image-grid {
+    column-count: 1;
+  }
+}
+
+/* ── end image grid ── */
 
 .memo-code-block-preview {
   background: var(--BG-0);
@@ -7407,4 +7515,130 @@ body.memo-timeline-page {
   font-size: var(--font-xs);
   padding: 12px 16px;
   text-align: center;
+}
+
+/* --- Privacy: frosted glass overlay --- */
+
+.memo-card.is-private,
+.memo-comment.is-private,
+.memo-task-card.is-private {
+  position: relative;
+  overflow: hidden;
+}
+
+.memo-card.is-private > *:not(.private-overlay),
+.memo-comment.is-private > *:not(.private-overlay),
+.memo-task-card.is-private > *:not(.private-overlay) {
+  filter: blur(8px);
+  user-select: none;
+  pointer-events: none;
+}
+
+.private-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: inherit;
+  transition: background 0.15s ease;
+}
+
+.private-overlay:hover {
+  background: rgba(255, 255, 255, 0.40);
+}
+
+.private-overlay-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--FG-2);
+  opacity: 0.7;
+}
+
+.private-overlay-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.private-overlay-text {
+  font-size: var(--font-xs);
+  color: var(--FG-2);
+  opacity: 0.8;
+}
+
+/* --- Privacy: PIN dialog --- */
+
+.pin-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.pin-dialog-card {
+  background: var(--BG-1);
+  border: 1px solid var(--BORDER);
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.pin-dialog-title {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--FG-1);
+}
+
+.pin-dialog-desc {
+  font-size: var(--font-sm);
+  color: var(--FG-2);
+  margin: 0 0 16px;
+}
+
+.pin-dialog-error {
+  font-size: var(--font-sm);
+  color: var(--DANGER);
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(220, 53, 69, 0.08);
+}
+
+.pin-dialog-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: var(--font-md);
+  border: 1px solid var(--BORDER);
+  border-radius: 8px;
+  background: var(--BG-2);
+  color: var(--FG-1);
+  outline: none;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.pin-dialog-input:focus {
+  border-color: var(--ACCENT);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+
+.pin-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }

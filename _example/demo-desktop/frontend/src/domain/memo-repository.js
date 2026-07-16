@@ -85,7 +85,7 @@ export function loadMemosFromVault() {
   });
 }
 
-export function createMemoInVault(content, visibility, projectId) {
+export function createMemoInVault(content, visibility, projectId, isPrivate) {
   if (typeof globalThis.invoke !== "function") {
     const now = new Date().toISOString();
     return Promise.resolve({
@@ -94,6 +94,7 @@ export function createMemoInVault(content, visibility, projectId) {
       createdAt: now,
       id: createId(),
       pinned: false,
+      private: Boolean(isPrivate),
       projectId: normalizeProjectID(projectId),
       updatedAt: "",
       visibility,
@@ -103,6 +104,7 @@ export function createMemoInVault(content, visibility, projectId) {
     method: "POST",
     args: {
       content,
+      private: Boolean(isPrivate),
       projectId: normalizeProjectID(projectId),
       visibility,
     },
@@ -130,6 +132,7 @@ export function updateMemoInVault(id, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, "createdAt")) args.createdAt = patch.createdAt;
   if (Object.prototype.hasOwnProperty.call(patch, "projectId")) args.projectId = normalizeProjectID(patch.projectId);
   if (Object.prototype.hasOwnProperty.call(patch, "visibility")) args.visibility = patch.visibility;
+  if (Object.prototype.hasOwnProperty.call(patch, "private")) args.private = Boolean(patch.private);
   if (Object.prototype.hasOwnProperty.call(patch, "pinned")) args.pinned = patch.pinned;
   if (Object.prototype.hasOwnProperty.call(patch, "archived")) args.archived = patch.archived;
   if (Object.prototype.hasOwnProperty.call(patch, "kind")) args.kind = patch.kind;

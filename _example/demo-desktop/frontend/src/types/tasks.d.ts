@@ -63,6 +63,7 @@ export interface TaskRecord {
   parentId: TaskID | "";
   path: string;
   priority: TaskPriority | string;
+  private?: boolean;
   projectId: ProjectID | "";
   reminders: TaskReminder[];
   repeat: TaskRepeat;
@@ -75,6 +76,7 @@ export interface TaskRecord {
   timezone: string;
   title: string;
   updatedAt: string;
+  visibility: string;
 }
 
 export interface TaskSummary {
@@ -88,6 +90,7 @@ export interface TaskSummary {
   parentId: TaskID | "";
   path: string;
   priority: TaskPriority | string;
+  private?: boolean;
   projectId: ProjectID | "";
   source: TaskSource;
   startAt: string;
@@ -96,6 +99,7 @@ export interface TaskSummary {
   tags: string[];
   title: string;
   updatedAt: string;
+  visibility: string;
 }
 
 export interface TaskIndexEntry extends TaskSummary {}

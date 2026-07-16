@@ -15,6 +15,7 @@ export interface MemoRecord {
   createdAt: string;
   id: MemoID;
   pinned: boolean;
+  private?: boolean;
   projectId: ProjectID | "";
   updatedAt: string;
   visibility: MemoVisibility | string;

@@ -34,6 +34,7 @@ export function normalizeTaskPayload(task) {
     parentId: normalizeTaskID(task.parentId),
     path: String(task.path || ""),
     priority: normalizeTaskPriority(task.priority),
+    private: Boolean(task.private),
     projectId: normalizeProjectID(task.projectId),
     reminders: Array.isArray(task.reminders) ? task.reminders.map(normalizeTaskReminder).filter(Boolean) : [],
     repeat: normalizeTaskRepeat(task.repeat),
@@ -45,6 +46,7 @@ export function normalizeTaskPayload(task) {
     timezone: String(task.timezone || "UTC").trim() || "UTC",
     title,
     updatedAt: task.updatedAt || "",
+    visibility: task.visibility || "PRIVATE",
   };
 }
 
@@ -71,6 +73,7 @@ export function normalizeTaskSummary(task) {
     tags: normalized.tags,
     title: normalized.title,
     updatedAt: normalized.updatedAt,
+    visibility: normalized.visibility,
   };
 }
 

@@ -15,19 +15,25 @@ type MemoCommentRecord struct {
 	ID         string   `json:"id"`
 	MemoID     string   `json:"memoId"`
 	Path       string   `json:"path"`
+	Private    bool     `json:"private"`
 	References []string `json:"references"`
 	Tags       []string `json:"tags"`
 	UpdatedAt  string   `json:"updatedAt"`
+	Visibility string   `json:"visibility"`
 }
 
 type MemoCommentCreateRequest struct {
-	Content string `json:"content"`
-	MemoID  string `json:"memoId"`
+	Content    string `json:"content"`
+	MemoID     string `json:"memoId"`
+	Private    bool   `json:"private"`
+	Visibility string `json:"visibility"`
 }
 
 type MemoCommentUpdateRequest struct {
-	Content *string `json:"content"`
-	ID      string  `json:"id"`
+	Content    *string `json:"content"`
+	ID         string  `json:"id"`
+	Private    *bool   `json:"private"`
+	Visibility *string `json:"visibility"`
 }
 
 type MemoCommentDeleteRequest struct {
@@ -97,11 +103,13 @@ func createVaultMemoComment(ctx *VaultContext, req MemoCommentCreateRequest) (Me
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	comment := MemoCommentRecord{
-		Content:   content,
-		CreatedAt: now,
-		ID:        newMemoCommentID(),
-		MemoID:    memoID,
-		UpdatedAt: "",
+		Content:    content,
+		CreatedAt:  now,
+		ID:         newMemoCommentID(),
+		MemoID:     memoID,
+		Private:    req.Private,
+		UpdatedAt:  "",
+		Visibility: normalizeMemoVisibility(req.Visibility),
 	}
 	comment.Path = memoCommentRelativePath(comment)
 	originalTags := extractMemoTags(comment.Content)
@@ -135,6 +143,12 @@ func updateVaultMemoComment(ctx *VaultContext, req MemoCommentUpdateRequest) (Me
 			return MemoCommentRecord{}, fmt.Errorf("comment content is required")
 		}
 		comment.Content = content
+	}
+	if req.Visibility != nil {
+		comment.Visibility = normalizeMemoVisibility(*req.Visibility)
+	}
+	if req.Private != nil {
+		comment.Private = *req.Private
 	}
 	memoPath, err := findMemoFilePath(ctx, comment.MemoID)
 	if err != nil {
@@ -224,9 +238,11 @@ func readMemoCommentFile(ctx *VaultContext, path string) (MemoCommentRecord, err
 		ID:         id,
 		MemoID:     strings.TrimSpace(meta["memoId"]),
 		Path:       relativeVaultPath(ctx, path),
+		Private:    parseMemoBool(meta["private"]),
 		References: parseMemoList(meta, "references"),
 		Tags:       parseMemoList(meta, "tags"),
 		UpdatedAt:  firstNonEmpty(meta["updatedAt"], meta["updated_at"]),
+		Visibility: normalizeMemoVisibility(firstNonEmpty(meta["visibility"])),
 	}
 	if comment.MemoID == "" {
 		comment.MemoID = memoIDFromCommentPath(ctx, path)
@@ -264,6 +280,7 @@ func writeMemoCommentRecord(ctx *VaultContext, comment MemoCommentRecord) error 
 func renderMemoCommentMarkdownFile(comment MemoCommentRecord) string {
 	tags := uniqueStrings(comment.Tags)
 	refs := uniqueStrings(comment.References)
+	visibility := normalizeMemoVisibility(comment.Visibility)
 	lines := []string{
 		"---",
 		"schemaVersion: " + fmt.Sprintf("%d", vaultSchemaVersion),
@@ -271,6 +288,8 @@ func renderMemoCommentMarkdownFile(comment MemoCommentRecord) string {
 		"memoId: " + yamlQuote(strings.TrimSpace(comment.MemoID)),
 		"createdAt: " + yamlQuote(comment.CreatedAt),
 		"updatedAt: " + yamlQuote(comment.UpdatedAt),
+		"visibility: " + yamlQuote(visibility),
+		"private: " + fmt.Sprintf("%t", comment.Private),
 		"contentWhitespace: \"preserve\"",
 	}
 	if len(tags) == 0 {

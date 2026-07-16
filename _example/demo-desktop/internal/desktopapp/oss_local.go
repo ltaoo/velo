@@ -94,10 +94,7 @@ func listLocalOSSFiles(parent context.Context, cfg OSSConfig, objectPath string)
 		items = append(items, ossFileView(cfg, "", cleanPath, key, entry.IsDir(), size, &modTime, ""))
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].IsDir != items[j].IsDir {
-			return items[i].IsDir
-		}
-		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+		return items[i].ModTime > items[j].ModTime
 	})
 	return velo.H{
 		"bucket":    cfg.Bucket,

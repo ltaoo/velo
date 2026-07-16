@@ -51,11 +51,12 @@ type VaultFile struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 type VaultContext struct {
-	Entry          VaultEntry `json:"entry"`
-	RootDir        string     `json:"rootDir"`
-	VeloDir        string     `json:"veloDir"`
-	MemoDir        string     `json:"memoDir"`
-	MemoCommentDir string     `json:"memoCommentDir"`
+	Entry           VaultEntry `json:"entry"`
+	RootDir         string     `json:"rootDir"`
+	VeloDir         string     `json:"veloDir"`
+	MemoDir         string     `json:"memoDir"`
+	MemoCommentDir  string     `json:"memoCommentDir"`
+	PrivateUnlocked bool       `json:"-"`
 }
 
 type VaultOpenRequest struct {

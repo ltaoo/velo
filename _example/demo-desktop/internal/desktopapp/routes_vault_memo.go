@@ -144,6 +144,11 @@ func registerVaultProjectMemoRoutes(b *velo.Box) {
 		if err != nil {
 			return c.Error(err.Error())
 		}
+		for i, memo := range memos {
+			if isPrivateAndLocked(ctx, memo.Private) {
+				memos[i] = redactPrivateMemo(memo)
+			}
+		}
 		return c.Ok(velo.H{"memos": memos})
 	})
 
@@ -223,6 +228,11 @@ func registerVaultProjectMemoRoutes(b *velo.Box) {
 		comments, err := listVaultMemoComments(ctx, c.Query("memoId"))
 		if err != nil {
 			return c.Error(err.Error())
+		}
+		for i, comment := range comments {
+			if isPrivateAndLocked(ctx, comment.Private) {
+				comments[i] = redactPrivateComment(comment)
+			}
 		}
 		return c.Ok(velo.H{"comments": comments})
 	})
@@ -330,5 +340,73 @@ func registerVaultProjectMemoRoutes(b *velo.Box) {
 			return c.Error(err.Error())
 		}
 		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Post("/api/privacy/set-pin", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req struct {
+			Pin string `json:"pin"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		if err := setPrivacyPin(ctx, req.Pin); err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Post("/api/privacy/unlock", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		var req struct {
+			Pin string `json:"pin"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		ok, err := verifyPrivacyPin(ctx, req.Pin)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		if !ok {
+			return c.Ok(velo.H{"unlocked": false, "msg": "PIN incorrect"})
+		}
+		// Update the active vault context in-memory
+		vaultRuntime.Lock()
+		if vaultRuntime.active != nil {
+			vaultRuntime.active.PrivateUnlocked = true
+		}
+		vaultRuntime.Unlock()
+		return c.Ok(velo.H{"unlocked": true})
+	})
+
+	b.Post("/api/privacy/lock", func(c *velo.BoxContext) interface{} {
+		vaultRuntime.Lock()
+		if vaultRuntime.active != nil {
+			vaultRuntime.active.PrivateUnlocked = false
+		}
+		vaultRuntime.Unlock()
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Get("/api/privacy/status", func(c *velo.BoxContext) interface{} {
+		ctx, err := requireActiveVault()
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		hasPin, err := hasPrivacyPin(ctx)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		return c.Ok(velo.H{
+			"hasPin":   hasPin,
+			"unlocked": ctx.PrivateUnlocked,
+		})
 	})
 }

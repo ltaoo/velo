@@ -12,9 +12,17 @@ func registerTaskRoutes(b *velo.Box) {
 		if err != nil {
 			return c.Error(err.Error())
 		}
+		entries := taskIndexEntries(index)
+		for i, entry := range entries {
+			if isPrivateAndLocked(ctx, entry.Private) {
+				entries[i].Title = "[PRIVATE]"
+				entries[i].Tags = []string{}
+				entries[i].Contexts = []string{}
+			}
+		}
 		return c.Ok(velo.H{
 			"index": index,
-			"tasks": taskIndexEntries(index),
+			"tasks": entries,
 		})
 	})
 
@@ -26,6 +34,9 @@ func registerTaskRoutes(b *velo.Box) {
 		task, err := getVaultTask(ctx, c.Query("id"))
 		if err != nil {
 			return c.Error(err.Error())
+		}
+		if isPrivateAndLocked(ctx, task.Private) {
+			task = redactPrivateTask(task)
 		}
 		return c.Ok(velo.H{"task": task})
 	})
