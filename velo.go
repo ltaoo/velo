@@ -459,6 +459,9 @@ func (b *Box) webviewURL(optURL, pathname string) string {
 	if optURL != "" {
 		return optURL
 	}
+	if !strings.HasPrefix(pathname, "/") {
+		pathname = "/" + pathname
+	}
 	if b.mode == ModeBridgeHttp {
 		return "http://127.0.0.1:8080" + pathname
 	}
@@ -585,10 +588,11 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 
 func (b *Box) handleMessage(message string) (string, string) {
 	var msg struct {
-		ID      string      `json:"id"`
-		Method  string      `json:"method"`
-		Headers interface{} `json:"headers"`
-		Args    interface{} `json:"args"`
+		ID         string      `json:"id"`
+		Method     string      `json:"method"`
+		Headers    interface{} `json:"headers"`
+		Args       interface{} `json:"args"`
+		HTTPMethod string      `json:"httpMethod"`
 	}
 	if err := json.Unmarshal([]byte(message), &msg); err != nil {
 		fmt.Println("[box]handleMessage - unmarshal message failed", err)
@@ -610,11 +614,17 @@ func (b *Box) handleMessage(message string) (string, string) {
 		}
 	}
 	fmt.Println("match methods in get handlers or post handlers", path)
-	handler, exists := b.get_handlers[path]
-	if !exists {
-		if postHandler, ok := b.post_handlers[path]; ok {
-			handler = postHandler
-			exists = true
+	var handler Handler
+	var exists bool
+	if msg.HTTPMethod == "POST" {
+		handler, exists = b.post_handlers[path]
+		if !exists {
+			handler, exists = b.get_handlers[path]
+		}
+	} else {
+		handler, exists = b.get_handlers[path]
+		if !exists {
+			handler, exists = b.post_handlers[path]
 		}
 	}
 	ctx := &BoxContext{
@@ -737,11 +747,26 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 		w.Write([]byte(box.injectedRuntimeJS(nil)))
 	})
 
-	for path, handler := range box.get_handlers {
-		path, handler := path, handler
-		fmt.Printf("[velo] registering GET %s\n", path)
+	// Collect all unique paths (union of GET and POST handlers)
+	allPaths := make(map[string]struct{})
+	for path := range box.get_handlers {
+		allPaths[path] = struct{}{}
+	}
+	for path := range box.post_handlers {
+		allPaths[path] = struct{}{}
+	}
+
+	for path := range allPaths {
+		path := path
+		getHandler, hasGet := box.get_handlers[path]
+		postHandler, hasPost := box.post_handlers[path]
+		// Capture copies for the closure (Go 1.20 loop variable semantics).
+		gh, hg := getHandler, hasGet
+		ph, hp := postHandler, hasPost
+		fmt.Printf("[velo] registering %s (GET=%v, POST=%v)\n", path, hg, hp)
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			fmt.Printf("[velo] handling GET %s (registered as %s)\n", r.URL.Path, path)
+			fmt.Printf("[velo] handling %s %s\n", r.Method, r.URL.Path)
+
 			query_params := make(map[string]string)
 			for key, values := range r.URL.Query() {
 				if len(values) > 0 {
@@ -749,40 +774,22 @@ func (box *Box) setupMux(frontendFS fs.FS, entryPage string) *http.ServeMux {
 				}
 			}
 
-			ctx := &BoxContext{
-				ctx:     r.Context(),
-				id:      "",
-				method:  path,
-				args:    nil,
-				query:   query_params,
-				headers: r.Header,
-				Writer:  w,
-			}
-			result := handler(ctx)
-			if result != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(fmt.Sprintf("%v", result)))
-			}
-		})
-	}
-
-	for path, handler := range box.post_handlers {
-		path, handler := path, handler
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			var handler Handler
 			var args interface{}
-			if r.Method == "POST" {
+
+			if r.Method == "POST" && hp {
+				handler = ph
 				contentType := strings.ToLower(r.Header.Get("Content-Type"))
 				if strings.Contains(contentType, "application/json") || contentType == "" {
 					json.NewDecoder(r.Body).Decode(&args)
 				} else if body, err := io.ReadAll(r.Body); err == nil {
 					args = body
 				}
-			}
-			query_params := make(map[string]string)
-			for key, values := range r.URL.Query() {
-				if len(values) > 0 {
-					query_params[key] = values[0]
-				}
+			} else if hg {
+				handler = gh
+			} else {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
 			}
 
 			ctx := &BoxContext{

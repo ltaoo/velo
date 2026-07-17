@@ -12,7 +12,7 @@ import {
   resolveMemoReferenceTarget,
 } from "../../domain/memos.js";
 import { codeBlockFence, fileDisplayName, isFileAttachment, isImageAttachment } from "../../domain/memo-resources.js";
-import { parseAssetReference } from "../../domain/storage.js";
+import { parseAssetReference, parseImageQueryParams } from "../../domain/storage.js";
 import { formatRelativeDate } from "./memo-date.js";
 import { cloudStorageById, loadEditorSettings, normalizeFileEditor, normalizeFileEditorRules, resolveAssetUrl } from "./memo-editor.js";
 import { SVG } from "./memo-icons.js";
@@ -77,11 +77,28 @@ function renderMemoMarkdownLines(lines, context, lineNumberOffset) {
         index++;
       }
       index--;
-      html += memoLineTemplate(
-        quoteStart + 1 + lineNumberOffset,
-        `<blockquote>${renderMemoMarkdown(quoteLines.join("\n"), context, quoteStart + lineNumberOffset)}</blockquote>`,
-        "is-quote",
-      );
+
+      const callout = parseCallout(quoteLines[0]);
+      if (callout) {
+        const titleHtml = callout.title
+          ? `<div class="memo-callout-title">${escapeHTML(callout.title)}</div>`
+          : "";
+        const bodyLines = quoteLines.slice(1);
+        const bodyHtml = bodyLines.length
+          ? renderMemoMarkdown(bodyLines.join("\n"), context, quoteStart + 1 + lineNumberOffset)
+          : "";
+        html += memoLineTemplate(
+          quoteStart + 1 + lineNumberOffset,
+          `<div class="memo-callout memo-callout-${escapeAttr(callout.type)}">${titleHtml}${bodyHtml}</div>`,
+          "is-callout",
+        );
+      } else {
+        html += memoLineTemplate(
+          quoteStart + 1 + lineNumberOffset,
+          `<blockquote>${renderMemoMarkdown(quoteLines.join("\n"), context, quoteStart + lineNumberOffset)}</blockquote>`,
+          "is-quote",
+        );
+      }
       continue;
     }
 
@@ -324,6 +341,12 @@ function stripQuoteMarker(line) {
   return match ? match[1] : line;
 }
 
+function parseCallout(line) {
+  const match = String(line || "").match(/^\[!(.+?)\](?:\s+(.+))?$/);
+  if (!match) return null;
+  return { type: match[1].toLowerCase().trim(), title: (match[2] || "").trim() };
+}
+
 function isMemoHorizontalRuleLine(line) {
   return /^\s*-{3,}\s*$/.test(String(line || ""));
 }
@@ -529,8 +552,48 @@ function inlineMarkdown(value, context = {}) {
   return html;
 }
 
+function extractHtmlImgTags(text) {
+  const tags = [];
+  const processed = text.replace(/<img\b[^>]*\/?>/gi, function (match) {
+    const sanitized = sanitizeHtmlImgTag(match);
+    if (!sanitized) return match;
+    var idx = tags.length;
+    tags.push(sanitized);
+    return "\x00HTMLIMG" + idx + "\x00";
+  });
+  return { text: processed, tags: tags };
+}
+
+function sanitizeHtmlImgTag(raw) {
+  var srcMatch = raw.match(/src\s*=\s*"([^"]*)"/i) || raw.match(/src\s*=\s*'([^']*)'/i);
+  if (!srcMatch) return "";
+  var src = safeImageUrl(srcMatch[1]);
+  if (!src) return "";
+
+  var getAttr = function (name) {
+    var m = raw.match(new RegExp(name + '\\s*=\\s*"([^"]*)"', "i")) ||
+            raw.match(new RegExp(name + "\\s*=\\s*'([^']*)'", "i"));
+    return m ? m[1] : "";
+  };
+
+  var alt = getAttr("alt");
+  var w = getAttr("width");
+  var h = getAttr("height");
+
+  var attrs = 'src="' + escapeAttr(src) + '" alt="' + escapeAttr(alt) + '" loading="lazy"';
+  if (/^\d+$/.test(w)) attrs += ' width="' + w + '"';
+  if (/^\d+$/.test(h)) attrs += ' height="' + h + '"';
+  if (!/^\d+$/.test(w) && !/^\d+$/.test(h)) {
+    var dimAttrs = imageDimensionAttrs(srcMatch[1]);
+    if (dimAttrs) attrs += dimAttrs;
+  }
+
+  return "<img " + attrs + " />";
+}
+
 function inlineMarkdownBase(value, context = {}) {
-  let html = escapeHTML(value);
+  var extracted = extractHtmlImgTags(value);
+  let html = escapeHTML(extracted.text);
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
     return renderMemoImageToken({ label: alt, url: src });
   });
@@ -549,6 +612,9 @@ function inlineMarkdownBase(value, context = {}) {
   html = html.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   html = html.replace(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g, '$1<span class="memo-hashtag">#$2</span>');
   html = replaceMemoTimeSyntax(html);
+  html = html.replace(/\x00HTMLIMG(\d+)\x00/g, function (_, idx) {
+    return extracted.tags[parseInt(idx)] || "";
+  });
   return html;
 }
 
@@ -851,7 +917,7 @@ function renderMemoImageBlock(resource) {
   const previewAttrs = imagePreviewAttrs(src, label, resource.url, label);
   return `
     <figure class="memo-image-block">
-      <img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" ${previewAttrs} />
+      <img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" ${imageDimensionAttrs(resource.url)} ${previewAttrs} />
       ${label ? `<figcaption>${escapeHTML(label)}</figcaption>` : ""}
     </figure>
   `;
@@ -888,7 +954,7 @@ function renderMemoImageGridLayout(layoutType, items) {
           : "";
         return `
           <button class="memo-image-layout-item" type="button" ${previewAttrs} aria-label="预览 ${escapeAttr(label)}">
-            <img src="${escapeAttr(image.src)}" alt="${escapeAttr(label)}" loading="lazy" />
+            <img src="${escapeAttr(image.src)}" alt="${escapeAttr(label)}" loading="lazy" ${imageDimensionAttrs(image.source)} />
             ${overflow}
           </button>
         `;
@@ -955,7 +1021,7 @@ function renderMemoImageToken(resource) {
     <span class="memo-image-token" ${previewAttrs} ${src ? 'role="button" tabindex="0"' : ""}>
       ${SVG.image}
       <span>${escapeHTML(label || resource.url)}</span>
-      ${src ? `<span class="memo-image-token-preview"><img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" /></span>` : ""}
+      ${src ? `<span class="memo-image-token-preview"><img src="${escapeAttr(src)}" alt="${escapeAttr(label)}" loading="lazy" ${imageDimensionAttrs(resource.url)} /></span>` : ""}
     </span>
   `;
 }
@@ -1121,6 +1187,12 @@ function safeImageUrl(value) {
   if (/^(https?:|local:\/\/|blob:)/i.test(url)) return url;
   if (/^data:image\//i.test(url)) return url;
   return "";
+}
+
+function imageDimensionAttrs(url) {
+  var params = parseImageQueryParams(url);
+  if (!params) return "";
+  return ' width="' + params.width + '" height="' + params.height + '"';
 }
 
 function safeUrl(value) {

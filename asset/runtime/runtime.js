@@ -223,6 +223,9 @@
           headers: args.headers,
           args: args.args,
         };
+        if (args.method) {
+          payload.httpMethod = String(args.method).toUpperCase();
+        }
         ensure_cbs();
         window.invoke_cbs[id] = function (result) {
           delete window.invoke_cbs[id];

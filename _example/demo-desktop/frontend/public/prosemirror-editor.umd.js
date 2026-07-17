@@ -2431,7 +2431,14 @@
 
           const quote = /^(\s*>\s?)/.exec(text);
           if (quote) {
-            pushMiniLineDecoration(decorations, lineFrom, lineTo, "mini-blockquote-line");
+            const stripped = text.slice(quote[1].length);
+            const isCallout = /^\[!.+?\]/.test(stripped);
+            pushMiniLineDecoration(
+              decorations,
+              lineFrom,
+              lineTo,
+              isCallout ? "mini-blockquote-line mini-callout-line" : "mini-blockquote-line",
+            );
             pushMiniInlineDecoration(
               decorations,
               textFrom,

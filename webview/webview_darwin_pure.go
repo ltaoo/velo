@@ -1329,13 +1329,22 @@ func sendCallbackTo(webView cocoa.ID, id, result string) {
 }
 
 func sendMessage(payload string) bool {
-	if globalWebView == 0 {
+	mapLock.RLock()
+	targets := make([]cocoa.ID, 0, len(webviewMap))
+	for wv := range webviewMap {
+		targets = append(targets, cocoa.ID(wv))
+	}
+	mapLock.RUnlock()
+
+	if len(targets) == 0 {
 		return false
 	}
 
+	script := fmt.Sprintf("window.__receiveGoMessage && window.__receiveGoMessage(%s);", payload)
 	cocoa.DispatchMain(func() {
-		script := fmt.Sprintf("window.__receiveGoMessage && window.__receiveGoMessage(%s);", payload)
-		globalWebView.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), cocoa.StringToNSString(script), 0)
+		for _, wv := range targets {
+			wv.Send(cocoa.RegisterName("evaluateJavaScript:completionHandler:"), cocoa.StringToNSString(script), 0)
+		}
 	})
 
 	return true

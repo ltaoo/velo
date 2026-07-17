@@ -7,7 +7,7 @@ import {
   memoBacklinkCount,
 } from "../../domain/memos.js";
 import { collectCodeBlocks, collectLinks, collectResources, fileDisplayName } from "../../domain/memo-resources.js";
-import { normalizeProjectColor, normalizeProjectFilter, normalizeProjectID } from "../../domain/projects.js";
+import { normalizeProjectColor, normalizeProjectID } from "../../domain/projects.js";
 import {
   calendarWeekdays,
   formatDateKey,
@@ -137,7 +137,7 @@ function detachedMemoWindowTemplate() {
           <button class="memo-window-icon-button velo-no-drag" type="button" data-window-control="toggleFixed" title="悬浮在所有窗口上方" aria-label="悬浮在所有窗口上方">
             ${SVG.pin}
           </button>
-          <span class="memo-window-visibility memo-visibility" data-window-visibility hidden></span>
+          <span class="memo-window-visibility memo-window-project" data-window-project hidden></span>
         </div>
       </header>
       <main class="memo-window-body velo-no-drag" data-window-content></main>
@@ -183,6 +183,7 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
         </div>
         <div class="memo-card-meta memo-window-card-meta">
           <div class="memo-card-head-actions">
+            <button class="memo-action-button" type="button" data-action="editMemo" title="编辑" aria-label="编辑">${SVG.edit}</button>
             <button class="memo-action-button" type="button" data-action="copyMemo" title="复制" aria-label="复制">${SVG.copy}</button>
             <button class="memo-action-button" type="button" data-action="copyMemoRef" title="复制引用" aria-label="复制引用">${SVG.link}</button>
           </div>
@@ -308,6 +309,12 @@ function activeViewMeta(view) {
       subtitle: "显示当前粘贴板的文本、链接或图片",
       title: "粘贴板",
     },
+    "project-detail": {
+      hideComposer: true,
+      searchPlaceholder: "搜索项目内 memos",
+      subtitle: "",
+      title: "项目详情",
+    },
     memos: {
       hideComposer: false,
       searchPlaceholder: "搜索 memos",
@@ -356,14 +363,10 @@ function shellTemplate() {
         </nav>
         <div class="memo-sidebar-section">
           <div class="memo-sidebar-heading">
-            <span>Project</span>
-            <span data-project-summary></span>
+            <span>Projects</span>
+            <button class="memo-project-create-btn" type="button" data-action="createProject" title="新建 Project">${SVG.plus}</button>
           </div>
           <div class="memo-project-list" data-project-list></div>
-          <button class="memo-nav-button memo-project-create" type="button" data-action="createProject">
-            ${SVG.plus}
-            <span>新建 Project</span>
-          </button>
         </div>
         <div class="memo-sidebar-section">
           <div class="memo-sidebar-heading">
@@ -481,6 +484,16 @@ function shellTemplate() {
             ${SVG.search}
             <input type="search" placeholder="搜索 memos" data-search-input />
           </label>
+          <label class="memo-select-wrap memo-project-filter-wrap">
+            <span class="memo-select-icon">${SVG.hash}</span>
+            <select data-project-filter-select aria-label="项目筛选">
+            </select>
+            ${SVG.chevronDown}
+          </label>
+          <button class="memo-icon-text-button" type="button" data-action="createProject" title="新建 Project">
+            ${SVG.plus}
+            <span>Project</span>
+          </button>
           <button class="memo-clear-button" type="button" data-action="clearFilters">重置</button>
           <span class="memo-feed-count" data-feed-count></span>
         </section>
@@ -526,18 +539,6 @@ function filterButtonTemplate(filter, label, icon) {
   `;
 }
 
-function projectFilterTemplate(filter, label, count, color, activeFilter) {
-  const active = normalizeProjectFilter(filter) === normalizeProjectFilter(activeFilter);
-  const swatch = color ? `<span class="memo-project-dot" style="--project-color: ${escapeAttr(color)}"></span>` : SVG.hash;
-  return `
-    <button class="memo-nav-button memo-project-filter ${active ? "is-active" : ""}" type="button" data-project-filter="${escapeAttr(filter)}">
-      ${swatch}
-      <span>${escapeHTML(label)}</span>
-      <strong>${count ? escapeHTML(String(count)) : ""}</strong>
-    </button>
-  `;
-}
-
 function projectOptionsTemplate(projects, selected) {
   const selectedID = normalizeProjectID(selected);
   const activeProjects = Array.isArray(projects) ? projects : [];
@@ -557,6 +558,79 @@ function projectBadgeTemplate(projectId, projects = []) {
   const label = project ? project.name : "未知 Project";
   const color = normalizeProjectColor(project && project.color);
   return `<span class="memo-project-badge" style="--project-color: ${escapeAttr(color)}">${escapeHTML(label)}</span>`;
+}
+
+function projectSidebarItemTemplate(project, count, isActive) {
+  const color = normalizeProjectColor(project.color);
+  return `
+    <button class="memo-nav-button memo-project-item ${isActive ? "is-active" : ""}"
+            type="button" data-project-detail="${escapeAttr(project.id)}">
+      <span class="memo-project-dot" style="--project-color: ${escapeAttr(color)}"></span>
+      <span>${escapeHTML(project.name)}</span>
+      <strong>${count}</strong>
+    </button>
+  `;
+}
+
+function projectDetailViewTemplate(project, memos, renderMemoCard, todos) {
+  const color = normalizeProjectColor(project.color);
+  const memoCards = memos.length
+    ? memos.map((memo) => renderMemoCard(memo)).join("")
+    : `<div class="memo-empty-state">暂无 memo</div>`;
+  const todoItems = todos.length
+    ? todos.map((task) => {
+        const done = task.status === "completed";
+        return `<div class="memo-project-todo-item ${done ? "is-done" : ""}">
+          <span class="memo-project-todo-check">${done ? SVG.check : ""}</span>
+          <span class="memo-project-todo-text">${escapeHTML(task.content || task.title || "")}</span>
+        </div>`;
+      }).join("")
+    : `<div class="memo-empty-state">暂无待办</div>`;
+  return `
+    <div class="memo-project-detail">
+      <header class="memo-project-detail-header">
+        <button class="memo-icon-text-button" type="button" data-action="backToMemos">
+          ${SVG.chevronLeft || "←"}
+          <span>返回</span>
+        </button>
+        <div class="memo-project-detail-title">
+          <span class="memo-project-dot memo-project-dot--lg" style="--project-color: ${escapeAttr(color)}"></span>
+          <h2>${escapeHTML(project.name)}</h2>
+        </div>
+        <div class="memo-project-detail-actions">
+          <button class="memo-icon-text-button" type="button" data-action="editProject" data-project-id="${escapeAttr(project.id)}">编辑</button>
+          <button class="memo-icon-text-button" type="button" data-action="archiveProject" data-project-id="${escapeAttr(project.id)}">归档</button>
+        </div>
+      </header>
+      <div class="memo-project-stats">
+        <div class="memo-project-stat">
+          <strong>${memos.length}</strong>
+          <span>Memos</span>
+        </div>
+        <div class="memo-project-stat">
+          <strong>${todos.filter((t) => t.status !== "completed").length}</strong>
+          <span>待办</span>
+        </div>
+        <div class="memo-project-stat">
+          <strong>${todos.filter((t) => t.status === "completed").length}</strong>
+          <span>已完成</span>
+        </div>
+      </div>
+      <section class="memo-project-detail-section">
+        <div class="memo-project-detail-section-head">
+          <h3>Memos (${memos.length})</h3>
+          <button class="memo-primary-button" type="button" data-action="createMemo">新建</button>
+        </div>
+        <div class="memo-project-memo-list">${memoCards}</div>
+      </section>
+      <section class="memo-project-detail-section">
+        <div class="memo-project-detail-section-head">
+          <h3>待办 (${todos.length})</h3>
+        </div>
+        <div class="memo-project-todo-list">${todoItems}</div>
+      </section>
+    </div>
+  `;
 }
 
 function viewNavButtonTemplate(view, label, icon, countAttr) {
@@ -672,7 +746,9 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const commentsExpanded = options.commentsExpanded === true;
   const sourceEditing = options.sourceEditing === true;
   const sourceDraft = String(options.sourceDraft || "");
-  const toc = !editing && !sourceEditing && expanded ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
+  const tocHTML = !editing && !sourceEditing ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
+  const hasToc = !!tocHTML;
+  const tocVisible = hasToc && (expanded || options.tocVisible === true);
 
   return `
     <article class="${cardClass}" data-memo-id="${escapeAttr(memo.id)}">
@@ -688,6 +764,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
           <div class="memo-card-head-actions">
+            ${hasToc ? `<button class="memo-action-button memo-toc-toggle" type="button" data-action="toggleMemoToc" title="${tocVisible ? "隐藏目录" : "显示目录"}">${SVG.toc}</button>` : ""}
             <button class="memo-action-button" type="button" data-action="togglePin" title="${memo.pinned ? "取消置顶" : "置顶"}">${SVG.pin}</button>
             <button class="memo-action-button" type="button" data-action="detachMemo" title="分离为窗口">${SVG.external}</button>
             <button class="memo-action-button" type="button" data-action="copyMemo" title="复制">${SVG.copy}</button>
@@ -700,7 +777,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           : sourceEditing
             ? memoSourceTemplate(sourceDraft)
             : `
-            <div class="memo-card-reading ${toc ? "has-toc" : ""}">
+            <div class="memo-card-reading ${tocVisible ? "has-toc" : ""}">
               <div class="memo-card-reading-main">
                 <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}${!expanded && textLines <= 36 ? " is-short" : ""}" data-memo-collapse data-memo-lines="${textLines}">
                   <div class="memo-content">${renderMemoMarkdown(memo.content, renderContext)}</div>
@@ -710,11 +787,10 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
                   </button>
                 </div>
               </div>
-              ${toc}
+              ${tocHTML}
             </div>
           `
       }
-      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded, { privateUnlocked: options.privateUnlocked, commentVisibility: options.commentVisibility }) : ""}
       <footer class="memo-card-actions">
         ${summary}
         <div class="memo-card-actions-buttons">
@@ -724,6 +800,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
             ${comments.length ? `<span class="memo-action-count">${comments.length}</span>` : ""}
           </button>
           <button class="memo-action-button" type="button" data-action="editMemo" title="编辑">${SVG.edit}</button>
+          <button class="memo-action-button" type="button" data-action="detachMemoEdit" title="在独立窗口中编辑">${SVG.external}</button>
           <button class="memo-action-button" type="button" data-action="editMemoSource" title="编辑源数据" aria-label="编辑源数据">${SVG.code}</button>
           ${
             archived
@@ -733,6 +810,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
         </div>
       </footer>
+      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded, { privateUnlocked: options.privateUnlocked, commentVisibility: options.commentVisibility }) : ""}
     </article>
   `;
 }
@@ -1699,8 +1777,9 @@ export {
   parseHost,
   pinDialogTemplate,
   privateOverlayTemplate,
-  projectFilterTemplate,
+  projectDetailViewTemplate,
   projectOptionsTemplate,
+  projectSidebarItemTemplate,
   resourceGroupTemplate,
   resourceTemplate,
   shellTemplate,

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>编辑 Memo</title>
+  <link rel="stylesheet" href="/public/index.css?v=20260709-flex-layout" />
+  <script src="/public/tailwindcss.3.4.17.js"></script>
+  <script src="/public/timeless.core.umd.min.js"></script>
+  <script src="/public/timeless.web.umd.min.js"></script>
+  <script src="/public/veloui.umd.min.js"></script>
+  <script src="/public/prosemirror.umd.min.js"></script>
+  <script src="/public/vim.js?v=20260611-vim-visual-exit-selection-flush"></script>
+  <script src="/public/prosemirror-editor.umd.js?v=20260612-image-layout"></script>
+  <script src="/public/input-policy.js" defer></script>
+  <style>
+    :root {
+      --background: #ededed;
+      --foreground: #171717;
+      --BG-0: #ffffff;
+      --BG-1: #f7f7f7;
+      --BG-2: #fff;
+      --BG-3: #f7f7f7;
+      --BG-4: #4c4c4c;
+      --BG-5: #fff;
+      --FG-0: rgba(0, 0, 0, 0.9);
+      --FG-0_5: rgba(0, 0, 0, 0.9);
+      --FG-1: rgba(0, 0, 0, 0.55);
+      --FG-2: rgba(0, 0, 0, 0.3);
+      --FG-3: rgba(0, 0, 0, 0.1);
+      --FG-4: rgba(0, 0, 0, 0.15);
+      --FG-5: rgba(0, 0, 0, 0.05);
+      --BG-COLOR-ACTIVE: #ececec;
+      --RED: #fa5151;
+      --GREEN: #07c160;
+      --border: oklch(92.2% 0 0);
+      --hh: 100vh;
+      --memo-titlebar-bg: #f0f0f0;
+      --memo-titlebar-bg-focused: #e8e8e8;
+    }
+
+    [data-theme="dark"] {
+      --background: #111;
+      --foreground: #f3f4f6;
+      --BG-0: #111;
+      --BG-1: #1e1e1e;
+      --BG-2: #191919;
+      --BG-3: #202020;
+      --BG-4: #404040;
+      --BG-5: #2c2c2c;
+      --FG-0: rgba(255, 255, 255, 0.8);
+      --FG-0_5: rgba(255, 255, 255, 0.6);
+      --FG-1: rgba(255, 255, 255, 0.5);
+      --FG-2: rgba(255, 255, 255, 0.3);
+      --FG-3: rgba(255, 255, 255, 0.1);
+      --FG-4: rgba(255, 255, 255, 0.15);
+      --FG-5: rgba(255, 255, 255, 0.1);
+      --BG-COLOR-ACTIVE: #373737;
+      --RED: #fa5151;
+      --GREEN: #07c160;
+      --border: oklch(100% 0 0/.1);
+      --memo-titlebar-bg: #2b2a28;
+      --memo-titlebar-bg-focused: #1d1d1c;
+    }
+  </style>
+</head>
+
+<body class="edit-memo-window-page">
+  <script>
+    !function () {
+      try {
+        var root = document.documentElement;
+        var key = "data-theme";
+        var saved = localStorage.getItem("theme");
+        if (saved === "system" || (!saved && true)) {
+          var media = window.matchMedia("(prefers-color-scheme: dark)");
+          var theme = media.media !== "(prefers-color-scheme: dark)" || media.matches ? "dark" : "light";
+          root.style.colorScheme = theme;
+          root.setAttribute(key, theme);
+        } else if (saved) {
+          root.style.colorScheme = saved;
+          root.setAttribute(key, saved);
+        }
+      } catch (_) { }
+    }();
+  </script>
+  <div id="root"></div>
+  <script type="module" src="/src/edit-memo-window.js?v=20260709-flex-layout"></script>
+</body>
+
+</html>

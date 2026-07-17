@@ -23,9 +23,10 @@ var memoWindowCache = struct {
 }
 
 type MemoWindowPayload struct {
-	Fixed bool            `json:"fixed"`
-	Memo  json.RawMessage `json:"memo"`
-	Memos json.RawMessage `json:"memos"`
+	Fixed    bool            `json:"fixed"`
+	Memo     json.RawMessage `json:"memo"`
+	Memos    json.RawMessage `json:"memos"`
+	Projects json.RawMessage `json:"projects,omitempty"`
 }
 
 func droppedFilesFromPayload(payload string, logger *zerolog.Logger) ([]velo.H, velo.H) {

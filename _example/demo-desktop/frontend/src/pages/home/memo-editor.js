@@ -1820,6 +1820,7 @@ function memoSlashCommands() {
     { icon: "UL", label: "无序列表", detail: "插入 - 列表", keywords: "list bullet", text: "- " },
     { icon: "OL", label: "有序列表", detail: "插入 1. 列表", keywords: "list ordered", text: "1. " },
     { icon: ">", label: "引用", detail: "插入引用块", keywords: "quote", text: "> \n> " },
+    { icon: "!", label: "标注", detail: "插入 Callout 标注块", keywords: "callout alert note warning tip danger info", text: "> [!NOTE] \n> " },
     { icon: "<>", label: "代码块", detail: "插入 fenced code", keywords: "code pre", text: "```\n\n```" },
     { icon: "SNIP", label: "代码片段", detail: "插入可搜索 snippet", keywords: "snippet snip code alias 代码片段", text: "```sh snippet 标题 | alias\n\n```" },
     {
@@ -2388,15 +2389,20 @@ function fileInfoToUploadURL(file) {
       }
       const storageId = resp.data.storageId || storage.id;
       const ref = markdownUrl(resp.data.ref || assetReference(storageId, resp.data.key || ""));
-      return {
-        key: resp.data.key || "",
-        name: resp.data.name || file.name,
-        publicUrl: resp.data.url || "",
-        ref,
-        storageId,
-        type: resp.data.type || file.type,
-        url: ref || resp.data.url || file.url,
-      };
+      return getImageInfo(file.url || file.dataURL || "").then(function (info) {
+        const finalRef = info
+          ? ref + "?w=" + info.width + "&h=" + info.height + "&size=" + info.size + "&type=" + encodeURIComponent(info.type)
+          : ref;
+        return {
+          key: resp.data.key || "",
+          name: resp.data.name || file.name,
+          publicUrl: resp.data.url || "",
+          ref: finalRef,
+          storageId,
+          type: resp.data.type || file.type,
+          url: finalRef || resp.data.url || file.url,
+        };
+      });
     });
   });
 }
@@ -2459,6 +2465,24 @@ function dataURLToBase64(value) {
   const comma = text.indexOf(",");
   if (text.startsWith("data:") && comma >= 0) return text.slice(comma + 1);
   return text;
+}
+
+function getImageInfo(dataURL) {
+  return new Promise(function (resolve) {
+    var img = new Image();
+    img.onload = function () {
+      var width = img.naturalWidth;
+      var height = img.naturalHeight;
+      if (!width || !height) { resolve(null); return; }
+      var base64 = dataURLToBase64(dataURL);
+      var size = Math.floor(base64.length * 3 / 4);
+      var match = String(dataURL || "").match(/^data:(image\/[^;,]+)/);
+      var type = match ? match[1] : "";
+      resolve({ width: width, height: height, size: size, type: type });
+    };
+    img.onerror = function () { resolve(null); };
+    img.src = dataURL;
+  });
 }
 
 function uploadErrorMessage(err) {

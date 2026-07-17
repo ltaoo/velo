@@ -105,11 +105,34 @@ export function assetReference(storageId, key) {
 }
 
 export function parseAssetReference(value) {
-  const match = String(value || "").trim().match(/^@assets\/([a-z0-9_-]+)\/(.+)$/i);
+  const cleanValue = String(value || "").trim().replace(/\?.*$/, "");
+  const match = cleanValue.match(/^@assets\/([a-z0-9_-]+)\/(.+)$/i);
   if (!match) return null;
   return {
     key: decodeAssetReferenceKey(match[2]),
     storageId: sanitizeStorageId(match[1]),
+  };
+}
+
+export function parseImageQueryParams(value) {
+  var text = String(value || "").trim();
+  var qIndex = text.indexOf("?");
+  if (qIndex < 0) return null;
+  var query = text.slice(qIndex + 1);
+  var params = {};
+  query.split("&").forEach(function (part) {
+    var eq = part.indexOf("=");
+    if (eq < 0) return;
+    params[decodeURIComponent(part.slice(0, eq))] = decodeURIComponent(part.slice(eq + 1));
+  });
+  var w = parseInt(params.w, 10);
+  var h = parseInt(params.h, 10);
+  if (!w || !h || w <= 0 || h <= 0) return null;
+  return {
+    width: w,
+    height: h,
+    size: params.size || "",
+    type: params.type || "",
   };
 }
 

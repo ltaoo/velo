@@ -59,6 +59,8 @@ export const SVG = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path></svg>',
   sort:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9h12"></path><path d="M9 15h6"></path><path d="M3 3h18"></path><path d="M10 21h4"></path></svg>',
+  toc:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h14"></path><path d="M3 11h14"></path><path d="M3 15h10"></path><circle cx="20" cy="7" r="1.5"></circle><circle cx="20" cy="11" r="1.5"></circle><circle cx="16.5" cy="15" r="1.5"></circle></svg>',
   trash:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>',
   x:

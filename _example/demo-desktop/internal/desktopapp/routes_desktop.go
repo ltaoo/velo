@@ -1,6 +1,7 @@
 package desktopapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -292,6 +293,109 @@ func registerDesktopRoutes(b *velo.Box, logger *zerolog.Logger) {
 			"memos":      payload.Memos,
 			"windowName": memoWindowName(memoID),
 		})
+	})
+
+	b.Post("/api/memo-window/edit", func(c *velo.BoxContext) interface{} {
+		var req MemoWindowPayload
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+
+		memoID, err := memoWindowMemoID(req.Memo)
+		if err != nil {
+			return c.Error(err.Error())
+		}
+		req.Memos = memoWindowMemosPayload(req.Memo, req.Memos)
+
+		editCacheKey := "edit:" + memoID
+		memoWindowCache.Lock()
+		memoWindowCache.items[editCacheKey] = req
+		memoWindowCache.Unlock()
+
+		windowName := memoWindowName(memoID) + "-edit"
+		b.OpenWindow(&velo.VeloWebviewOpt{
+			Name:       windowName,
+			Title:      "编辑 Memo",
+			Pathname:   "edit-memo-window.html?id=" + memoID,
+			Width:      520,
+			Height:     600,
+			Frameless:  true,
+			EntryPage:  "edit-memo-window.html",
+			FrontendFS: appAssets.FrontendFS,
+			OnClose:    forgetPersistedOpenWindowOnClose(b.Store, logger),
+		})
+		return c.Ok(velo.H{"success": true, "id": memoID, "windowName": windowName})
+	})
+
+	b.Get("/api/memo-window/edit", func(c *velo.BoxContext) interface{} {
+		memoID := strings.TrimSpace(c.Query("id"))
+		if memoID == "" {
+			return c.Error("id is required")
+		}
+
+		editCacheKey := "edit:" + memoID
+		memoWindowCache.RLock()
+		payload, ok := memoWindowCache.items[editCacheKey]
+		memoWindowCache.RUnlock()
+		if !ok {
+			return c.Ok(velo.H{"found": false})
+		}
+		return c.Ok(velo.H{
+			"found":      true,
+			"memo":       payload.Memo,
+			"memos":      payload.Memos,
+			"projects":   payload.Projects,
+			"windowName": memoWindowName(memoID) + "-edit",
+		})
+	})
+
+	b.Post("/api/memo-window/request-edit", func(c *velo.BoxContext) interface{} {
+		var req struct {
+			MemoID string `json:"memoId"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		if req.MemoID == "" {
+			return c.Error("memoId is required")
+		}
+		b.SendMessage(velo.H{"type": "edit_memo_request", "memoId": req.MemoID})
+		return c.Ok(velo.H{"success": true})
+	})
+
+	b.Post("/api/memo-window/memo-saved", func(c *velo.BoxContext) interface{} {
+		var req struct {
+			MemoID string `json:"memoId"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			return c.Error(err.Error())
+		}
+		if req.MemoID == "" {
+			return c.Error("memoId is required")
+		}
+
+		// Refresh window cache with fresh memo data from vault so that
+		// detached memo windows (and any other memo windows) will see the
+		// latest content when they reload.
+		ctx, err := requireActiveVault()
+		if err == nil {
+			path, fErr := findMemoFilePath(ctx, req.MemoID)
+			if fErr == nil {
+				memo, rErr := readMemoFile(ctx, path)
+				if rErr == nil {
+					memoJSON, _ := json.Marshal(memo)
+					memoWindowCache.Lock()
+					if cached, ok := memoWindowCache.items[req.MemoID]; ok {
+						cached.Memo = memoJSON
+						memoWindowCache.items[req.MemoID] = cached
+					}
+					memoWindowCache.Unlock()
+				}
+			}
+		}
+
+		b.SendMessage(velo.H{"type": "memo_saved", "memoId": req.MemoID})
+		return c.Ok(velo.H{"success": true})
 	})
 }
 
