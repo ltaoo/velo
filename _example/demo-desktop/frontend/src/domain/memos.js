@@ -16,6 +16,7 @@ export function normalizeMemoPayload(memo) {
   const id = String(memo.id || "").trim();
   if (!id) return null;
   return {
+    alias: String(memo.alias || "").trim(),
     archived: Boolean(memo.archived),
     content: String(memo.content || ""),
     createdAt: memo.createdAt || new Date().toISOString(),

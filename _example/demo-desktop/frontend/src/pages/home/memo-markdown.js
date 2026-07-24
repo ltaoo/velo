@@ -280,6 +280,20 @@ function memoLineNumberRange(startIndex, endIndex, offset) {
   return start === end ? start : `${start}-${end}`;
 }
 
+function highlightCode(code, language) {
+  try {
+    const hljs = globalThis.hljs;
+    if (!hljs) return escapeHTML(code);
+    if (language && hljs.getLanguage(language)) {
+      return hljs.highlight(code, { language }).value;
+    }
+    const result = hljs.highlightAuto(code);
+    return result.value;
+  } catch (_) {
+    return escapeHTML(code);
+  }
+}
+
 function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endLineIndex) {
   const sourceId = String((context && context.sourceId) || "").trim();
   const blockId = sourceId ? `${sourceId}:${startLineIndex}:${endLineIndex}:code` : "";
@@ -300,7 +314,7 @@ function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endL
             </button>
           </div>
         </div>
-        <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+        <pre class="memo-fenced-code-body"><code data-code-block-code>${highlightCode(code, language)}</code></pre>
       </div>
     `;
   }
@@ -319,7 +333,7 @@ function renderMemoCodeBlock(fenceLine, codeLines, context, startLineIndex, endL
         </div>
       </div>
       <div class="memo-fenced-code-viewport">
-        <pre class="memo-fenced-code-body"><code data-code-block-code>${escapeHTML(code)}</code></pre>
+        <pre class="memo-fenced-code-body"><code data-code-block-code>${highlightCode(code, language)}</code></pre>
       </div>
       <div class="memo-fenced-code-overlay">
         <div class="memo-fenced-code-overlay-gradient"></div>
@@ -591,30 +605,82 @@ function sanitizeHtmlImgTag(raw) {
   return "<img " + attrs + " />";
 }
 
+function extractInlineLinks(text) {
+  var items = [];
+  var processed = text;
+
+  // Extract markdown images first: ![alt](url) — must precede [text](url)
+  processed = processed.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_match, alt, src) {
+    var idx = items.length;
+    items.push({ type: "image", label: alt, url: src });
+    return "\x00MDIMG" + idx + "\x00";
+  });
+
+  // Extract markdown links: [text](url)
+  processed = processed.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, label, url) {
+    var idx = items.length;
+    items.push({ type: "link", label: label, url: url });
+    return "\x00MDLINK" + idx + "\x00";
+  });
+
+  // Extract auto-links: bare https?:// URLs
+  processed = processed.replace(/\b(https?:\/\/[^\s<>"`]+)/g, function (match) {
+    var idx = items.length;
+    items.push({ type: "autolink", url: match });
+    return "\x00MDAUTO" + idx + "\x00";
+  });
+
+  return { text: processed, items: items };
+}
+
 function inlineMarkdownBase(value, context = {}) {
+  // Step 1: Extract raw HTML <img> tags
   var extracted = extractHtmlImgTags(value);
-  let html = escapeHTML(extracted.text);
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-    return renderMemoImageToken({ label: alt, url: src });
-  });
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
-    if (isFileAttachment(label, url)) {
-      return renderMemoFileToken({ label, url }, context);
-    }
-    return renderMemoLinkToken(label, url);
-  });
-  html = html.replace(/\b(https?:\/\/[^\s<>"`]+)/g, (_, url) => {
-    const href = safeUrl(url);
-    return `<a class="memo-auto-link" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${escapeHTML(url)}</a>`;
-  });
+
+  // Step 2: Extract markdown links, images, and auto-links BEFORE escaping
+  var linkExtracted = extractInlineLinks(extracted.text);
+
+  // Step 3: Escape the remaining text (placeholders are safe — no HTML-special chars)
+  let html = escapeHTML(linkExtracted.text);
+
+  // Step 4: Inline markdown on escaped text
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   html = html.replace(/(^|\s)#([\w\u4e00-\u9fa5-]+)/g, '$1<span class="memo-hashtag">#$2</span>');
+
+  // Step 5: Time syntax (placeholders survive this — no time patterns inside)
   html = replaceMemoTimeSyntax(html);
+
+  // Step 6: Restore markdown images with correct (unescaped) URLs
+  html = html.replace(/\x00MDIMG(\d+)\x00/g, function (_, idx) {
+    var item = linkExtracted.items[parseInt(idx)];
+    return item ? renderMemoImageToken({ label: item.label, url: item.url }) : "";
+  });
+
+  // Step 7: Restore markdown links
+  html = html.replace(/\x00MDLINK(\d+)\x00/g, function (_, idx) {
+    var item = linkExtracted.items[parseInt(idx)];
+    if (!item) return "";
+    if (isFileAttachment(item.label, item.url)) {
+      return renderMemoFileToken({ label: item.label, url: item.url }, context);
+    }
+    return renderMemoLinkToken(item.label, item.url);
+  });
+
+  // Step 8: Restore auto-links
+  html = html.replace(/\x00MDAUTO(\d+)\x00/g, function (_, idx) {
+    var item = linkExtracted.items[parseInt(idx)];
+    if (!item) return "";
+    var href = safeUrl(item.url);
+    return `<a class="memo-auto-link" href="${escapeAttr(href)}" target="_blank" rel="noreferrer">${escapeHTML(item.url)}</a>`;
+  });
+
+  // Step 9: Restore HTML <img> tags
   html = html.replace(/\x00HTMLIMG(\d+)\x00/g, function (_, idx) {
     return extracted.tags[parseInt(idx)] || "";
   });
+
   return html;
 }
 

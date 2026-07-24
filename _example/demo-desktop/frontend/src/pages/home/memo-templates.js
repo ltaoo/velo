@@ -244,11 +244,11 @@ function detachedMemoCommentTemplate(comment, renderContext, editingCommentId = 
           `
           : `
             <div class="memo-window-comment-bubble">
-              <div class="memo-window-comment-hover-actions" aria-label="评论操作">
-                <button class="memo-action-button" type="button" data-window-comment-action="edit" title="编辑评论" aria-label="编辑评论">${SVG.edit}</button>
-                <button class="memo-action-button is-danger" type="button" data-window-comment-action="delete" title="删除评论" aria-label="删除评论">${SVG.trash}</button>
-              </div>
               <div class="memo-window-comment-collapse ${expanded ? "is-expanded" : "is-collapsed"}" data-window-comment-collapse>
+                <div class="memo-window-comment-hover-actions" aria-label="评论操作">
+                  <button class="memo-action-button" type="button" data-window-comment-action="edit" title="编辑评论" aria-label="编辑评论">${SVG.edit}</button>
+                  <button class="memo-action-button is-danger" type="button" data-window-comment-action="delete" title="删除评论" aria-label="删除评论">${SVG.trash}</button>
+                </div>
                 <div class="memo-content memo-comment-content">${content}</div>
                 <button class="memo-expand-button memo-window-comment-expand-button" type="button" data-window-comment-action="toggleExpand" aria-expanded="${expanded ? "true" : "false"}" title="${expandLabel}">
                   <span>${expandLabel}</span>
@@ -740,13 +740,12 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
   const textLines = (memo.content || "").split("\n").length;
   const expandLabel = expanded ? "收起" : "展开";
   const projectBadge = memo.projectId ? projectBadgeTemplate(memo.projectId, projects) : "";
+  const aliasBadge = memo.alias ? `<span class="memo-alias-label">@${escapeHTML(memo.alias)}</span>` : "";
   const comments = Array.isArray(options.comments) ? options.comments : [];
   const commenting = options.commenting === true;
   const editingCommentId = String(options.editingCommentId || "");
   const commentsExpanded = options.commentsExpanded === true;
-  const sourceEditing = options.sourceEditing === true;
-  const sourceDraft = String(options.sourceDraft || "");
-  const tocHTML = !editing && !sourceEditing ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
+  const tocHTML = !editing ? memoCardTocTemplate(collectMemoHeadings(memo.content)) : "";
   const hasToc = !!tocHTML;
   const tocVisible = hasToc && (expanded || options.tocVisible === true);
 
@@ -760,6 +759,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
         </div>
         <div class="memo-card-meta">
           ${showVisibility ? `<span class="memo-visibility">${SVG[displayVisibility.icon]} ${displayVisibility.label}</span>` : ""}
+          ${aliasBadge}
           ${projectBadge}
           ${memo.pinned ? '<span class="memo-pin-label">置顶</span>' : ""}
           ${backlinks ? `<span class="memo-backlink-label">${backlinks} 引用</span>` : ""}
@@ -774,9 +774,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
       ${
         editing
           ? editTemplate(memo, projects)
-          : sourceEditing
-            ? memoSourceTemplate(sourceDraft)
-            : `
+          : `
             <div class="memo-card-reading ${tocVisible ? "has-toc" : ""}">
               <div class="memo-card-reading-main">
                 <div class="memo-list-collapse ${expanded ? "is-expanded" : "is-collapsed"}${!expanded && textLines <= 36 ? " is-short" : ""}" data-memo-collapse data-memo-lines="${textLines}">
@@ -810,7 +808,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
           <button class="memo-action-button is-danger" type="button" data-action="deleteMemo" title="删除">${SVG.trash}</button>
         </div>
       </footer>
-      ${!editing && !sourceEditing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded, { privateUnlocked: options.privateUnlocked, commentVisibility: options.commentVisibility }) : ""}
+      ${!editing && (comments.length || commenting) ? memoCommentSectionTemplate(comments, commenting, renderContext, editingCommentId, commentsExpanded, { privateUnlocked: options.privateUnlocked, commentVisibility: options.commentVisibility }) : ""}
     </article>
   `;
 }
@@ -841,19 +839,6 @@ function memoCardTocTemplate(headings) {
           .join("")}
       </ol>
     </nav>
-  `;
-}
-
-function memoSourceTemplate(sourceDraft) {
-  return `
-    <div class="memo-inline-editor memo-source-editor">
-      <textarea class="memo-source-textarea" data-memo-source-yaml spellcheck="false" rows="10">${escapeHTML(sourceDraft)}</textarea>
-      <div class="memo-inline-actions">
-        <div class="memo-inline-status-line">YAML frontmatter</div>
-        <button class="memo-secondary-button" type="button" data-action="cancelMemoSource">${SVG.x}<span>取消</span></button>
-        <button class="memo-primary-button" type="button" data-action="saveMemoSource">${SVG.check}<span>保存</span></button>
-      </div>
-    </div>
   `;
 }
 

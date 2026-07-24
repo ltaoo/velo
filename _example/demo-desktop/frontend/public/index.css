@@ -739,7 +739,7 @@ ol {
   padding: 4px;
   position: fixed;
   width: min(360px, calc(100vw - 16px));
-  z-index: 1000;
+  z-index: 1200;
 }
 
 .slash-command-menu {
@@ -1340,7 +1340,7 @@ body.is-fixed-window .memo-window-shell {
   padding: 2px;
   pointer-events: none;
   position: absolute;
-  right: 8px;
+  left: 8px;
   top: -18px;
   transform: translateY(4px);
   transition: opacity 0.14s ease, transform 0.14s ease;
@@ -1420,13 +1420,19 @@ body.is-fixed-window .memo-window-shell {
   background: linear-gradient(to bottom, rgba(17, 17, 17, 0), color-mix(in srgb, var(--BG-4) 72%, var(--BG-2)));
 }
 
+.memo-window-comment-collapse:not(.is-short) {
+  padding-bottom: 34px;
+}
+
 .memo-window-comment-collapse.is-short .memo-window-comment-expand-button {
   display: none;
 }
 
 .memo-window-comment-expand-button {
-  align-self: end;
-  justify-self: end;
+  bottom: 6px;
+  position: absolute;
+  right: 10px;
+  z-index: 2;
 }
 
 .memo-window-comment-collapse.is-expanded .memo-window-comment-expand-button svg {
@@ -2997,6 +3003,7 @@ body.is-fixed-window .memo-window-shell {
 }
 
 .memo-visibility,
+.memo-alias-label,
 .memo-pin-label,
 .memo-backlink-label {
   align-items: center;
@@ -3554,6 +3561,12 @@ body.is-fixed-window .memo-window-shell {
   min-width: max-content;
   padding: 0;
   white-space: pre;
+}
+
+.memo-fenced-code-body .hljs {
+  background: transparent;
+  color: inherit;
+  padding: 0;
 }
 
 .memo-fenced-code-actions {

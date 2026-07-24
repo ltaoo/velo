@@ -85,10 +85,11 @@ export function loadMemosFromVault() {
   });
 }
 
-export function createMemoInVault(content, visibility, projectId, isPrivate) {
+export function createMemoInVault(content, visibility, projectId, isPrivate, meta) {
+  meta = meta || {};
   if (typeof globalThis.invoke !== "function") {
     const now = new Date().toISOString();
-    return Promise.resolve({
+    return Promise.resolve(Object.assign({
       archived: false,
       content,
       createdAt: now,
@@ -98,16 +99,16 @@ export function createMemoInVault(content, visibility, projectId, isPrivate) {
       projectId: normalizeProjectID(projectId),
       updatedAt: "",
       visibility,
-    });
+    }, meta));
   }
   return globalThis.invoke("/api/memos/create", {
     method: "POST",
-    args: {
+    args: Object.assign({
       content,
       private: Boolean(isPrivate),
       projectId: normalizeProjectID(projectId),
       visibility,
-    },
+    }, meta),
   }).then(function (resp) {
     if (!resp || resp.code !== 0 || !resp.data || !resp.data.memo) {
       throw new Error((resp && resp.msg) || "发布失败");
@@ -138,6 +139,7 @@ export function updateMemoInVault(id, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, "kind")) args.kind = patch.kind;
   if (Object.prototype.hasOwnProperty.call(patch, "taskId")) args.taskId = patch.taskId;
   if (Object.prototype.hasOwnProperty.call(patch, "updatedAt")) args.updatedAt = patch.updatedAt;
+  if (Object.prototype.hasOwnProperty.call(patch, "alias")) args.alias = patch.alias;
   return globalThis.invoke("/api/memos/update", {
     method: "POST",
     args,

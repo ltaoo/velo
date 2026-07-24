@@ -582,8 +582,6 @@ export function mountMemosHome(root) {
     editDraft: "",
     editProjectId: "",
     editVisibility: DEFAULT_VISIBILITY,
-    sourceDraft: "",
-    sourceEditingId: "",
     highlightMemoId: "",
     highlightTimer: null,
     expandedMemoIds: new Set(),
@@ -1056,8 +1054,6 @@ export function mountMemosHome(root) {
       state.activeTag = "";
       state.editingId = "";
       state.editPreviewVisible = false;
-      state.sourceDraft = "";
-      state.sourceEditingId = "";
       state.commentPreviewVisible = false;
       state.commentingMemoId = "";
       state.commentDraft = "";
@@ -1078,8 +1074,6 @@ export function mountMemosHome(root) {
       state.activeTag = "";
       state.editingId = "";
       state.editPreviewVisible = false;
-      state.sourceDraft = "";
-      state.sourceEditingId = "";
       state.commentPreviewVisible = false;
       state.commentingMemoId = "";
       state.commentDraft = "";
@@ -1204,8 +1198,6 @@ export function mountMemosHome(root) {
         state.commentPreviewVisible = false;
         state.editingId = "";
         state.editPreviewVisible = false;
-        state.sourceDraft = "";
-        state.sourceEditingId = "";
         state.query = "";
         state.selectedCalendarDate = "";
         state.linksDomainFilter = "";
@@ -1335,13 +1327,10 @@ export function mountMemosHome(root) {
         startCommentEdit(commentId);
         break;
       case "editMemoSource":
-        startSourceEdit(memoId);
-        break;
-      case "cancelMemoSource":
-        cancelSourceEdit();
-        break;
-      case "saveMemoSource":
-        saveMemoSource(memoId);
+        {
+          var sourceMemo = findMemo(memoId);
+          if (sourceMemo) openSourceEditDialog(sourceMemo);
+        }
         break;
       case "toggleMemoExpand":
         toggleMemoExpand(memoId);
@@ -1634,20 +1623,101 @@ export function mountMemosHome(root) {
     });
   }
 
+  function extractYamlFrontmatter(content) {
+    var trimmed = String(content || "");
+    var match = trimmed.match(/^```ya?ml\s*\r?\n([\s\S]*?)\r?\n```\s*\r?\n?/);
+    if (!match) return { meta: {}, stripped: trimmed };
+    var block = match[1];
+    var meta = {};
+    var lines = block.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line || line.startsWith("#")) continue;
+      var colon = line.indexOf(":");
+      if (colon < 0) continue;
+      var key = line.slice(0, colon).trim();
+      var value = line.slice(colon + 1).trim();
+      // Remove surrounding quotes
+      if ((value[0] === '"' && value[value.length - 1] === '"') || (value[0] === "'" && value[value.length - 1] === "'")) {
+        value = value.slice(1, -1);
+      }
+      meta[key] = value;
+    }
+    return { meta: meta, stripped: trimmed.slice(match[0].length) };
+  }
+
+  function applyYamlFrontmatterMeta(rawMeta) {
+    var result = {};
+    if (rawMeta.createdAt) {
+      var ts = parseDisplayTime(rawMeta.createdAt);
+      if (ts !== null) result.createdAt = ts;
+    }
+    if (rawMeta.updatedAt) {
+      var ts2 = parseDisplayTime(rawMeta.updatedAt);
+      if (ts2 !== null) result.updatedAt = ts2;
+    }
+    if (rawMeta.visibility) {
+      var v = String(rawMeta.visibility).trim().toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(VISIBILITY, v)) {
+        result.visibility = v;
+      }
+    }
+    if (rawMeta.private !== undefined) {
+      result.private = String(rawMeta.private).trim().toLowerCase() === "true";
+    }
+    if (rawMeta.pinned !== undefined) {
+      result.pinned = String(rawMeta.pinned).trim().toLowerCase() === "true";
+    }
+    if (rawMeta.archived !== undefined) {
+      result.archived = String(rawMeta.archived).trim().toLowerCase() === "true";
+    }
+    if (rawMeta.projectId !== undefined) {
+      result.projectId = normalizeProjectID(rawMeta.projectId);
+    }
+    if (rawMeta.kind !== undefined) {
+      result.kind = String(rawMeta.kind).trim();
+    }
+    if (rawMeta.taskId !== undefined) {
+      result.taskId = String(rawMeta.taskId).trim();
+    }
+    if (rawMeta.alias !== undefined) {
+      result.alias = String(rawMeta.alias).trim();
+    }
+    return result;
+  }
+
   function createMemoFromContent(content, successMessage) {
     const text = String(content || "").trim();
     if (!text) return Promise.reject(new Error("剪贴板内容为空"));
 
-    const projectRef = extractProjectDirective(text);
+    var yamlResult = extractYamlFrontmatter(text);
+    var yamlMeta = applyYamlFrontmatterMeta(yamlResult.meta);
+    var contentWithoutYaml = yamlResult.stripped;
+
+    const projectRef = extractProjectDirective(contentWithoutYaml);
     const resolveProject = projectRef
       ? resolveOrCreateProjectByName(projectRef)
       : Promise.resolve(null);
 
     return resolveProject.then(function (resolvedProjectId) {
-      const finalContent = projectRef ? stripProjectDirective(text) : text;
-      const finalProjectId = resolvedProjectId || state.composerProjectId;
-      const isSecret = state.visibility === "SECRET";
-      return createMemoInVault(finalContent, isSecret ? "PRIVATE" : state.visibility, finalProjectId, isSecret);
+      var finalContent = projectRef ? stripProjectDirective(contentWithoutYaml) : contentWithoutYaml;
+      var finalProjectId = yamlMeta.projectId || resolvedProjectId || state.composerProjectId;
+      var visibility = yamlMeta.visibility || state.visibility;
+      var isSecret = visibility === "SECRET";
+      var storedVisibility = isSecret ? "PRIVATE" : visibility;
+      var meta = {
+        createdAt: yamlMeta.createdAt,
+        updatedAt: yamlMeta.updatedAt,
+        pinned: yamlMeta.pinned,
+        kind: yamlMeta.kind,
+        taskId: yamlMeta.taskId,
+        archived: yamlMeta.archived,
+        alias: yamlMeta.alias,
+      };
+      if (yamlMeta.private !== undefined) {
+        meta.private = yamlMeta.private;
+      }
+      return createMemoInVault(finalContent, storedVisibility, finalProjectId, isSecret, meta);
     }).then(function (memo) {
       const normalized = normalizeMemoPayload(memo);
       if (!normalized) throw new Error("创建 memo 失败");
@@ -2080,8 +2150,6 @@ export function mountMemosHome(root) {
     state.activeProjectFilter = "all";
     state.editingId = "";
     state.editPreviewVisible = false;
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
     state.query = "";
     state.selectedCalendarDate = "";
     els.searchInput.value = "";
@@ -2221,9 +2289,6 @@ export function mountMemosHome(root) {
       return;
     }
 
-    if (event.target.matches("[data-memo-source-yaml]")) {
-      state.sourceDraft = event.target.value;
-    }
   }
 
   function handleKeydown(event) {
@@ -2547,16 +2612,34 @@ export function mountMemosHome(root) {
     state.saving = true;
     renderComposerStatus(content);
 
-    const projectRef = extractProjectDirective(content);
+    var yamlResult = extractYamlFrontmatter(content);
+    var yamlMeta = applyYamlFrontmatterMeta(yamlResult.meta);
+    var contentWithoutYaml = yamlResult.stripped;
+
+    const projectRef = extractProjectDirective(contentWithoutYaml);
     const resolveProject = projectRef
       ? resolveOrCreateProjectByName(projectRef)
       : Promise.resolve(null);
 
     return resolveProject.then(function (resolvedProjectId) {
-      const finalContent = projectRef ? stripProjectDirective(content) : content;
-      const finalProjectId = resolvedProjectId || state.composerProjectId;
-      const isSecret = state.visibility === "SECRET";
-      return createMemoInVault(finalContent, isSecret ? "PRIVATE" : state.visibility, finalProjectId, isSecret);
+      var finalContent = projectRef ? stripProjectDirective(contentWithoutYaml) : contentWithoutYaml;
+      var finalProjectId = yamlMeta.projectId || resolvedProjectId || state.composerProjectId;
+      var visibility = yamlMeta.visibility || state.visibility;
+      var isSecret = visibility === "SECRET";
+      var storedVisibility = isSecret ? "PRIVATE" : visibility;
+      var meta = {
+        createdAt: yamlMeta.createdAt,
+        updatedAt: yamlMeta.updatedAt,
+        pinned: yamlMeta.pinned,
+        kind: yamlMeta.kind,
+        taskId: yamlMeta.taskId,
+        archived: yamlMeta.archived,
+        alias: yamlMeta.alias,
+      };
+      if (yamlMeta.private !== undefined) {
+        meta.private = yamlMeta.private;
+      }
+      return createMemoInVault(finalContent, storedVisibility, finalProjectId, isSecret, meta);
     }).then(
       function (memo) {
         const normalized = normalizeMemoPayload(memo);
@@ -3802,14 +3885,14 @@ export function mountMemosHome(root) {
     const saveLabel = commentEditing ? "保存" : "评论";
     const description = commentEditing
       ? (memo && memo.id ? compactText(memoTitle(memo), 88) : "")
-      : compactText(memoTitle(memo), 88);
+      : "";
 
     return `
       <section class="memo-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="memo-dialog-title">
         <header class="memo-dialog-head">
           <div>
             <h2 id="memo-dialog-title">${escapeHTML(title)}</h2>
-            <p>${escapeHTML(description)}</p>
+            ${description ? `<p>${escapeHTML(description)}</p>` : ""}
           </div>
           <button class="memo-action-button" type="button" data-memo-dialog-action="close" title="关闭" aria-label="关闭">${SVG.x}</button>
         </header>
@@ -4112,27 +4195,154 @@ export function mountMemosHome(root) {
     }).catch(function () {});
   }
 
-  function startSourceEdit(memoId) {
-    const memo = findMemo(memoId);
-    if (!memo) return;
-    state.commentingMemoId = "";
-    state.commentDraft = "";
-    state.commentPreviewVisible = false;
-    state.commentEditingId = "";
-    state.commentEditDraft = "";
-    state.commentEditPreviewVisible = false;
-    state.editingId = "";
-    state.editDraft = "";
-    state.editPreviewVisible = false;
-    state.sourceEditingId = memoId;
-    state.sourceDraft = memoSourceYaml(memo);
-    state.editVisibility = memo.private && memo.visibility === "PRIVATE" ? "SECRET" : memo.visibility || DEFAULT_VISIBILITY;
-    state.editProjectId = normalizeProjectID(memo.projectId);
-    renderFeed();
-    window.requestAnimationFrame(function () {
-      const input = els.memoList.querySelector("[data-memo-source-yaml]");
-      if (input) input.focus();
+  function openSourceEditDialog(memo) {
+    closeSourceEditDialog();
+    var overlay = document.createElement("div");
+    overlay.className = "memo-dialog";
+    overlay.setAttribute("data-source-edit-dialog", "");
+    overlay.innerHTML = sourceEditDialogTemplate(memo);
+    root.appendChild(overlay);
+
+    overlay.addEventListener("click", function (event) {
+      if (event.target === overlay) closeSourceEditDialog();
+      var closeBtn = closestElement(event.target, "[data-source-edit-dialog-close]");
+      if (closeBtn) closeSourceEditDialog();
     });
+
+    var form = overlay.querySelector("[data-source-edit-form]");
+    if (form) {
+      form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        saveSourceEditDialog(memo.id);
+      });
+    }
+  }
+
+  function closeSourceEditDialog() {
+    var existing = root.querySelector("[data-source-edit-dialog]");
+    if (existing) existing.remove();
+  }
+
+  function saveSourceEditDialog(memoId) {
+    var memo = findMemo(memoId);
+    if (!memo) return;
+
+    var overlay = root.querySelector("[data-source-edit-dialog]");
+    if (!overlay) return;
+
+    var fields = overlay.querySelectorAll("[data-source-edit-field]");
+    var data = {};
+    fields.forEach(function (field) {
+      if (field.type === "checkbox") {
+        data[field.name] = field.checked;
+      } else {
+        data[field.name] = String(field.value || "").trim();
+      }
+    });
+
+    // Validate createdAt
+    if (!data.createdAt) {
+      showToast("createdAt 不能为空");
+      return;
+    }
+    var parsedCreatedAt = parseDisplayTime(data.createdAt);
+    if (!parsedCreatedAt) {
+      showToast("createdAt 格式错误，应为 YYYY-MM-DD HH:mm:ss");
+      return;
+    }
+
+    // Validate updatedAt
+    var parsedUpdatedAt = "";
+    if (data.updatedAt) {
+      parsedUpdatedAt = parseDisplayTime(data.updatedAt);
+      if (!parsedUpdatedAt) {
+        showToast("updatedAt 格式错误，应为 YYYY-MM-DD HH:mm:ss");
+        return;
+      }
+    }
+
+    // Validate visibility
+    var visibility = String(data.visibility || DEFAULT_VISIBILITY).trim().toUpperCase();
+    if (!Object.prototype.hasOwnProperty.call(VISIBILITY, visibility)) {
+      showToast("visibility 只能是 SECRET、PRIVATE、PROTECTED 或 PUBLIC");
+      return;
+    }
+
+    // Validate projectId
+    var projectId = normalizeProjectID(data.projectId);
+    if (projectId && !state.projects.some(function (p) { return p.id === projectId; })) {
+      showToast("Project 不存在");
+      return;
+    }
+
+    // Validate taskId
+    var taskId = String(data.taskId || "").trim();
+    if (taskId && !state.tasks.some(function (t) { return t.id === taskId; })) {
+      showToast("Task 不存在");
+      return;
+    }
+
+    // Build patch
+    var isSecret = visibility === "SECRET";
+    var isPrivate = isSecret ? true : Boolean(data.private);
+    var storedVisibility = isSecret ? "PRIVATE" : visibility;
+
+    var patch = {
+      alias: String(data.alias || "").trim(),
+      archived: Boolean(data.archived),
+      createdAt: parsedCreatedAt,
+      kind: String(data.kind || "").trim(),
+      pinned: Boolean(data.pinned),
+      private: isPrivate,
+      projectId: projectId,
+      taskId: taskId,
+      updatedAt: parsedUpdatedAt || void 0,
+      visibility: storedVisibility,
+    };
+    if (patch.updatedAt === void 0) delete patch.updatedAt;
+
+    closeSourceEditDialog();
+
+    return updateMemo(memoId, patch).then(function (result) {
+      if (!result || result.ok !== false) showToast("源数据已保存");
+      return result;
+    });
+  }
+
+  function sourceEditDialogTemplate(memo) {
+    var isSecret = Boolean(memo.private) && (memo.visibility || DEFAULT_VISIBILITY) === "PRIVATE";
+    var visibilityValue = isSecret ? "SECRET" : memo.visibility || DEFAULT_VISIBILITY;
+    var privateValue = isSecret ? false : Boolean(memo.private);
+    var visOptions = Object.keys(VISIBILITY).map(function (v) {
+      return '<option value="' + escapeAttr(v) + '"' + (visibilityValue === v ? " selected" : "") + ">" + escapeHTML(v) + "</option>";
+    }).join("");
+
+    return (
+      '<div class="memo-dialog-panel" style="max-width:520px">' +
+        '<div class="memo-dialog-head">' +
+          "<h2>编辑源数据</h2>" +
+          '<button class="memo-action-button" type="button" data-source-edit-dialog-close title="关闭">' + SVG.x + "</button>" +
+        "</div>" +
+        '<div class="memo-dialog-body" style="padding:16px">' +
+          '<form data-source-edit-form>' +
+            '<div class="memo-form-field"><label>alias</label><input type="text" name="alias" value="' + escapeAttr(memo.alias || "") + '" data-source-edit-field placeholder="快捷搜索别名"></div>' +
+            '<div class="memo-form-field"><label>createdAt</label><input type="text" name="createdAt" value="' + escapeAttr(formatDisplayTime(memo.createdAt)) + '" data-source-edit-field></div>' +
+            '<div class="memo-form-field"><label>updatedAt</label><input type="text" name="updatedAt" value="' + escapeAttr(formatDisplayTime(memo.updatedAt)) + '" data-source-edit-field></div>' +
+            '<div class="memo-form-field"><label>visibility</label><select name="visibility" data-source-edit-field>' + visOptions + "</select></div>" +
+            '<div class="memo-form-field"><label><input type="checkbox" name="private"' + (privateValue ? " checked" : "") + ' data-source-edit-field> private</label></div>' +
+            '<div class="memo-form-field"><label><input type="checkbox" name="pinned"' + (memo.pinned ? " checked" : "") + ' data-source-edit-field> pinned</label></div>' +
+            '<div class="memo-form-field"><label><input type="checkbox" name="archived"' + (memo.archived ? " checked" : "") + ' data-source-edit-field> archived</label></div>' +
+            '<div class="memo-form-field"><label>projectId</label><input type="text" name="projectId" value="' + escapeAttr(memo.projectId || "") + '" data-source-edit-field></div>' +
+            '<div class="memo-form-field"><label>kind</label><input type="text" name="kind" value="' + escapeAttr(memo.kind || "") + '" data-source-edit-field></div>' +
+            '<div class="memo-form-field"><label>taskId</label><input type="text" name="taskId" value="' + escapeAttr(memo.taskId || "") + '" data-source-edit-field></div>' +
+            '<div class="memo-dialog-actions">' +
+              '<button class="memo-secondary-button" type="button" data-source-edit-dialog-close>取消</button>' +
+              '<button class="memo-primary-button" type="submit">保存</button>' +
+            "</div>" +
+          "</form>" +
+        "</div>" +
+      "</div>"
+    );
   }
 
   function toggleMemoExpand(memoId) {
@@ -4275,28 +4485,6 @@ export function mountMemosHome(root) {
     }
   }
 
-  function cancelSourceEdit() {
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
-    renderFeed();
-  }
-
-  function saveMemoSource(memoId) {
-    const memo = findMemo(memoId);
-    if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
-    const parsed = parseMemoSourceYaml(state.sourceDraft, memo);
-    if (parsed.error) {
-      showToast(parsed.error);
-      return Promise.resolve({ ok: false, message: parsed.error });
-    }
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
-    return updateMemo(memoId, parsed.patch).then(function (result) {
-      if (!result || result.ok !== false) showToast("源数据已保存");
-      return result;
-    });
-  }
-
   function saveEdit(memoId, options = {}) {
     const memo = findMemo(memoId);
     if (!memo) return Promise.resolve({ ok: false, message: "找不到 memo" });
@@ -4367,119 +4555,26 @@ export function mountMemosHome(root) {
     return Promise.resolve({ ok: false, message: "找不到 memo" });
   }
 
-  function memoSourceYaml(memo) {
-    const isSecret = Boolean(memo.private) && (memo.visibility || DEFAULT_VISIBILITY) === "PRIVATE";
-    const lines = [
-      ["id", memo.id || ""],
-      ["createdAt", memo.createdAt || ""],
-      ["updatedAt", memo.updatedAt || ""],
-      ["visibility", isSecret ? "SECRET" : memo.visibility || DEFAULT_VISIBILITY],
-      ["private", isSecret ? false : Boolean(memo.private)],
-      ["pinned", Boolean(memo.pinned)],
-      ["archived", Boolean(memo.archived)],
-      ["projectId", memo.projectId || ""],
-      ["kind", memo.kind || ""],
-      ["taskId", memo.taskId || ""],
-    ];
-    return lines.map(function ([key, value]) {
-      if (typeof value === "boolean") return `${key}: ${value ? "true" : "false"}`;
-      return `${key}: ${yamlQuote(value)}`;
-    }).join("\n");
-  }
-
-  function parseMemoSourceYaml(value, memo) {
-    const meta = {};
-    const allowed = new Set(["id", "createdAt", "created_at", "updatedAt", "updated_at", "visibility", "private", "pinned", "archived", "projectId", "kind", "taskId"]);
-    const ignored = new Set(["schemaVersion", "contentWhitespace", "tags", "references"]);
-    const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index].trim();
-      if (!line || line.startsWith("#") || line === "---") continue;
-      if (/^-\s/.test(line)) continue;
-      const colon = line.indexOf(":");
-      if (colon < 0) return { error: `源数据第 ${index + 1} 行缺少冒号` };
-      const key = line.slice(0, colon).trim();
-      if (!key) return { error: `源数据第 ${index + 1} 行缺少字段名` };
-      if (ignored.has(key)) continue;
-      if (!allowed.has(key)) return { error: `不支持的源数据字段: ${key}` };
-      meta[key] = yamlScalarValue(line.slice(colon + 1));
-    }
-
-    const id = String(meta.id || "").trim();
-    if (!id) return { error: "源数据必须保留 id" };
-    if (id !== memo.id) return { error: "暂不支持修改 memo id" };
-
-    const createdAt = String(meta.createdAt || meta.created_at || "").trim();
-    if (!createdAt) return { error: "createdAt 不能为空" };
-    if (!isValidMemoTime(createdAt)) return { error: "createdAt 必须是 RFC3339 时间" };
-
-    const updatedAt = String(meta.updatedAt || meta.updated_at || "").trim();
-    if (updatedAt && !isValidMemoTime(updatedAt)) return { error: "updatedAt 必须是 RFC3339 时间" };
-
-    const visibility = String(meta.visibility || DEFAULT_VISIBILITY).trim().toUpperCase();
-    if (!Object.prototype.hasOwnProperty.call(VISIBILITY, visibility)) return { error: "visibility 只能是 SECRET、PRIVATE、PROTECTED 或 PUBLIC" };
-
-    const pinned = parseYAMLBool(meta.pinned, Boolean(memo.pinned));
-    if (pinned === null) return { error: "pinned 必须是 true 或 false" };
-    const archived = parseYAMLBool(meta.archived, Boolean(memo.archived));
-    if (archived === null) return { error: "archived 必须是 true 或 false" };
-    const rawPrivate = parseYAMLBool(meta.private, Boolean(memo.private));
-    if (rawPrivate === null) return { error: "private 必须是 true 或 false" };
-    const isSecret = visibility === "SECRET";
-    const isPrivate = isSecret ? true : rawPrivate;
-    const storedVisibility = isSecret ? "PRIVATE" : visibility;
-
-    return {
-      patch: {
-        archived,
-        createdAt,
-        kind: String(meta.kind || "").trim(),
-        pinned,
-        private: isPrivate,
-        projectId: normalizeProjectID(meta.projectId || ""),
-        taskId: String(meta.taskId || "").trim(),
-        updatedAt,
-        visibility: storedVisibility,
-      },
-    };
-  }
-
-  function yamlQuote(value) {
-    return JSON.stringify(String(value || ""));
-  }
-
-  function yamlScalarValue(value) {
-    const raw = String(value || "").trim();
-    if (!raw) return "";
-    if (raw[0] === '"' || raw[0] === "'") {
-      try {
-        return JSON.parse(raw);
-      } catch (_) {
-        return raw.replace(/^['"]|['"]$/g, "");
-      }
-    }
-    return raw.replace(/\s+#.*$/, "").trim();
-  }
-
-  function parseYAMLBool(value, fallback) {
-    if (value === undefined) return fallback;
-    switch (String(value).trim().toLowerCase()) {
-      case "true":
-      case "yes":
-      case "1":
-        return true;
-      case "false":
-      case "no":
-      case "0":
-        return false;
-      default:
-        return null;
-    }
-  }
-
   function isValidMemoTime(value) {
     const date = new Date(value);
     return !Number.isNaN(date.getTime());
+  }
+
+  function formatDisplayTime(value) {
+    var d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+
+  function parseDisplayTime(str) {
+    var trimmed = String(str || "").trim();
+    if (!trimmed) return null;
+    var m = trimmed.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[\sT](\d{1,2}):(\d{1,2}):(\d{1,2})$/);
+    if (!m) return null;
+    var date = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.getTime();
   }
 
   function writeEditDraft(memoId) {
@@ -5406,8 +5501,6 @@ export function mountMemosHome(root) {
           commentVisibility: state.commentVisibility,
           editingCommentId: state.commentEditingId,
           privateUnlocked: state.privateUnlocked,
-          sourceDraft: state.sourceEditingId === memo.id ? state.sourceDraft : "",
-          sourceEditing: state.sourceEditingId === memo.id,
           tocVisible: state.tocVisibleMemoIds.has(memo.id),
         },
       );
@@ -5661,7 +5754,7 @@ export function mountMemosHome(root) {
           if (!normalized) return;
           state.projects = state.projects.concat(normalized);
           saveProjects(state.projects);
-          selectProjectFilter(normalized.id);
+          renderProjects();
           showToast("已创建 Project");
         },
         function (err) {
@@ -5899,7 +5992,7 @@ export function mountMemosHome(root) {
         if (state.selectedCalendarDate && memoDateKey(memo) !== state.selectedCalendarDate) return false;
         if (!query) return true;
         const commentText = commentsForMemo(memo.id).map((comment) => comment.content).join("\n");
-        return `${memo.content} ${commentText} ${memo.visibility}`.toLowerCase().includes(query);
+        return `${memo.content} ${commentText} ${memo.visibility} ${memo.alias || ""}`.toLowerCase().includes(query);
       })
       .sort((a, b) => {
         const result = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
@@ -5913,7 +6006,7 @@ export function mountMemosHome(root) {
       .filter((todo) => {
         if (state.activeTag && !extractTags(todo.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
-        return `${todo.text} ${todo.sourceText} ${todo.memo.content} ${todo.memo.visibility}`.toLowerCase().includes(query);
+        return `${todo.text} ${todo.sourceText} ${todo.memo.content} ${todo.memo.visibility} ${todo.memo.alias || ""}`.toLowerCase().includes(query);
       })
       .sort((a, b) => {
         if (a.checked !== b.checked) return a.checked ? 1 : -1;
@@ -6208,7 +6301,7 @@ export function mountMemosHome(root) {
           if (!host.includes(domainFilter)) return false;
         }
         if (!query) return true;
-        return `${link.label} ${link.url} ${link.sourceText} ${link.memo.content} ${link.memo.visibility}`.toLowerCase().includes(query);
+        return `${link.label} ${link.url} ${link.sourceText} ${link.memo.content} ${link.memo.visibility} ${link.memo.alias || ""}`.toLowerCase().includes(query);
       })
       .sort((a, b) => sortMemoReference(a, b, state.sortDesc));
   }
@@ -6239,6 +6332,7 @@ export function mountMemosHome(root) {
       block.sourceText,
       block.memo.content,
       block.memo.visibility,
+      block.memo.alias || "",
       projectLabel(block.memo.projectId),
     ].join(" ");
   }
@@ -6258,7 +6352,7 @@ export function mountMemosHome(root) {
       .filter((resource) => {
         if (state.activeTag && !extractTags(resource.memo.content).includes(state.activeTag)) return false;
         if (!query) return true;
-        return `${resource.label} ${resource.url} ${resource.sourceText} ${resource.memo.content} ${resource.memo.visibility} ${resource.type}`.toLowerCase().includes(query);
+        return `${resource.label} ${resource.url} ${resource.sourceText} ${resource.memo.content} ${resource.memo.visibility} ${resource.memo.alias || ""} ${resource.type}`.toLowerCase().includes(query);
       })
       .sort((a, b) => sortMemoReference(a, b, state.sortDesc));
   }
@@ -6323,8 +6417,6 @@ export function mountMemosHome(root) {
         state.query = "";
         state.editingId = "";
         state.editPreviewVisible = false;
-        state.sourceDraft = "";
-        state.sourceEditingId = "";
         els.searchInput.value = "";
         break;
       default:
@@ -6343,8 +6435,6 @@ export function mountMemosHome(root) {
     state.query = "";
     state.editingId = "";
     state.editPreviewVisible = false;
-    state.sourceDraft = "";
-    state.sourceEditingId = "";
     els.searchInput.value = "";
     renderAll();
   }
