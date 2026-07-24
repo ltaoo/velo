@@ -25,6 +25,7 @@ export function normalizeMemoPayload(memo) {
     pinned: Boolean(memo.pinned),
     private: Boolean(memo.private),
     projectId: normalizeProjectID(memo.projectId),
+    reactions: Array.isArray(memo.reactions) ? memo.reactions.filter(String) : [],
     taskId: String(memo.taskId || "").trim(),
     updatedAt: memo.updatedAt || "",
     visibility: memo.visibility || DEFAULT_VISIBILITY,

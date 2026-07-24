@@ -598,6 +598,7 @@ export function mountMemosHome(root) {
     gtdMilestones: [],
     activeProjectFilter: "all",
     activeProjectId: "",
+    projectActiveTab: "memos",
     composerProjectId: "",
     composerPreviewVisible: false,
     lastComposerProjectId: localStorage.getItem(LAST_PROJECT_STORAGE_KEY) || "",
@@ -978,6 +979,11 @@ export function mountMemosHome(root) {
   }
 
   function handleClick(event) {
+    // Close reaction pickers on clicks outside reaction elements
+    if (!event.target.closest(".memo-reactions-add-wrap, .memo-reactions-picker")) {
+      closeAllReactionPickers();
+    }
+
     const searchResult = closestElement(event.target, "[data-memo-search-result]");
     if (searchResult && root.contains(searchResult)) {
       openMemoSearchResult(searchResult.dataset.memoSearchResult || "");
@@ -1054,6 +1060,7 @@ export function mountMemosHome(root) {
       state.activeTag = "";
       state.editingId = "";
       state.editPreviewVisible = false;
+      state.projectActiveTab = "memos";
       state.commentPreviewVisible = false;
       state.commentingMemoId = "";
       state.commentDraft = "";
@@ -1371,6 +1378,36 @@ export function mountMemosHome(root) {
         break;
       case "togglePin":
         togglePin(memoId);
+        break;
+      case "toggleMemoReactions":
+        toggleMemoReactions(event, memoId, action);
+        break;
+      case "pickMemoReaction":
+        {
+          var emoji = action.dataset.emoji;
+          if (emoji) toggleMemoReaction(memoId, emoji);
+        }
+        break;
+      case "toggleMemoReaction":
+        {
+          var emoji = action.dataset.emoji;
+          if (emoji) toggleMemoReaction(memoId, emoji);
+        }
+        break;
+      case "toggleCommentReactions":
+        toggleCommentReactions(event, commentId, action);
+        break;
+      case "pickCommentReaction":
+        {
+          var emoji = action.dataset.emoji;
+          if (emoji) toggleCommentReaction(commentId, emoji);
+        }
+        break;
+      case "toggleCommentReaction":
+        {
+          var emoji = action.dataset.emoji;
+          if (emoji) toggleCommentReaction(commentId, emoji);
+        }
         break;
       default:
         break;
@@ -1950,7 +1987,7 @@ export function mountMemosHome(root) {
     const targetMemoId = result && result.memoId ? result.memoId : memoId;
     const memo = findMemo(targetMemoId);
     if (!memo) {
-      showToast("找不到 memo 或代码片段");
+      showToast("找不到 memo");
       return;
     }
     closeMemoSearchPalette();
@@ -2029,6 +2066,34 @@ export function mountMemosHome(root) {
         };
       });
 
+    const todoResults = collectTodos(state.memos)
+      .filter(function (todo) {
+        if (!query) return true;
+        return matchesSearchQuery([
+          todo.text,
+          todo.memo.content,
+          todo.memo.id,
+        ].join(" "), query);
+      })
+      .slice(0, 20)
+      .map(function (todo) {
+        return {
+          id: todo.id,
+          key: "todo:" + todo.id,
+          kind: "todo",
+          kindLabel: todo.checked ? "DONE" : "TODO",
+          memoId: todo.memoId || todo.memo.id,
+          priority: todo.checked ? 3 : 1,
+          summary: compactText(todo.text, 112),
+          time: new Date(todo.memo.createdAt).getTime() || 0,
+          title: todo.text,
+          meta: [
+            todo.checked ? "已完成" : "未完成",
+            projectLabel(todo.memo.projectId),
+          ].filter(Boolean).join(" · "),
+        };
+      });
+
     const codeResults = collectCodeBlocks(memoDocumentsWithComments(state.memos, state.comments, state.memos))
       .filter(function (block) {
         if (!query) return block.marked;
@@ -2057,7 +2122,7 @@ export function mountMemosHome(root) {
         };
       });
 
-    return codeResults.concat(memoResults)
+    return todoResults.concat(codeResults, memoResults)
       .sort(function (a, b) {
         if (query && a.priority !== b.priority) return a.priority - b.priority;
         if (!query && a.kind !== b.kind) return a.kind === "memo" ? -1 : 1;
@@ -2292,6 +2357,10 @@ export function mountMemosHome(root) {
   }
 
   function handleKeydown(event) {
+    if (event.key === "Escape" && root.querySelector("[data-reactions-picker]:not([hidden])")) {
+      closeAllReactionPickers();
+      return;
+    }
     if (root.querySelector("[data-inline-task-detail-dialog]") && event.key === "Escape") {
       event.preventDefault();
       closeInlineTaskDetailDialog();
@@ -2386,6 +2455,12 @@ export function mountMemosHome(root) {
 
     if (event.target.matches("[data-project-filter-select]")) {
       selectProjectFilter(event.target.value || "all");
+      return;
+    }
+
+    if (event.target.matches("[data-project-tab]")) {
+      state.projectActiveTab = event.target.dataset.projectTab;
+      renderProjectDetail();
       return;
     }
 
@@ -4664,6 +4739,104 @@ export function mountMemosHome(root) {
     updateMemo(memoId, { pinned: !memo.pinned });
   }
 
+  /* ── Emoji Reactions ── */
+
+  var reactionDocHandler = null;
+
+  function installReactionDocHandler() {
+    uninstallReactionDocHandler();
+    reactionDocHandler = function (event) {
+      if (event.target.closest(".memo-reactions-add-wrap, .memo-reactions-picker")) return;
+      closeAllReactionPickers();
+    };
+    window.setTimeout(function () {
+      document.addEventListener("click", reactionDocHandler, true);
+    }, 0);
+  }
+
+  function uninstallReactionDocHandler() {
+    if (reactionDocHandler) {
+      document.removeEventListener("click", reactionDocHandler, true);
+      reactionDocHandler = null;
+    }
+  }
+
+  function closeAllReactionPickers() {
+    root.querySelectorAll("[data-reactions-picker]").forEach(function (el) {
+      el.hidden = true;
+    });
+    uninstallReactionDocHandler();
+  }
+
+  function toggleMemoReactions(event, memoId, action) {
+    event.stopPropagation();
+    closeAllReactionPickers();
+    if (!action) return;
+    var wrap = action.closest(".memo-reactions-add-wrap");
+    if (!wrap) return;
+    var picker = wrap.querySelector("[data-reactions-picker]");
+    if (!picker) return;
+    picker.hidden = !picker.hidden;
+    if (!picker.hidden) installReactionDocHandler();
+  }
+
+  function toggleCommentReactions(event, commentId, action) {
+    event.stopPropagation();
+    closeAllReactionPickers();
+    if (!action) return;
+    var wrap = action.closest(".memo-reactions-add-wrap");
+    if (!wrap) return;
+    var picker = wrap.querySelector("[data-reactions-picker]");
+    if (!picker) return;
+    picker.hidden = !picker.hidden;
+    if (!picker.hidden) installReactionDocHandler();
+  }
+
+  function memoReactions(memoId) {
+    var memo = findMemo(memoId);
+    return memo && Array.isArray(memo.reactions) ? memo.reactions : [];
+  }
+
+  function commentReactions(commentId) {
+    var comment = findComment(commentId);
+    return comment && Array.isArray(comment.reactions) ? comment.reactions : [];
+  }
+
+  function toggleMemoReaction(memoId, emoji) {
+    var reactions = memoReactions(memoId);
+    var idx = reactions.indexOf(emoji);
+    var next;
+    if (idx >= 0) {
+      next = reactions.slice(0, idx).concat(reactions.slice(idx + 1));
+    } else {
+      next = reactions.concat([emoji]);
+    }
+    updateMemo(memoId, { reactions: next });
+    closeAllReactionPickers();
+  }
+
+  function toggleCommentReaction(commentId, emoji) {
+    var reactions = commentReactions(commentId);
+    var idx = reactions.indexOf(emoji);
+    var next;
+    if (idx >= 0) {
+      next = reactions.slice(0, idx).concat(reactions.slice(idx + 1));
+    } else {
+      next = reactions.concat([emoji]);
+    }
+    updateMemoCommentInVault(commentId, { reactions: next }).then(
+      function (updated) {
+        upsertCommentInState(updated);
+        renderAll();
+      },
+      function (err) {
+        showToast("更新反应失败: " + errorMessage(err));
+        renderAll();
+      },
+    );
+    closeAllReactionPickers();
+  }
+
   function toggleTask(memoId, lineIndex, checked) {
     const memo = findMemo(memoId);
     if (!memo) return;
@@ -5274,6 +5447,7 @@ export function mountMemosHome(root) {
       projectMemos,
       function (memo) { return safeMemoTemplate(memo); },
       projectTasks,
+      state.projectActiveTab,
     );
     els.feedCount.textContent = `${projectMemos.length} 条 memo`;
   }
@@ -7017,7 +7191,19 @@ export function mountDetachedMemoWindow(root, options = {}) {
     openExternalLinkInDefaultBrowser(url);
   }
 
+  /* ── Detached Window: Emoji Reactions ── */
+
+  var detachedCloseAllReactionPickers = function () {
+    root.querySelectorAll("[data-reactions-picker]").forEach(function (el) {
+      el.hidden = true;
+    });
+  };
+
   function handleClick(event) {
+    // Close reaction pickers on clicks outside reaction elements
+    if (!event.target.closest(".memo-reactions-add-wrap, .memo-reactions-picker")) {
+      detachedCloseAllReactionPickers();
+    }
     const control = closestElement(event.target, "[data-window-control]");
     if (control && root.contains(control)) {
       runWindowControl(control.dataset.windowControl);
@@ -7114,6 +7300,66 @@ export function mountDetachedMemoWindow(root, options = {}) {
         event.stopPropagation();
         copyInlineLinkFromAction(action, showToast);
         break;
+      case "toggleMemoReactions":
+        event.stopPropagation();
+        detachedCloseAllReactionPickers();
+        {
+          var wrap = action.closest(".memo-reactions-add-wrap");
+          if (wrap) {
+            var picker = wrap.querySelector("[data-reactions-picker]");
+            if (picker) picker.hidden = !picker.hidden;
+          }
+        }
+        break;
+      case "pickMemoReaction":
+      case "toggleMemoReaction":
+        {
+          var memoId = action.dataset.memoId || (state.memo && state.memo.id);
+          var emoji = action.dataset.emoji;
+          if (memoId && emoji) {
+            var memo = state.memos.find(function (m) { return m.id === memoId; });
+            if (memo) {
+              var rx = Array.isArray(memo.reactions) ? memo.reactions : [];
+              var idx = rx.indexOf(emoji);
+              var next = idx >= 0 ? rx.slice(0, idx).concat(rx.slice(idx + 1)) : rx.concat([emoji]);
+              memo.reactions = next;
+              updateMemoInVault(memoId, { reactions: next }).catch(function () {});
+              renderDetachedMemo();
+            }
+          }
+          detachedCloseAllReactionPickers();
+        }
+        break;
+      case "toggleCommentReactions":
+        event.stopPropagation();
+        detachedCloseAllReactionPickers();
+        {
+          var wrap2 = action.closest(".memo-reactions-add-wrap");
+          if (wrap2) {
+            var picker2 = wrap2.querySelector("[data-reactions-picker]");
+            if (picker2) picker2.hidden = !picker2.hidden;
+          }
+        }
+        break;
+      case "pickCommentReaction":
+      case "toggleCommentReaction":
+        {
+          var commentId = action.dataset.commentId;
+          var emoji2 = action.dataset.emoji;
+          if (commentId && emoji2) {
+            var comment = state.comments.find(function (c) { return c && c.id === commentId; });
+            if (comment) {
+              var rx2 = Array.isArray(comment.reactions) ? comment.reactions : [];
+              var idx2 = rx2.indexOf(emoji2);
+              var next2 = idx2 >= 0 ? rx2.slice(0, idx2).concat(rx2.slice(idx2 + 1)) : rx2.concat([emoji2]);
+              comment.reactions = next2;
+              updateMemoCommentInVault(commentId, { reactions: next2 }).catch(function () {});
+              renderDetachedMemo();
+            }
+          }
+          detachedCloseAllReactionPickers();
+        }
+        break;
       default:
         break;
     }
@@ -7135,6 +7381,10 @@ export function mountDetachedMemoWindow(root, options = {}) {
   }
 
   function handleKeydown(event) {
+    if (event.key === "Escape" && root.querySelector("[data-reactions-picker]:not([hidden])")) {
+      detachedCloseAllReactionPickers();
+      return;
+    }
     if (event.key === "Escape" && root.querySelector("[data-inline-task-detail-dialog]")) {
       event.preventDefault();
       closeDetachedInlineTaskDetailDialog();

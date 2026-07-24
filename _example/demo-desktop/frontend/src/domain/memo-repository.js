@@ -140,6 +140,7 @@ export function updateMemoInVault(id, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, "taskId")) args.taskId = patch.taskId;
   if (Object.prototype.hasOwnProperty.call(patch, "updatedAt")) args.updatedAt = patch.updatedAt;
   if (Object.prototype.hasOwnProperty.call(patch, "alias")) args.alias = patch.alias;
+  if (Object.prototype.hasOwnProperty.call(patch, "reactions")) args.reactions = patch.reactions;
   return globalThis.invoke("/api/memos/update", {
     method: "POST",
     args,

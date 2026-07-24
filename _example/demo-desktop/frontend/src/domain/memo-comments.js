@@ -12,6 +12,7 @@ export function normalizeMemoCommentPayload(comment) {
     memoId,
     path: String(comment.path || ""),
     private: Boolean(comment.private),
+    reactions: Array.isArray(comment.reactions) ? comment.reactions.filter(String) : [],
     references: Array.isArray(comment.references) ? comment.references.map(String).filter(Boolean) : [],
     tags: Array.isArray(comment.tags) ? comment.tags.map(String).filter(Boolean) : [],
     updatedAt: comment.updatedAt || "",
@@ -99,6 +100,7 @@ export function updateMemoCommentInVault(id, patch) {
   const args = { id: commentId };
   if (Object.prototype.hasOwnProperty.call(patch, "content")) args.content = patch.content;
   if (Object.prototype.hasOwnProperty.call(patch, "private")) args.private = Boolean(patch.private);
+  if (Object.prototype.hasOwnProperty.call(patch, "reactions")) args.reactions = patch.reactions;
   return globalThis.invoke("/api/memo-comments/update", {
     method: "POST",
     args,

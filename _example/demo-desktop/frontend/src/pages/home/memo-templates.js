@@ -126,6 +126,7 @@ function linksDomainBarTemplate(activeDomain) {
 }
 
 const MEMO_COMMENT_PREVIEW_LIMIT = 3;
+const REACTIONS = ["👍", "👎", "😄", "🎉", "❤️", "🚀", "👀"];
 
 function detachedMemoWindowTemplate() {
   return `
@@ -157,6 +158,15 @@ function detachedMemoWindowTemplate() {
         </button>
         <input class="memo-hidden-input" type="file" multiple data-window-comment-file-input />
       </form>
+      <div class="memo-command-palette" data-memo-search-palette hidden>
+        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo、代办和代码片段">
+          <label class="memo-command-search">
+            ${SVG.search}
+            <input type="search" data-memo-search-input placeholder="搜索 memo / 代办 / 代码片段" autocomplete="off" />
+          </label>
+          <div class="memo-command-results" data-memo-search-results role="listbox"></div>
+        </div>
+      </div>
       <div class="memo-toast" data-toast role="status"></div>
     </div>
   `;
@@ -179,6 +189,7 @@ function detachedMemoCardTemplate(memo, renderContext, options = {}) {
           <div>
             <div class="memo-author-name">You</div>
             <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+            ${memoReactionsTemplate(memo)}
           </div>
         </div>
         <div class="memo-card-meta memo-window-card-meta">
@@ -256,6 +267,7 @@ function detachedMemoCommentTemplate(comment, renderContext, editingCommentId = 
                 </button>
               </div>
             </div>
+            ${commentReactionsTemplate(comment)}
           `
       }
     </article>
@@ -516,10 +528,10 @@ function shellTemplate() {
         </section>
       </aside>
       <div class="memo-command-palette" data-memo-search-palette hidden>
-        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo 和代码片段">
+        <div class="memo-command-panel" role="dialog" aria-modal="true" aria-label="搜索 memo、代办和代码片段">
           <label class="memo-command-search">
             ${SVG.search}
-            <input type="search" data-memo-search-input placeholder="搜索 memo / 代码片段" autocomplete="off" />
+            <input type="search" data-memo-search-input placeholder="搜索 memo / 代办 / 代码片段" autocomplete="off" />
           </label>
           <div class="memo-command-results" data-memo-search-results role="listbox"></div>
         </div>
@@ -572,7 +584,8 @@ function projectSidebarItemTemplate(project, count, isActive) {
   `;
 }
 
-function projectDetailViewTemplate(project, memos, renderMemoCard, todos) {
+function projectDetailViewTemplate(project, memos, renderMemoCard, todos, activeTab) {
+  const tab = activeTab || "memos";
   const color = normalizeProjectColor(project.color);
   const memoCards = memos.length
     ? memos.map((memo) => renderMemoCard(memo)).join("")
@@ -589,10 +602,6 @@ function projectDetailViewTemplate(project, memos, renderMemoCard, todos) {
   return `
     <div class="memo-project-detail">
       <header class="memo-project-detail-header">
-        <button class="memo-icon-text-button" type="button" data-action="backToMemos">
-          ${SVG.chevronLeft || "←"}
-          <span>返回</span>
-        </button>
         <div class="memo-project-detail-title">
           <span class="memo-project-dot memo-project-dot--lg" style="--project-color: ${escapeAttr(color)}"></span>
           <h2>${escapeHTML(project.name)}</h2>
@@ -602,33 +611,19 @@ function projectDetailViewTemplate(project, memos, renderMemoCard, todos) {
           <button class="memo-icon-text-button" type="button" data-action="archiveProject" data-project-id="${escapeAttr(project.id)}">归档</button>
         </div>
       </header>
-      <div class="memo-project-stats">
-        <div class="memo-project-stat">
-          <strong>${memos.length}</strong>
-          <span>Memos</span>
-        </div>
-        <div class="memo-project-stat">
-          <strong>${todos.filter((t) => t.status !== "completed").length}</strong>
-          <span>待办</span>
-        </div>
-        <div class="memo-project-stat">
-          <strong>${todos.filter((t) => t.status === "completed").length}</strong>
-          <span>已完成</span>
-        </div>
+      <div class="memo-project-tabs">
+        <button class="memo-project-tab ${tab === "memos" ? "is-active" : ""}" type="button" data-project-tab="memos">Memo <span class="memo-project-tab-count">${memos.length}</span></button>
+        <button class="memo-project-tab ${tab === "tasks" ? "is-active" : ""}" type="button" data-project-tab="tasks">待办 <span class="memo-project-tab-count">${todos.length}</span></button>
       </div>
-      <section class="memo-project-detail-section">
-        <div class="memo-project-detail-section-head">
-          <h3>Memos (${memos.length})</h3>
-          <button class="memo-primary-button" type="button" data-action="createMemo">新建</button>
+      <div class="memo-project-tab-panel ${tab === "memos" ? "" : "hidden"}" data-project-tab-panel="memos">
+        <div class="memo-project-tab-toolbar">
+          <button class="memo-primary-button" type="button" data-action="createMemo">新建 Memo</button>
         </div>
         <div class="memo-project-memo-list">${memoCards}</div>
-      </section>
-      <section class="memo-project-detail-section">
-        <div class="memo-project-detail-section-head">
-          <h3>待办 (${todos.length})</h3>
-        </div>
+      </div>
+      <div class="memo-project-tab-panel ${tab === "tasks" ? "" : "hidden"}" data-project-tab-panel="tasks">
         <div class="memo-project-todo-list">${todoItems}</div>
-      </section>
+      </div>
     </div>
   `;
 }
@@ -725,6 +720,52 @@ function calendarTemplate(monthDate, memos, selectedDate, weekStart) {
   `;
 }
 
+function memoReactionsTemplate(memo) {
+  const reactions = Array.isArray(memo.reactions) ? memo.reactions : [];
+  const activeSet = new Set(reactions);
+
+  const badges = reactions.map(function (emoji) {
+    return `<button class="memo-reaction-badge is-active" type="button" data-memo-id="${escapeAttr(memo.id)}" data-action="toggleMemoReaction" data-emoji="${escapeAttr(emoji)}">${emoji}</button>`;
+  }).join("");
+
+  const picker = REACTIONS.map(function (emoji) {
+    return `<button class="memo-picker-emoji${activeSet.has(emoji) ? " is-active" : ""}" type="button" data-memo-id="${escapeAttr(memo.id)}" data-action="pickMemoReaction" data-emoji="${escapeAttr(emoji)}">${emoji}</button>`;
+  }).join("");
+
+  return `
+    <div class="memo-reactions" data-memo-id="${escapeAttr(memo.id)}">
+      ${badges ? `<div class="memo-reactions-badges">${badges}</div>` : ""}
+      <div class="memo-reactions-add-wrap">
+        <button class="memo-reaction-add-btn" type="button" data-memo-id="${escapeAttr(memo.id)}" data-action="toggleMemoReactions" title="添加反应" aria-label="添加反应">${SVG.plus}</button>
+        <div class="memo-reactions-picker" data-reactions-picker hidden>${picker}</div>
+      </div>
+    </div>
+  `;
+}
+
+function commentReactionsTemplate(comment) {
+  const reactions = Array.isArray(comment.reactions) ? comment.reactions : [];
+  const activeSet = new Set(reactions);
+
+  const badges = reactions.map(function (emoji) {
+    return `<button class="memo-reaction-badge is-active" type="button" data-comment-id="${escapeAttr(comment.id)}" data-action="toggleCommentReaction" data-emoji="${escapeAttr(emoji)}">${emoji}</button>`;
+  }).join("");
+
+  const picker = REACTIONS.map(function (emoji) {
+    return `<button class="memo-picker-emoji${activeSet.has(emoji) ? " is-active" : ""}" type="button" data-comment-id="${escapeAttr(comment.id)}" data-action="pickCommentReaction" data-emoji="${escapeAttr(emoji)}">${emoji}</button>`;
+  }).join("");
+
+  return `
+    <div class="memo-reactions memo-reactions--comment" data-comment-id="${escapeAttr(comment.id)}">
+      ${badges ? `<div class="memo-reactions-badges">${badges}</div>` : ""}
+      <div class="memo-reactions-add-wrap">
+        <button class="memo-reaction-add-btn" type="button" data-comment-id="${escapeAttr(comment.id)}" data-action="toggleCommentReactions" title="添加反应" aria-label="添加反应">${SVG.plus}</button>
+        <div class="memo-reactions-picker" data-reactions-picker hidden>${picker}</div>
+      </div>
+    </div>
+  `;
+}
+
 function memoTemplate(memo, editingId, renderContext, expanded = false, projects = [], options = {}) {
   const visibility = VISIBILITY[memo.visibility] || VISIBILITY[DEFAULT_VISIBILITY];
   const isSecret = memo.private && (memo.visibility || DEFAULT_VISIBILITY) === "PRIVATE";
@@ -756,6 +797,7 @@ function memoTemplate(memo, editingId, renderContext, expanded = false, projects
         <div class="memo-card-author-info">
           <span class="memo-author-name">You</span>
           <time datetime="${escapeAttr(memo.createdAt)}">${formatRelativeDate(memo.createdAt)}</time>
+          ${!editing && !isPrivateVisible ? memoReactionsTemplate(memo) : ""}
         </div>
         <div class="memo-card-meta">
           ${showVisibility ? `<span class="memo-visibility">${SVG[displayVisibility.icon]} ${displayVisibility.label}</span>` : ""}
@@ -981,6 +1023,7 @@ function memoCommentTemplate(comment, renderContext, editingCommentId = "", opti
               </div>
               <div class="memo-content memo-comment-content">${content}</div>
             </div>
+            ${!isPrivateVisible ? commentReactionsTemplate(comment) : ""}
           `
       }
     </article>
@@ -1758,6 +1801,8 @@ export {
   linkTemplate,
   linksDomainBarTemplate,
   memoCommentTemplate,
+  memoReactionsTemplate,
+  commentReactionsTemplate,
   memoTemplate,
   parseHost,
   pinDialogTemplate,
