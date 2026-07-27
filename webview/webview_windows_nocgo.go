@@ -14,6 +14,9 @@ func open_window(opts *BoxWebviewOptions) {
 
 func focus_window(opts *BoxWebviewOptions) bool { return false }
 
+func sendCallback(id, result string)    {}
+func sendMessage(payload string) bool   { return false }
+
 func Terminate()                   {}
 func setTitle(title string)        {}
 func setSize(width, height int)    {}
