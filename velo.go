@@ -21,7 +21,6 @@ import (
 
 	"github.com/ltaoo/velo/asset"
 	"github.com/ltaoo/velo/buildcfg"
-	"github.com/ltaoo/velo/database"
 	"github.com/ltaoo/velo/frontendserver"
 	"github.com/ltaoo/velo/store"
 	"github.com/ltaoo/velo/webview"
@@ -470,19 +469,43 @@ func (b *Box) webviewURL(optURL, pathname string) string {
 
 // UseDatabase opens a database connection, runs migrations, and stores the
 // resulting *gorm.DB on b.DB. Apps opt-in by calling this method.
-func (b *Box) UseDatabase(cfg *database.DBConfig, migrations *embed.FS) error {
-	db, err := database.NewDatabase(cfg)
+func (b *Box) UseDatabase(cfg *DBConfig, migrations *embed.FS) error {
+	db, err := NewDatabase(cfg)
 	if err != nil {
 		return err
 	}
 	if migrations != nil {
-		m := database.NewMigrator(cfg, migrations)
+		m := NewMigrator(cfg, migrations)
 		if err := m.MigrateUp(db); err != nil {
 			return err
 		}
 	}
 	b.DB = db
 	return nil
+}
+
+// Migrate opens a database and applies embedded migrations.
+//
+// VeloDatabaseOpt supports SQLite's path-based configuration. For database
+// types that need connection details such as MySQL or Postgres, use
+// UseDatabase with a DBConfig instead.
+func (b *Box) Migrate(opt *VeloDatabaseOpt) error {
+	if opt == nil {
+		return fmt.Errorf("database options are required")
+	}
+	if opt.DBType == "" {
+		return fmt.Errorf("database type is not configured")
+	}
+	if opt.DBType != DBTypeSQLite {
+		return fmt.Errorf("Migrate with a database path only supports SQLite; use UseDatabase for %s", opt.DBType)
+	}
+	if opt.DBPath == "" {
+		return fmt.Errorf("database path is required")
+	}
+	return b.UseDatabase(&DBConfig{
+		Type: opt.DBType,
+		Path: opt.DBPath,
+	}, opt.Migrations)
 }
 
 func (b *Box) Get(name string, handler Handler) {
