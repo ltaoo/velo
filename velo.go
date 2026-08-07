@@ -196,8 +196,14 @@ func LoadAppConfig(embedded ...[]byte) *AppConfig {
 	if len(embedded) > 0 && len(embedded[0]) > 0 {
 		data = embedded[0]
 	} else {
-		var err error
-		data, err = os.ReadFile("app-config.json")
+		configPath, legacy, err := buildcfg.ResolveConfigPath(".")
+		if err != nil {
+			return &AppConfig{}
+		}
+		if legacy {
+			fmt.Fprintf(os.Stderr, "warning: %s is deprecated; rename it to %s\n", buildcfg.LegacyConfigFileName, buildcfg.ConfigFileName)
+		}
+		data, err = os.ReadFile(configPath)
 		if err != nil {
 			return &AppConfig{}
 		}

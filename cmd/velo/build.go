@@ -15,13 +15,14 @@ import (
 )
 
 type darwinCreds struct {
-	AppleID        string
-	TeamID         string
-	P12File        string
-	P12Password    string
-	P8File         string
-	APIKeyID       string
-	APIKeyIssuerID string
+	AppleID         string
+	TeamID          string
+	SigningIdentity string
+	P12File         string
+	P12Password     string
+	P8File          string
+	APIKeyID        string
+	APIKeyIssuerID  string
 }
 
 func loadEnv(projectPath string) map[string]string {
@@ -74,13 +75,14 @@ func decodeBase64ToTempFile(b64, prefix, suffix string) (string, error) {
 func loadDarwinCreds(projectPath string) *darwinCreds {
 	env := loadEnv(projectPath)
 	c := &darwinCreds{
-		AppleID:        env["APPLE_ID"],
-		TeamID:         envOr(env, "TEAM_ID", "APNS_TEAM_ID"),
-		P12File:        env["P12_FILE"],
-		P12Password:    envOr(env, "P12_PASSWORD", "MAC_CERT_PASSWORD"),
-		P8File:         env["P8_FILE"],
-		APIKeyID:       envOr(env, "API_KEY_ID", "APNS_KEY_ID"),
-		APIKeyIssuerID: env["API_KEY_ISSUER_ID"],
+		AppleID:         env["APPLE_ID"],
+		TeamID:          envOr(env, "TEAM_ID", "APNS_TEAM_ID"),
+		SigningIdentity: envOr(env, "MAC_CERT_IDENTITY", "APPLE_SIGNING_IDENTITY"),
+		P12File:         env["P12_FILE"],
+		P12Password:     envOr(env, "P12_PASSWORD", "MAC_CERT_PASSWORD"),
+		P8File:          env["P8_FILE"],
+		APIKeyID:        envOr(env, "API_KEY_ID", "APNS_KEY_ID"),
+		APIKeyIssuerID:  env["API_KEY_ISSUER_ID"],
 	}
 
 	// Support base64-encoded P12
@@ -131,7 +133,10 @@ func runBuild(projectPath, platform, outDir, versionOverride string) error {
 		return err
 	}
 
-	configPath := filepath.Join(projectPath, "app-config.json")
+	configPath, err := resolveProjectConfig(projectPath)
+	if err != nil {
+		return err
+	}
 	cfg, err := buildcfg.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -197,7 +202,7 @@ func runBuild(projectPath, platform, outDir, versionOverride string) error {
 			fmt.Printf("version: %s (from git tag)\n", version)
 		} else {
 			version = cfg.App.Version
-			fmt.Printf("version: %s (from app-config.json)\n", version)
+			fmt.Printf("version: %s (from %s)\n", version, filepath.Base(configPath))
 		}
 	}
 
@@ -360,7 +365,7 @@ func runCmdOutput(name string, args ...string) (string, error) {
 }
 
 func signDarwinApp(creds *darwinCreds, appDir, appName, entitlementsPath string) error {
-	identity := fmt.Sprintf("Developer ID Application: %s (%s)", creds.AppleID, creds.TeamID)
+	identity := darwinSigningIdentity(creds)
 
 	// Setup temporary keychain if P12 is provided
 	keychainPath := "/tmp/velo-build.keychain"
@@ -469,13 +474,20 @@ func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName
 }
 
 func signDarwinDMG(creds *darwinCreds, dmgPath string) error {
-	identity := fmt.Sprintf("Developer ID Application: %s (%s)", creds.AppleID, creds.TeamID)
+	identity := darwinSigningIdentity(creds)
 	fmt.Println("signing DMG...")
 	if err := runCmd("codesign", "--sign", identity, "--timestamp", dmgPath); err != nil {
 		return fmt.Errorf("signing DMG: %w", err)
 	}
 	fmt.Println("  ✓ DMG signed")
 	return nil
+}
+
+func darwinSigningIdentity(creds *darwinCreds) string {
+	if creds.SigningIdentity != "" {
+		return creds.SigningIdentity
+	}
+	return fmt.Sprintf("Developer ID Application: %s (%s)", creds.AppleID, creds.TeamID)
 }
 
 func notarizeDarwinDMG(creds *darwinCreds, dmgPath string) error {

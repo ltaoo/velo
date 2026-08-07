@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Get app name from config
-APP_NAME=$(jq -r '.app.name' app-config.json)
+APP_NAME=$(jq -r '.app.name' velo.json)
 
 echo "App: $APP_NAME"
 echo ""

@@ -5,7 +5,7 @@ This directory contains scripts for building, releasing, and maintaining the app
 ## Scripts Overview
 
 - `generate_manifest.sh` / `generate_manifest.py` - Generate update manifests from GitHub Releases
-- `generate-configs.sh` - Generate build configurations from `app-config.json`
+- `generate-configs.sh` - Generate build configurations from `velo.json`
 - `generate-icons.sh` - Generate platform-specific icons from source image
 - `create_dmg.sh` - Create macOS DMG installer
 - `test_update_server.go` - Test update server functionality
@@ -34,7 +34,7 @@ Automatically generates platform-specific icon files from a single source image.
 ./scripts/generate-icons.sh
 ```
 
-**Output:** Files are generated in `.build/icons/` and copied to `build/` for compatibility.
+**Output:** Files are generated in `.build/icons/`.
 
 **Documentation:** See [docs/ICON_GENERATION.md](../docs/ICON_GENERATION.md) for details.
 

@@ -10,12 +10,32 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "app-config.json", "path to app-config.json")
+	configPathFlag := flag.String("config", "", "path to Velo configuration (default: velo.json)")
 	outDir := flag.String("out", ".build", "output directory")
 	icons := flag.Bool("icons", false, "generate icons from source image")
 	flag.Parse()
 
-	cfg, err := buildcfg.Load(*configPath)
+	configPath := *configPathFlag
+	if configPath == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		var legacy bool
+		configPath, legacy, err = buildcfg.ResolveConfigPath(wd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		if legacy {
+			fmt.Fprintf(os.Stderr, "warning: %s is deprecated; rename it to %s\n", buildcfg.LegacyConfigFileName, buildcfg.ConfigFileName)
+		}
+	} else if filepath.Base(configPath) == buildcfg.LegacyConfigFileName {
+		fmt.Fprintf(os.Stderr, "warning: %s is deprecated; rename it to %s\n", buildcfg.LegacyConfigFileName, buildcfg.ConfigFileName)
+	}
+
+	cfg, err := buildcfg.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -25,7 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	baseDir := filepath.Dir(*configPath)
+	baseDir := filepath.Dir(configPath)
 	if baseDir == "" || baseDir == "." {
 		baseDir, _ = os.Getwd()
 	} else if !filepath.IsAbs(baseDir) {

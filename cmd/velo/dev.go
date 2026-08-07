@@ -22,7 +22,11 @@ func (c crlfWriter) Write(p []byte) (int, error) {
 }
 
 func loadAppName(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "app-config.json"))
+	configPath, err := resolveProjectConfig(dir)
+	if err != nil {
+		return "app"
+	}
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return "app"
 	}

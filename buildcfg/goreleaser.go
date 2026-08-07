@@ -8,7 +8,7 @@ import (
 	"text/template"
 )
 
-var goreleaserTmpl = template.Must(template.New("goreleaser").Parse(`# Auto-generated from app-config.json
+var goreleaserTmpl = template.Must(template.New("goreleaser").Parse(`# Auto-generated from velo.json
 version: 2
 
 project_name: {{.ProjectName}}

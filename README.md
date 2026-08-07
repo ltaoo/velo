@@ -55,7 +55,7 @@ velo build -out build
 velo build -version 1.2.3
 ```
 
-The `velo build` command reads `app-config.json` from the project directory, generates icons, platform configs, and compiles binaries for the target platform(s).
+The `velo build` command reads `velo.json` from the project directory, generates icons, platform configs, and compiles binaries for the target platform(s). The legacy `app-config.json` name remains supported with a deprecation warning.
 
 ## Building the Example Project
 
@@ -78,15 +78,15 @@ The example project uses `replace` directive in `go.mod` to reference the local 
 
 ```
 _example/simple/
-├── app-config.json    # Application configuration (name, platforms, update, etc.)
+├── velo.json          # Application configuration (name, platforms, update, etc.)
 ├── main.go            # Application entry point
 ├── frontend/          # Web frontend assets
 └── go.mod
 ```
 
-### app-config.json
+### velo.json
 
-The `app-config.json` file configures your application. Key sections:
+The `velo.json` file configures your application. Key sections:
 
 - `app` — Name, version, description, icon
 - `binary` — Output binary name

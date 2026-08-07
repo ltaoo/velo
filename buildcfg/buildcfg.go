@@ -4,9 +4,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ltaoo/velo/updater/types"
 )
+
+const (
+	ConfigFileName       = "velo.json"
+	LegacyConfigFileName = "app-config.json"
+)
+
+// ResolveConfigPath returns the preferred Velo configuration file in dir.
+// app-config.json remains supported as a compatibility fallback.
+func ResolveConfigPath(dir string) (path string, legacy bool, err error) {
+	preferred := filepath.Join(dir, ConfigFileName)
+	if _, statErr := os.Stat(preferred); statErr == nil {
+		return preferred, false, nil
+	} else if !os.IsNotExist(statErr) {
+		return "", false, fmt.Errorf("checking %s: %w", preferred, statErr)
+	}
+
+	legacyPath := filepath.Join(dir, LegacyConfigFileName)
+	if _, statErr := os.Stat(legacyPath); statErr == nil {
+		return legacyPath, true, nil
+	} else if !os.IsNotExist(statErr) {
+		return "", false, fmt.Errorf("checking %s: %w", legacyPath, statErr)
+	}
+
+	return "", false, fmt.Errorf(
+		"Velo configuration not found in %s (expected %s; legacy %s is also supported)",
+		dir,
+		ConfigFileName,
+		LegacyConfigFileName,
+	)
+}
 
 type AppSection struct {
 	Name        string `json:"name"`

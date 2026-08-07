@@ -34,6 +34,7 @@ var (
 	windowWebViewMap  = make(map[uintptr]cocoa.ID)
 	windowDelegateMap = make(map[uintptr]cocoa.ID)
 	mapLock           sync.RWMutex
+	registerClasses   sync.Once
 
 	quitOnLastWindowClosed = true
 )
@@ -46,54 +47,56 @@ func init() {
 	// GORM/SQLite create goroutines during their init), causing NSWindow creation
 	// to crash with "NSWindow should only be instantiated on the main thread!".
 	runtime.LockOSThread()
+}
 
-	fmt.Fprintln(os.Stderr, "DEBUG: webview_darwin_pure.go init()")
+func registerNativeClasses() {
+	registerClasses.Do(func() {
+		// Register VeloSchemeHandler class
+		handlerClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloSchemeHandler", 0)
+		cocoa.AddMethod(handlerClass, cocoa.RegisterName("webView:startURLSchemeTask:"), startURLSchemeTask, "v@:@@")
+		cocoa.AddMethod(handlerClass, cocoa.RegisterName("webView:stopURLSchemeTask:"), stopURLSchemeTask, "v@:@@")
+		cocoa.RegisterClassPair(handlerClass)
+		debugln("DEBUG: VeloSchemeHandler registered")
 
-	// Register VeloSchemeHandler class
-	handlerClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloSchemeHandler", 0)
-	cocoa.AddMethod(handlerClass, cocoa.RegisterName("webView:startURLSchemeTask:"), startURLSchemeTask, "v@:@@")
-	cocoa.AddMethod(handlerClass, cocoa.RegisterName("webView:stopURLSchemeTask:"), stopURLSchemeTask, "v@:@@")
-	cocoa.RegisterClassPair(handlerClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloSchemeHandler registered")
+		// Register VeloScriptMessageHandler class
+		scriptHandlerClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloScriptMessageHandler", 0)
+		cocoa.AddMethod(scriptHandlerClass, cocoa.RegisterName("userContentController:didReceiveScriptMessage:"), didReceiveScriptMessage, "v@:@@")
+		cocoa.RegisterClassPair(scriptHandlerClass)
+		debugln("DEBUG: VeloScriptMessageHandler registered")
 
-	// Register VeloScriptMessageHandler class
-	scriptHandlerClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloScriptMessageHandler", 0)
-	cocoa.AddMethod(scriptHandlerClass, cocoa.RegisterName("userContentController:didReceiveScriptMessage:"), didReceiveScriptMessage, "v@:@@")
-	cocoa.RegisterClassPair(scriptHandlerClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloScriptMessageHandler registered")
+		// Register VeloAppDelegate class
+		appDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloAppDelegate", 0)
+		cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), applicationShouldTerminateAfterLastWindowClosed, "B@:@")
+		cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldHandleReopen:hasVisibleWindows:"), applicationShouldHandleReopen, "B@:@B")
+		cocoa.RegisterClassPair(appDelegateClass)
+		debugln("DEBUG: VeloAppDelegate registered")
 
-	// Register VeloAppDelegate class
-	appDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloAppDelegate", 0)
-	cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldTerminateAfterLastWindowClosed:"), applicationShouldTerminateAfterLastWindowClosed, "B@:@")
-	cocoa.AddMethod(appDelegateClass, cocoa.RegisterName("applicationShouldHandleReopen:hasVisibleWindows:"), applicationShouldHandleReopen, "B@:@B")
-	cocoa.RegisterClassPair(appDelegateClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloAppDelegate registered")
+		// Register VeloWindowDelegate class for named-window cleanup on close and focus/blur events.
+		windowDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloWindowDelegate", 0)
+		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowWillClose:"), windowWillClose, "v@:@")
+		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidBecomeKey:"), windowDidBecomeKey, "v@:@")
+		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidResignKey:"), windowDidResignKey, "v@:@")
+		cocoa.RegisterClassPair(windowDelegateClass)
+		debugln("DEBUG: VeloWindowDelegate registered")
 
-	// Register VeloWindowDelegate class for named-window cleanup on close and focus/blur events.
-	windowDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloWindowDelegate", 0)
-	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowWillClose:"), windowWillClose, "v@:@")
-	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidBecomeKey:"), windowDidBecomeKey, "v@:@")
-	cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidResignKey:"), windowDidResignKey, "v@:@")
-	cocoa.RegisterClassPair(windowDelegateClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloWindowDelegate registered")
+		// Register VeloPanel class for transient launchers that need keyboard focus
+		// without activating the whole application.
+		panelClass := cocoa.AllocateClassPair(cocoa.GetClass("NSPanel"), "VeloPanel", 0)
+		cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeKeyWindow"), veloPanelCanBecomeKeyWindow, "B@:")
+		cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeMainWindow"), veloPanelCanBecomeMainWindow, "B@:")
+		cocoa.RegisterClassPair(panelClass)
+		debugln("DEBUG: VeloPanel registered")
 
-	// Register VeloPanel class for transient launchers that need keyboard focus
-	// without activating the whole application.
-	panelClass := cocoa.AllocateClassPair(cocoa.GetClass("NSPanel"), "VeloPanel", 0)
-	cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeKeyWindow"), veloPanelCanBecomeKeyWindow, "B@:")
-	cocoa.AddMethod(panelClass, cocoa.RegisterName("canBecomeMainWindow"), veloPanelCanBecomeMainWindow, "B@:")
-	cocoa.RegisterClassPair(panelClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloPanel registered")
-
-	// Register VeloWebView class (subclass of WKWebView with drag-drop support)
-	webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
-	cocoa.AddMethod(webViewClass, cocoa.RegisterName("acceptsFirstMouse:"), veloWebViewAcceptsFirstMouse, "B@:@")
-	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingEntered:"), veloWebViewDraggingEntered, "Q@:@")
-	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingUpdated:"), veloWebViewDraggingUpdated, "Q@:@")
-	cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingExited:"), veloWebViewDraggingExited, "v@:@")
-	cocoa.AddMethod(webViewClass, cocoa.RegisterName("performDragOperation:"), veloWebViewPerformDragOperation, "B@:@")
-	cocoa.RegisterClassPair(webViewClass)
-	fmt.Fprintln(os.Stderr, "DEBUG: VeloWebView registered")
+		// Register VeloWebView class (subclass of WKWebView with drag-drop support)
+		webViewClass := cocoa.AllocateClassPair(cocoa.GetClass("WKWebView"), "VeloWebView", 0)
+		cocoa.AddMethod(webViewClass, cocoa.RegisterName("acceptsFirstMouse:"), veloWebViewAcceptsFirstMouse, "B@:@")
+		cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingEntered:"), veloWebViewDraggingEntered, "Q@:@")
+		cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingUpdated:"), veloWebViewDraggingUpdated, "Q@:@")
+		cocoa.AddMethod(webViewClass, cocoa.RegisterName("draggingExited:"), veloWebViewDraggingExited, "v@:@")
+		cocoa.AddMethod(webViewClass, cocoa.RegisterName("performDragOperation:"), veloWebViewPerformDragOperation, "B@:@")
+		cocoa.RegisterClassPair(webViewClass)
+		debugln("DEBUG: VeloWebView registered")
+	})
 }
 
 // Callback for applicationShouldTerminateAfterLastWindowClosed:
@@ -167,7 +170,7 @@ func veloPanelCanBecomeMainWindow(self, _cmd uintptr) uintptr {
 
 // Callback for webView:startURLSchemeTask:
 func startURLSchemeTask(self, _cmd, webView, task uintptr) {
-	fmt.Fprintf(os.Stderr, "DEBUG: startURLSchemeTask called\n")
+	debugf("DEBUG: startURLSchemeTask called\n")
 	// Get options for this webview
 	mapLock.RLock()
 	opts := webviewMap[webView]
@@ -178,7 +181,7 @@ func startURLSchemeTask(self, _cmd, webView, task uintptr) {
 	}
 
 	if opts == nil || opts.Mux == nil {
-		fmt.Fprintf(os.Stderr, "DEBUG: Mux is nil\n")
+		debugf("DEBUG: Mux is nil\n")
 		return
 	}
 
@@ -191,23 +194,23 @@ func startURLSchemeTask(self, _cmd, webView, task uintptr) {
 	nsURL := req.Send(cocoa.RegisterName("URL"))
 	nsString := nsURL.Send(cocoa.RegisterName("absoluteString"))
 	urlStr := cocoa.NSStringToString(nsString)
-	fmt.Fprintf(os.Stderr, "DEBUG: URL scheme request: %s\n", urlStr)
+	debugf("DEBUG: URL scheme request: %s\n", urlStr)
 
 	go func() {
 		u, err := url.Parse(urlStr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: Failed to parse URL: %v\n", err)
+			debugf("DEBUG: Failed to parse URL: %v\n", err)
 			return
 		}
 
 		// Map custom scheme to http for Mux
 		u.Scheme = "http"
 
-		fmt.Fprintf(os.Stderr, "DEBUG: Rewritten URL: %s\n", u.String())
+		debugf("DEBUG: Rewritten URL: %s\n", u.String())
 
 		goReq, err := http.NewRequest("GET", u.String(), nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: Failed to create request: %v\n", err)
+			debugf("DEBUG: Failed to create request: %v\n", err)
 			return
 		}
 
@@ -454,7 +457,7 @@ func (w *schemeResponseWriter) Write(data []byte) (int, error) {
 		copy(dataCopy, data)
 
 		cocoa.DispatchMain(func() {
-			fmt.Fprintf(os.Stderr, "DEBUG: schemeResponseWriter.Write: %d bytes\n", len(dataCopy))
+			debugf("DEBUG: schemeResponseWriter.Write: %d bytes\n", len(dataCopy))
 			nsData := cocoa.BytesToNSData(dataCopy)
 			w.task.Send(cocoa.RegisterName("didReceiveData:"), nsData)
 		})
@@ -503,17 +506,18 @@ func (w *schemeResponseWriter) Finish() {
 		w.WriteHeader(http.StatusOK)
 	}
 	cocoa.DispatchMain(func() {
-		fmt.Fprintln(os.Stderr, "DEBUG: schemeResponseWriter.Finish calling didFinish")
+		debugln("DEBUG: schemeResponseWriter.Finish calling didFinish")
 		w.task.Send(cocoa.RegisterName("didFinish"))
 	})
 }
 
 // Main implementation for Darwin using purego
 func open_webview(opts *BoxWebviewOptions) {
-	fmt.Println("DEBUG: open_webview started")
+	debugln("DEBUG: open_webview started")
 	// Ensure we run on main thread
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	registerNativeClasses()
 
 	// Relaunch from temp .app bundle for proper Dock name
 	if opts.AppName != "" && !isRunningInAppBundle() {
@@ -537,7 +541,7 @@ func open_webview(opts *BoxWebviewOptions) {
 
 	// Initialize NSApplication
 	nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
-	fmt.Println("DEBUG: NSApplication initialized")
+	debugln("DEBUG: NSApplication initialized")
 
 	// Set Application Delegate
 	appDelegate := cocoa.GetClass("VeloAppDelegate").Send(cocoa.RegisterName("alloc")).Send(cocoa.RegisterName("init"))
@@ -555,9 +559,9 @@ func open_webview(opts *BoxWebviewOptions) {
 	nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
 
 	// Set Application Icon if provided
-	fmt.Printf("DEBUG: open_webview IconData length: %d\n", len(opts.IconData))
+	debugf("DEBUG: open_webview IconData length: %d\n", len(opts.IconData))
 	if len(opts.IconData) > 0 {
-		fmt.Println("DEBUG: Setting application icon")
+		debugln("DEBUG: Setting application icon")
 		nsData := cocoa.BytesToNSData(opts.IconData)
 		nsImage := cocoa.GetClass("NSImage").Send(cocoa.RegisterName("alloc")).Send(cocoa.RegisterName("initWithData:"), nsData)
 		if nsImage == 0 {
@@ -567,14 +571,14 @@ func open_webview(opts *BoxWebviewOptions) {
 		}
 	}
 
-	fmt.Println("DEBUG: Creating window...")
+	debugln("DEBUG: Creating window...")
 	createWindow(opts, true)
-	fmt.Println("DEBUG: Window created")
+	debugln("DEBUG: Window created")
 
 	// Run Application
-	fmt.Println("DEBUG: Starting run loop...")
+	debugln("DEBUG: Starting run loop...")
 	nsApp.Send(cocoa.RegisterName("run"))
-	fmt.Println("DEBUG: Run loop ended")
+	debugln("DEBUG: Run loop ended")
 }
 
 func installStandardApplicationMenu(nsApp cocoa.ID, appName string) {
@@ -969,13 +973,15 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	if scriptHandler == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: Failed to allocate VeloScriptMessageHandler")
 	} else {
-		fmt.Fprintf(os.Stderr, "DEBUG: VeloScriptMessageHandler allocated: %d\n", scriptHandler)
+		debugf("DEBUG: VeloScriptMessageHandler allocated: %d\n", scriptHandler)
 	}
 	userContentController.Send(cocoa.RegisterName("addScriptMessageHandler:name:"), scriptHandler, cocoa.StringToNSString("go"))
-	fmt.Fprintln(os.Stderr, "DEBUG: Script message handler 'go' added")
+	debugln("DEBUG: Script message handler 'go' added")
 
 	// Inject setup script
-	setupScript := `
+	setupScript := ""
+	if debugEnabled() {
+		setupScript = `
 		console.log("DEBUG: setupScript running");
 		try {
 			if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.go) {
@@ -988,6 +994,9 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		} catch (e) {
 			console.log("DEBUG: Error checking messageHandlers: " + e);
 		}
+	`
+	}
+	setupScript += `
 		window.external = {
 			invoke: function(msg) {
 				window.webkit.messageHandlers.go.postMessage(msg);
@@ -1046,9 +1055,9 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	}
 
 	// Load URL
-	fmt.Fprintf(os.Stderr, "DEBUG: Loading URL: %s\n", opts.URL)
+	debugf("DEBUG: Loading URL: %s\n", opts.URL)
 	loadURLInWebView(wkWebView, opts.URL)
-	fmt.Fprintln(os.Stderr, "DEBUG: URL request loaded (sent)")
+	debugln("DEBUG: URL request loaded (sent)")
 }
 
 func hideTrafficLights(nsWindow cocoa.ID) {
@@ -1078,12 +1087,12 @@ func loadURLInWebView(wkWebView cocoa.ID, rawURL string) {
 		return
 	}
 	nsURL := cocoa.GetClass("NSURL").Send(cocoa.RegisterName("URLWithString:"), cocoa.StringToNSString(rawURL))
-	fmt.Fprintf(os.Stderr, "DEBUG: nsURL: %d\n", nsURL)
+	debugf("DEBUG: nsURL: %d\n", nsURL)
 	if nsURL == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: nsURL is nil")
 	}
 	req := cocoa.GetClass("NSURLRequest").Send(cocoa.RegisterName("requestWithURL:"), nsURL)
-	fmt.Fprintf(os.Stderr, "DEBUG: req: %d\n", req)
+	debugf("DEBUG: req: %d\n", req)
 	if req == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: req is nil")
 	}

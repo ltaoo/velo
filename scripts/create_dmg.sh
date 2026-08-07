@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Global variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="$PROJECT_ROOT/app-config.json"
+CONFIG_FILE="$PROJECT_ROOT/velo.json"
 TEMP_DIR=""
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/dist}"
 
@@ -80,7 +80,7 @@ parse_parameters() {
     info "Parameters: APP_NAME=$APP_NAME, VERSION=$VERSION, ARCH=$ARCH"
 }
 
-# Function to read configuration from app-config.json
+# Function to read configuration from velo.json
 read_config() {
     info "Reading configuration from $CONFIG_FILE..."
     
@@ -113,7 +113,7 @@ validate_background() {
     
     # Check if custom path is provided
     if [ "$AUTO_GENERATE" = "false" ] && [ -z "$CUSTOM_PATH" ]; then
-        error_exit "Background image path not configured in app-config.json. Set platforms.macos.dmg.background.custom_path or enable auto_generate." 5
+        error_exit "Background image path not configured in velo.json. Set platforms.macos.dmg.background.custom_path or enable auto_generate." 5
     fi
     
     # If custom path is provided, validate it exists

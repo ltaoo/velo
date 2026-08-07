@@ -27,13 +27,6 @@ declare -a required_files=(
     ".build/icons/icon.ico"
     ".build/icons/icon_256.png"
     ".build/icons/icon_16.png"
-    "build/AppIcon.icns"
-    "build/icon.ico"
-    "build/appicon.ico"
-    "build/icon_256.png"
-    "build/icon_16.png"
-    "build/icon16.png"
-    "build/appicon.png"
 )
 
 missing=0
@@ -58,7 +51,7 @@ if command -v identify &> /dev/null || command -v magick &> /dev/null; then
         IDENTIFY_CMD="identify"
     fi
     
-    for png_file in "build/icon_256.png" "build/icon_16.png"; do
+    for png_file in ".build/icons/icon_256.png" ".build/icons/icon_16.png"; do
         if [ -f "$png_file" ]; then
             dimensions=$($IDENTIFY_CMD -format "%wx%h" "$png_file")
             width=$(echo "$dimensions" | cut -d'x' -f1)

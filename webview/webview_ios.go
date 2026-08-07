@@ -16,44 +16,44 @@ var (
 )
 
 func open_webview(opts *BoxWebviewOptions) {
-	fmt.Println("========================================")
-	fmt.Println("DEBUG: Starting iOS Webview (open_webview)")
-	fmt.Printf("DEBUG: Options - Title: %s, URL: %s\n", opts.Title, opts.URL)
-	fmt.Println("========================================")
+	debugln("========================================")
+	debugln("DEBUG: Starting iOS Webview (open_webview)")
+	debugf("DEBUG: Options - Title: %s, URL: %s\n", opts.Title, opts.URL)
+	debugln("========================================")
 
 	// Store options for AppDelegate
 	webview_opts = opts
 
 	app := uikit.SharedApplication()
-	fmt.Printf("DEBUG: SharedApplication returned: %v\n", app)
+	debugf("DEBUG: SharedApplication returned: %v\n", app)
 
 	if app != 0 {
-		fmt.Println("========================================")
-		fmt.Println("DEBUG: UIApplication already running, navigating existing webview")
-		fmt.Printf("DEBUG: Current navController: %v\n", navController)
-		fmt.Printf("DEBUG: Current wkWebView: %v\n", wkWebView)
-		fmt.Println("========================================")
+		debugln("========================================")
+		debugln("DEBUG: UIApplication already running, navigating existing webview")
+		debugf("DEBUG: Current navController: %v\n", navController)
+		debugf("DEBUG: Current wkWebView: %v\n", wkWebView)
+		debugln("========================================")
 		uikit.DispatchAsyncMain(func() {
-			fmt.Println("DEBUG: Inside DispatchAsyncMain, calling pushWindow")
+			debugln("DEBUG: Inside DispatchAsyncMain, calling pushWindow")
 			pushWindow(opts)
-			fmt.Println("DEBUG: pushWindow completed")
+			debugln("DEBUG: pushWindow completed")
 		})
 		// Do not block, return immediately to allow handler to complete
-		fmt.Println("DEBUG: Returning from open_webview (app already running)")
+		debugln("DEBUG: Returning from open_webview (app already running)")
 		return
 	} else {
-		fmt.Println("DEBUG: UIApplication not running, starting new one")
+		debugln("DEBUG: UIApplication not running, starting new one")
 		// Create AppDelegate class
 		createAppDelegate()
-		fmt.Println("DEBUG: VeloAppDelegate class registered")
+		debugln("DEBUG: VeloAppDelegate class registered")
 
 		// Start UIApplication
 		// This blocks until app exit
-		fmt.Println("DEBUG: Calling UIApplicationMain...")
+		debugln("DEBUG: Calling UIApplicationMain...")
 		// The third argument (principalClassName) can be nil, or "UIApplication"
 		// The fourth argument is our delegate class name
 		ret := uikit.UIApplicationMain(0, nil, "", "VeloAppDelegate")
-		fmt.Printf("DEBUG: UIApplicationMain returned: %d\n", ret)
+		debugf("DEBUG: UIApplicationMain returned: %d\n", ret)
 	}
 }
 
@@ -102,8 +102,8 @@ func createScriptMessageHandler() {
 }
 
 func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
-	fmt.Println("========================================")
-	fmt.Println("DEBUG: scriptMessageReceived called")
+	debugln("========================================")
+	debugln("DEBUG: scriptMessageReceived called")
 
 	// message is WKScriptMessage
 	// body property contains the message body
@@ -113,21 +113,21 @@ func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
 	// The body should be a string (JSON) because we send JSON.stringify(payload) from JS
 	msgStr := uikit.NSStringToString(body)
 
-	fmt.Printf("DEBUG: Received message from JS: %s\n", msgStr)
-	fmt.Printf("DEBUG: webview_opts is nil: %v\n", webview_opts == nil)
+	debugf("DEBUG: Received message from JS: %s\n", msgStr)
+	debugf("DEBUG: webview_opts is nil: %v\n", webview_opts == nil)
 	if webview_opts != nil {
-		fmt.Printf("DEBUG: HandleMessage is nil: %v\n", webview_opts.HandleMessage == nil)
+		debugf("DEBUG: HandleMessage is nil: %v\n", webview_opts.HandleMessage == nil)
 	}
-	fmt.Println("========================================")
+	debugln("========================================")
 
 	if webview_opts != nil && webview_opts.HandleMessage != nil {
 		go func() {
-			fmt.Println("DEBUG: Handling message in goroutine")
+			debugln("DEBUG: Handling message in goroutine")
 			id, result := webview_opts.HandleMessage(msgStr)
-			fmt.Printf("DEBUG: Message handled, id: %s, result: %s\n", id, result)
+			debugf("DEBUG: Message handled, id: %s, result: %s\n", id, result)
 			if id != "" {
 				uikit.DispatchAsyncMain(func() {
-					fmt.Println("DEBUG: Sending callback to JS")
+					debugln("DEBUG: Sending callback to JS")
 					sendCallback(id, result)
 				})
 			}
@@ -139,7 +139,7 @@ func scriptMessageReceived(self, _cmd, controller, message uintptr) uintptr {
 }
 
 func applicationDidFinishLaunching(self, _cmd, app, options uintptr) uintptr {
-	fmt.Println("Velo: applicationDidFinishLaunching")
+	debugln("Velo: applicationDidFinishLaunching")
 
 	// Create and setup the window
 	initWindow()
@@ -201,11 +201,11 @@ func createWebviewController(opts *BoxWebviewOptions, rect uikit.CGRect) (uikit.
 }
 
 func pushWindow(opts *BoxWebviewOptions) {
-	fmt.Println("========================================")
-	fmt.Println("DEBUG: pushWindow called (pushing to navigation stack)")
-	fmt.Printf("DEBUG: pushWindow - Title: %s, URL: %s\n", opts.Title, opts.URL)
-	fmt.Printf("DEBUG: pushWindow - navController: %v\n", navController)
-	fmt.Println("========================================")
+	debugln("========================================")
+	debugln("DEBUG: pushWindow called (pushing to navigation stack)")
+	debugf("DEBUG: pushWindow - Title: %s, URL: %s\n", opts.Title, opts.URL)
+	debugf("DEBUG: pushWindow - navController: %v\n", navController)
+	debugln("========================================")
 
 	// Check if navigation controller exists
 	if navController == 0 {
@@ -214,25 +214,25 @@ func pushWindow(opts *BoxWebviewOptions) {
 	}
 
 	screen := uikit.GetClass("UIScreen").Send(uikit.RegisterName("mainScreen"))
-	fmt.Printf("DEBUG: Got screen: %v\n", screen)
+	debugf("DEBUG: Got screen: %v\n", screen)
 
 	rect := screen.SendGetRect(uikit.RegisterName("bounds"))
-	fmt.Printf("DEBUG: Screen bounds - X: %.0f, Y: %.0f, W: %.0f, H: %.0f\n",
+	debugf("DEBUG: Screen bounds - X: %.0f, Y: %.0f, W: %.0f, H: %.0f\n",
 		rect.Origin.X, rect.Origin.Y, rect.Size.Width, rect.Size.Height)
 
-	fmt.Printf("DEBUG: Creating new webview controller for URL: %s\n", opts.URL)
+	debugf("DEBUG: Creating new webview controller for URL: %s\n", opts.URL)
 	vc, wv := createWebviewController(opts, rect)
-	fmt.Printf("DEBUG: Created vc: %v, wv: %v\n", vc, wv)
+	debugf("DEBUG: Created vc: %v, wv: %v\n", vc, wv)
 
 	wkWebView = wv // Update current active webview
-	fmt.Printf("DEBUG: Updated global wkWebView to: %v\n", wkWebView)
+	debugf("DEBUG: Updated global wkWebView to: %v\n", wkWebView)
 
 	// Push the new view controller onto the navigation stack
 	// [navController pushViewController:vc animated:YES]
-	fmt.Println("DEBUG: About to call pushViewController:animated:")
+	debugln("DEBUG: About to call pushViewController:animated:")
 	navController.Send(uikit.RegisterName("pushViewController:animated:"), vc, true)
-	fmt.Println("DEBUG: pushViewController:animated: completed")
-	fmt.Println("========================================")
+	debugln("DEBUG: pushViewController:animated: completed")
+	debugln("========================================")
 }
 
 func initWindow() {
@@ -291,7 +291,7 @@ func sendCallback(id, result string) {
 	}
 	// window.invoke_cbs["id"](result)
 	js := fmt.Sprintf("window.invoke_cbs[\"%s\"](%s)", id, result)
-	fmt.Printf("DEBUG: Evaluating JS: %s\n", js)
+	debugf("DEBUG: Evaluating JS: %s\n", js)
 
 	wkWebView.Send(uikit.RegisterName("evaluateJavaScript:completionHandler:"), uikit.NSString(js), 0)
 }

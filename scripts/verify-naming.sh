@@ -9,16 +9,16 @@ echo "命名配置验证"
 echo "==================================="
 echo ""
 
-# 检查 app-config.json
-if [ ! -f "app-config.json" ]; then
-    echo "❌ 找不到 app-config.json"
+# 检查 velo.json
+if [ ! -f "velo.json" ]; then
+    echo "❌ 找不到 velo.json"
     exit 1
 fi
 
-echo "📋 从 app-config.json 读取配置..."
-APP_NAME=$(jq -r '.app.name' app-config.json)
-BINARY_NAME=$(jq -r '.binary.name' app-config.json)
-PROJECT_NAME=$(jq -r '.binary.project_name' app-config.json)
+echo "📋 从 velo.json 读取配置..."
+APP_NAME=$(jq -r '.app.name' velo.json)
+BINARY_NAME=$(jq -r '.binary.name' velo.json)
+PROJECT_NAME=$(jq -r '.binary.project_name' velo.json)
 
 echo "  ✓ 项目名称 (project_name): ${PROJECT_NAME}"
 echo "  ✓ 应用名称 (app.name): ${APP_NAME}"

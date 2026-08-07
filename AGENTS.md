@@ -30,7 +30,7 @@
 | native window 控制 | 前端调用 `__velo/window/*` 控制原生窗口，如拖动、关闭、最小化、置顶、调整尺寸。 | `asset/runtime/runtime.js`, `webview/` |
 | frontendserver | 框架内置前端静态资源服务，负责 dev/prod 静态文件、SPA fallback、缓存头。 | `frontendserver/frontendserver.go` |
 | CLI | `cmd/velo` 提供的命令行工具，包括 build/dev/doctor/version。 | `cmd/velo/` |
-| buildcfg | 构建配置和平台资源生成层，把 `app-config.json` 转成图标、plist、desktop entry、winres 等产物。 | `buildcfg/` |
+| buildcfg | 构建配置和平台资源生成层，把 `velo.json` 转成图标、plist、desktop entry、winres 等产物。 | `buildcfg/` |
 | updater | 自动更新模块，包含检查、下载、校验、应用更新、重启、跳过版本。 | `updater/` |
 | native 包能力 | 文件选择、托盘、通知、错误弹窗、快捷键、自启动、输入源、数据库迁移等跨平台能力。 | `file/`, `tray/`, `notification/`, `shortcut/`, `autostart/`, `inputsource/`, `database/` |
 
@@ -148,8 +148,8 @@
 | 功能描述/关键词 | 主要代码 | 说明 |
 | --- | --- | --- |
 | CLI 命令分发 | `cmd/velo/main.go` | `version`, `doctor`, `build`, `dev`。 |
-| `velo build` 配置读取 | `cmd/velo/build.go`, `buildcfg/buildcfg.go` | 读取 `app-config.json`，校验 `app.name/app.version`。 |
-| 图标生成 | `buildcfg/icons.go` | 生成多尺寸 PNG、ICO、macOS iconset/icns，兼容复制到 `build/`。 |
+| `velo build` 配置读取 | `cmd/velo/build.go`, `buildcfg/buildcfg.go` | 优先读取 `velo.json`，兼容旧名 `app-config.json`，校验 `app.name/app.version`。 |
+| 图标生成 | `buildcfg/icons.go` | 生成多尺寸 PNG、ICO、macOS iconset/icns，统一输出到 `.build/icons/`。 |
 | Windows 资源 | `buildcfg/windows.go` | `GenerateWinres` 生成 `winres.json`。 |
 | macOS plist/entitlements | `buildcfg/darwin.go` | `GenerateDarwinPlist`，包含 APS entitlement。 |
 | Linux desktop entry | `buildcfg/linux.go` | `GenerateLinuxDesktop`。 |
@@ -163,7 +163,7 @@
 | 功能描述/关键词 | 主要代码 | 说明 |
 | --- | --- | --- |
 | 应用级更新器 API | `updater/api/api.go` | `NewUpdaterWithOptions`, check/download/apply/restart/skip 等聚合入口。 |
-| 更新配置类型 | `updater/types/types.go`, `buildcfg/buildcfg.go` | `UpdateConfig`, `UpdateSource`, `ReleaseInfo`；`app-config.json` 的 `update` 会转为 updater config。 |
+| 更新配置类型 | `updater/types/types.go`, `buildcfg/buildcfg.go` | `UpdateConfig`, `UpdateSource`, `ReleaseInfo`；`velo.json` 的 `update` 会转为 updater config。 |
 | 版本/开发模式判断 | `updater/version/version.go` | `(dev)`、semver 比较、更新模式。 |
 | 更新源选择和缓存 | `updater/checker/checker.go`, `updater/cache/cache.go` | 多源按优先级检查，缓存和跳过版本状态。 |
 | GitHub Releases 更新源 | `updater/checker/github_checker.go` | 解析 release 和平台 asset/checksum。 |

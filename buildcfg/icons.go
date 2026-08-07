@@ -84,32 +84,6 @@ func GenerateIcons(cfg *Config, baseDir, outDir string) error {
 		}
 	}
 
-	// Copy to build/ for compatibility
-	buildDir := filepath.Join(baseDir, "build")
-	os.MkdirAll(buildDir, 0755)
-	copies := map[string]string{
-		"icon.ico":       "icon.ico",
-		"icon.ico#2":     "appicon.ico",
-		"icon_256.png":   "icon_256.png",
-		"icon_256.png#2": "appicon.png",
-		"icon_16.png":    "icon_16.png",
-		"icon_16.png#2":  "icon16.png",
-		"tray_icon.png":  "tray_icon.png",
-	}
-	for src, dst := range copies {
-		actual := src
-		if len(actual) > 2 && actual[len(actual)-2] == '#' {
-			actual = actual[:len(actual)-2]
-		}
-		srcPath := filepath.Join(iconsDir, actual)
-		if data, err := os.ReadFile(srcPath); err == nil {
-			os.WriteFile(filepath.Join(buildDir, dst), data, 0644)
-		}
-	}
-	if data, err := os.ReadFile(filepath.Join(iconsDir, "AppIcon.icns")); err == nil {
-		os.WriteFile(filepath.Join(buildDir, "AppIcon.icns"), data, 0644)
-	}
-
 	return nil
 }
 
@@ -212,7 +186,7 @@ func saveICO(path string, images []image.Image) error {
 		if e.height >= 256 {
 			h = 0
 		}
-		f.Write([]byte{w, h, 0, 0})                              // width, height, colors, reserved
+		f.Write([]byte{w, h, 0, 0})                               // width, height, colors, reserved
 		binary.Write(f, binary.LittleEndian, uint16(1))           // color planes
 		binary.Write(f, binary.LittleEndian, uint16(32))          // bits per pixel
 		binary.Write(f, binary.LittleEndian, uint32(len(e.data))) // data size

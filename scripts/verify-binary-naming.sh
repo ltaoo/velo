@@ -21,8 +21,8 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # 读取配置
-APP_NAME=$(jq -r '.app.name' app-config.json)
-BINARY_NAME=$(jq -r '.binary.name' app-config.json)
+APP_NAME=$(jq -r '.app.name' velo.json)
+BINARY_NAME=$(jq -r '.binary.name' velo.json)
 
 echo "📋 配置信息:"
 echo "  app.name: $APP_NAME"
