@@ -324,12 +324,15 @@ type Box struct {
 }
 
 type VeloAppOpt struct {
-	Mode                   Mode
-	WebviewEngine          webview.Engine
-	AppName                string
-	Title                  string
-	IconData               []byte
-	AppConfig              *AppConfig
+	Mode          Mode
+	WebviewEngine webview.Engine
+	AppName       string
+	Title         string
+	IconData      []byte
+	AppConfig     *AppConfig
+	// EnableLocalStorage creates storage.json and enables the built-in storage
+	// and window state persistence APIs.
+	EnableLocalStorage     bool
 	QuitOnLastWindowClosed *bool
 }
 
@@ -365,8 +368,10 @@ func NewApp(o *VeloAppOpt) *Box {
 	if o.QuitOnLastWindowClosed != nil {
 		b.quitOnLastWindowClosed = *o.QuitOnLastWindowClosed
 	}
-	b.Store = store.New()
-	b.registerStoreRoutes()
+	if o.EnableLocalStorage {
+		b.Store = store.New()
+		b.registerStoreRoutes()
+	}
 	b.registerVeloRoutes()
 	return b
 }
@@ -556,7 +561,10 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	height := opt.Height
 	var x, y int
 	hasPosition := false
-	savedState := b.Store.GetWindow(windowName)
+	var savedState *store.WindowState
+	if b.Store != nil {
+		savedState = b.Store.GetWindow(windowName)
+	}
 	if savedState != nil {
 		if savedState.Width > 0 && savedState.Height > 0 {
 			width = savedState.Width
@@ -920,7 +928,10 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	height := opt.Height
 	var x, y int
 	hasPosition := false
-	savedState := b.Store.GetWindow(windowName)
+	var savedState *store.WindowState
+	if b.Store != nil {
+		savedState = b.Store.GetWindow(windowName)
+	}
 	if savedState != nil {
 		if savedState.Width > 0 && savedState.Height > 0 {
 			width = savedState.Width
