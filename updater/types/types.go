@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,6 +24,40 @@ type UpdaterOptions struct {
 
 	// StatePath is the path to the state file (optional, will use default if empty)
 	StatePath string
+
+	// Downloader overrides the built-in update downloader. Projects can inject
+	// their own download engine while continuing to use velo for update checks
+	// and application.
+	Downloader UpdateDownloader
+
+	// RestartCoordinator records a restart request and lets the host
+	// application shut down gracefully before replacing its process.
+	RestartCoordinator RestartCoordinator
+
+	// RequestShutdown asks the host application to release its resources. It is
+	// invoked only after a restart request has been recorded successfully.
+	RequestShutdown func()
+}
+
+// UpdateDownloader downloads an update artifact for a release.
+type UpdateDownloader interface {
+	DownloadUpdate(
+		ctx context.Context,
+		release *ReleaseInfo,
+		on_progress DownloadCallback,
+	) (string, error)
+}
+
+// RestartCoordinator coordinates a two-phase application restart. Request
+// records the replacement process first, then asks the host application to
+// shut down. The host must execute the recorded replacement after cleanup.
+type RestartCoordinator interface {
+	Request(
+		executable_path string,
+		arguments []string,
+		environment []string,
+		request_shutdown func(),
+	) error
 }
 
 // UpdateConfig defines the configuration for the update system

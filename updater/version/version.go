@@ -3,10 +3,9 @@ package version
 import (
 	"fmt"
 	"strings"
+
 	"github.com/ltaoo/velo/updater/types"
 	"github.com/ltaoo/velo/updater/util"
-
-	"github.com/blang/semver/v4"
 )
 
 const DevVersion = "(dev)"
@@ -23,7 +22,7 @@ func DetectEnvironment(version string) Environment {
 		return EnvironmentDevelopment
 	}
 
-	if util.IsValidSemver(strings.TrimPrefix(version, "v")) {
+	if util.IsValidVersion(strings.TrimPrefix(version, "v")) {
 		return EnvironmentProduction
 	}
 
@@ -134,33 +133,5 @@ func (vi *VersionInfo) String() string {
 }
 
 func CompareVersions(current, latest string) (bool, error) {
-	currentVer, err := semver.Parse(normalizeVersion(current))
-	if err != nil {
-		return false, &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "invalid current version format",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"current_version": current,
-			},
-		}
-	}
-
-	latestVer, err := semver.Parse(normalizeVersion(latest))
-	if err != nil {
-		return false, &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "invalid latest version format",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"latest_version": latest,
-			},
-		}
-	}
-
-	return latestVer.GT(currentVer), nil
-}
-
-func normalizeVersion(version string) string {
-	return strings.TrimPrefix(version, "v")
+	return util.CompareVersions(current, latest)
 }

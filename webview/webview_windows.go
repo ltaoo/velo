@@ -17,7 +17,7 @@ import (
 )
 
 /*
-#cgo CXXFLAGS: -std=c++17 -IC:/Users/litao/.nuget/packages/microsoft.web.webview2/1.0.2792.45/build/native/include
+#cgo CXXFLAGS: -std=c++17
 #cgo LDFLAGS: -lole32 -lshell32 -luser32 -lgdi32 -luuid -ldwmapi
 #include <stdlib.h>
 #include "webview_windows.h"

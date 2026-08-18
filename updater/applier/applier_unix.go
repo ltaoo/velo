@@ -6,9 +6,7 @@ package applier
 import (
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"syscall"
 
 	"github.com/rs/zerolog"
 
@@ -357,44 +355,6 @@ func (uu *UnixUpdater) findExecutable(dir string) (string, error) {
 	}
 
 	return execPath, nil
-}
-
-// Restart restarts the application with the given arguments
-func (uu *UnixUpdater) Restart(execPath string, args []string) error {
-	uu.logger.Info().
-		Str("exec", execPath).
-		Strs("args", args).
-		Msg("Restarting application")
-
-	// Create command
-	cmd := exec.Command(execPath, args...)
-
-	// Detach from parent process
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-
-	// Start the new process
-	if err := cmd.Start(); err != nil {
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to start new process",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"exec": execPath,
-				"args": args,
-			},
-		}
-	}
-
-	uu.logger.Info().
-		Int("pid", cmd.Process.Pid).
-		Msg("New process started")
-
-	// Exit current process
-	os.Exit(0)
-
-	return nil
 }
 
 // newPlatformUpdaterImpl creates a Unix-specific updater

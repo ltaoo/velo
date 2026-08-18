@@ -7,51 +7,99 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
-	"github.com/ltaoo/velo/updater/types"
+	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/ltaoo/velo/updater/types"
 	"github.com/rs/zerolog"
 )
 
-// semverRegex matches valid semver strings (without v prefix)
-var semverRegex = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
+// semver_regex matches valid semver strings (without v prefix)
+var semver_regex = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
+
+var date_version_regex = regexp.MustCompile(`^\d{6}(\d{2})?$`)
 
 // isValidSemver checks if a version string (without v prefix) is valid semver
 func IsValidSemver(version string) bool {
-	return semverRegex.MatchString(version)
+	return semver_regex.MatchString(version)
+}
+
+// IsValidVersion accepts semantic versions and the date-based YYMMDD or
+// YYMMDDNN versions commonly used by command-line applications.
+func IsValidVersion(version string) bool {
+	normalized_version := normalize_version(version)
+	if IsValidSemver(normalized_version) {
+		return true
+	}
+	_, _, ok := parse_date_version(normalized_version)
+	return ok
 }
 
 func CompareVersions(current, latest string) (bool, error) {
-	currentVer, err := semver.Parse(normalizeVersion(current))
-	if err != nil {
-		return false, &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "invalid current version format",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"current_version": current,
-			},
+	current_date, current_revision, current_is_date := parse_date_version(normalize_version(current))
+	latest_date, latest_revision, latest_is_date := parse_date_version(normalize_version(latest))
+	if current_is_date || latest_is_date {
+		if !current_is_date {
+			return false, invalid_version_error("current", current, nil)
 		}
+		if !latest_is_date {
+			return false, invalid_version_error("latest", latest, nil)
+		}
+		if latest_date.After(current_date) {
+			return true, nil
+		}
+		if latest_date.Equal(current_date) {
+			return latest_revision > current_revision, nil
+		}
+		return false, nil
 	}
 
-	latestVer, err := semver.Parse(normalizeVersion(latest))
+	current_ver, err := semver.Parse(normalize_version(current))
 	if err != nil {
-		return false, &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "invalid latest version format",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"latest_version": latest,
-			},
-		}
+		return false, invalid_version_error("current", current, err)
 	}
 
-	return latestVer.GT(currentVer), nil
+	latest_ver, err := semver.Parse(normalize_version(latest))
+	if err != nil {
+		return false, invalid_version_error("latest", latest, err)
+	}
+
+	return latest_ver.GT(current_ver), nil
 }
 
-func normalizeVersion(version string) string {
+func normalize_version(version string) string {
 	return strings.TrimPrefix(version, "v")
+}
+
+func parse_date_version(version string) (time.Time, int, bool) {
+	if !date_version_regex.MatchString(version) {
+		return time.Time{}, 0, false
+	}
+	date, err := time.Parse("060102", version[:6])
+	if err != nil {
+		return time.Time{}, 0, false
+	}
+	revision := 0
+	if len(version) == 8 {
+		revision, err = strconv.Atoi(version[6:])
+		if err != nil {
+			return time.Time{}, 0, false
+		}
+	}
+	return date, revision, true
+}
+
+func invalid_version_error(kind string, version string, cause error) error {
+	return &types.UpdateError{
+		Category: types.ErrCategoryValidation,
+		Message:  fmt.Sprintf("invalid %s version format", kind),
+		Cause:    cause,
+		Context: map[string]interface{}{
+			kind + "_version": version,
+		},
+	}
 }
 
 // ExecutableValidator provides security validation for executable files

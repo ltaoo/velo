@@ -239,6 +239,20 @@ func (bu *BaseApplier) Cleanup(paths ...string) error {
 	return nil
 }
 
+// Restart no longer starts a detached replacement process. It remains on the
+// applier interface so existing integrations receive a migration error instead
+// of losing source compatibility.
+func (bu *BaseApplier) Restart(exec_path string, arguments []string) error {
+	return &types.UpdateError{
+		Category: types.ErrCategoryConfiguration,
+		Message:  "direct updater restart is disabled; use updater/restart.Manager after graceful shutdown",
+		Context: map[string]interface{}{
+			"exec_path": exec_path,
+			"arguments": arguments,
+		},
+	}
+}
+
 // ExtractArchive extracts an archive file to a destination directory
 // Supports .zip, .tar.gz, and .tar.xz formats
 func (bu *BaseApplier) ExtractArchive(archivePath, destDir string) error {

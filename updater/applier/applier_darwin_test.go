@@ -6,12 +6,12 @@ package applier
 import (
 	"archive/tar"
 	"compress/gzip"
+	"github.com/ltaoo/velo/updater/types"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"github.com/ltaoo/velo/updater/types"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
