@@ -59,36 +59,29 @@ func (uu *UnixUpdater) Apply(updatePath, execPath string) error {
 		}
 	}()
 
-	// Create temporary directory for extraction
-	tempDir := filepath.Join(os.TempDir(), "WXChannelsDownload")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	// Create an isolated temporary directory so stale files cannot be selected.
+	temp_dir, err := create_update_extraction_dir()
+	if err != nil {
 		uu.triggerRollback(backupPath, execPath)
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to create temporary extraction directory",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"temp_dir": tempDir,
-			},
-		}
+		return err
 	}
-	// defer os.RemoveAll(tempDir) // Commented out to keep files for inspection
+	defer os.RemoveAll(temp_dir)
 
 	// Extract the update archive
-	if err := uu.ExtractArchive(updatePath, tempDir); err != nil {
+	if err := uu.ExtractArchive(updatePath, temp_dir); err != nil {
 		uu.triggerRollback(backupPath, execPath)
 		return err
 	}
 
-	// Find the executable in the extracted files
-	newExecPath, err := uu.findExecutable(tempDir)
+	// Prefer the current target name; only a single candidate may be used as fallback.
+	new_exec_path, err := find_update_executable(temp_dir, filepath.Base(execPath), false, is_platform_executable)
 	if err != nil {
 		uu.triggerRollback(backupPath, execPath)
 		return err
 	}
 
 	uu.logger.Info().
-		Str("new_exec", newExecPath).
+		Str("new_exec", new_exec_path).
 		Msg("Found new executable")
 
 	// Get the original file permissions
@@ -121,7 +114,7 @@ func (uu *UnixUpdater) Apply(updatePath, execPath string) error {
 	}
 
 	// Copy the new executable to the target location
-	if err := uu.copyFile(newExecPath, execPath); err != nil {
+	if err := uu.copyFile(new_exec_path, execPath); err != nil {
 		uu.triggerRollback(backupPath, execPath)
 		return err
 	}
@@ -315,46 +308,8 @@ func (uu *UnixUpdater) copyFile(src, dst string) error {
 	return nil
 }
 
-// findExecutable finds the executable file in the extracted directory
-func (uu *UnixUpdater) findExecutable(dir string) (string, error) {
-	var execPath string
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Look for executable files (files with execute permission)
-		if !info.IsDir() && info.Mode()&0111 != 0 {
-			execPath = path
-			return filepath.SkipDir // Stop after finding first executable
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to search for executable",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"dir": dir,
-			},
-		}
-	}
-
-	if execPath == "" {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "no executable found in update archive",
-			Context: map[string]interface{}{
-				"dir": dir,
-			},
-		}
-	}
-
-	return execPath, nil
+func is_platform_executable(_ string, info os.FileInfo) bool {
+	return info.Mode()&0111 != 0
 }
 
 // newPlatformUpdaterImpl creates a Unix-specific updater

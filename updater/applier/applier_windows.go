@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -75,58 +76,57 @@ func (wu *WindowsUpdater) Apply(updatePath, execPath string) error {
 		}
 	}()
 
-	// Create temporary directory for extraction
-	tempDir := filepath.Join(os.TempDir(), "WXChannelsDownload")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	// Create an isolated temporary directory so stale files cannot be selected.
+	temp_dir, err := create_update_extraction_dir()
+	if err != nil {
 		wu.triggerRollback(backupPath, execPath)
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to create temporary extraction directory",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"temp_dir": tempDir,
-			},
-		}
+		return err
 	}
-	// defer os.RemoveAll(tempDir) // Commented out to keep files for inspection
+	cleanup_temp_dir := true
+	defer func() {
+		if cleanup_temp_dir {
+			_ = os.RemoveAll(temp_dir)
+		}
+	}()
 
 	// Extract the update archive
-	if err := wu.ExtractArchive(updatePath, tempDir); err != nil {
+	if err := wu.ExtractArchive(updatePath, temp_dir); err != nil {
 		wu.triggerRollback(backupPath, execPath)
 		return err
 	}
 
-	// Find the executable in the extracted files
-	newExecPath, err := wu.findExecutable(tempDir)
+	// Prefer the current target name; only a single candidate may be used as fallback.
+	new_exec_path, err := find_update_executable(temp_dir, filepath.Base(execPath), false, is_platform_executable)
 	if err != nil {
 		wu.triggerRollback(backupPath, execPath)
 		return err
 	}
 
 	wu.logger.Info().
-		Str("new_exec", newExecPath).
+		Str("new_exec", new_exec_path).
 		Msg("Found new executable")
 
 	// Try direct replacement first
-	if err := wu.tryDirectReplace(newExecPath, execPath); err != nil {
+	if err := wu.tryDirectReplace(new_exec_path, execPath); err != nil {
 		wu.logger.Warn().
 			Err(err).
 			Msg("Direct replacement failed, scheduling delayed replacement")
 
 		// If direct replacement fails (file locked), schedule delayed replacement
-		if err := wu.scheduleDelayedReplace(newExecPath, execPath); err != nil {
+		if err := wu.scheduleDelayedReplace(new_exec_path, execPath); err != nil {
 			wu.triggerRollback(backupPath, execPath)
 			return &types.UpdateError{
 				Category: types.ErrCategoryFileSystem,
 				Message:  "failed to schedule delayed replacement",
 				Cause:    err,
 				Context: map[string]interface{}{
-					"new_exec": newExecPath,
+					"new_exec": new_exec_path,
 					"target":   execPath,
 				},
 			}
 		}
 
+		cleanup_temp_dir = false
 		wu.logger.Info().Msg("Update scheduled for next restart")
 		return nil
 	}
@@ -324,46 +324,8 @@ func (wu *WindowsUpdater) scheduleDelayedReplace(newExecPath, execPath string) e
 	return nil
 }
 
-// findExecutable finds the executable file in the extracted directory
-func (wu *WindowsUpdater) findExecutable(dir string) (string, error) {
-	var execPath string
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Look for .exe files
-		if !info.IsDir() && filepath.Ext(path) == ".exe" {
-			execPath = path
-			return filepath.SkipDir // Stop after finding first .exe
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to search for executable",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"dir": dir,
-			},
-		}
-	}
-
-	if execPath == "" {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "no executable found in update archive",
-			Context: map[string]interface{}{
-				"dir": dir,
-			},
-		}
-	}
-
-	return execPath, nil
+func is_platform_executable(path string, _ os.FileInfo) bool {
+	return strings.EqualFold(filepath.Ext(path), ".exe")
 }
 
 // newPlatformUpdaterImpl creates a Windows-specific updater

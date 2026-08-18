@@ -82,25 +82,19 @@ func (du *DarwinUpdater) Apply(updatePath, execPath string) error {
 		}
 	}()
 
-	tempDir := filepath.Join(os.TempDir(), "WXChannelsDownload")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	temp_dir, err := create_update_extraction_dir()
+	if err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to create temporary directory",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"temp_dir": tempDir,
-			},
-		}
+		return err
 	}
+	defer os.RemoveAll(temp_dir)
 
 	du.logger.Info().
 		Str("dmg", updatePath).
-		Str("extract_to", tempDir).
+		Str("extract_to", temp_dir).
 		Msg("Extracting .app from DMG")
 
-	newAppPath, err := du.extractAppFromDmg(updatePath, tempDir)
+	newAppPath, err := du.extractAppFromDmg(updatePath, temp_dir)
 	if err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
 		return err
@@ -194,35 +188,29 @@ func (du *DarwinUpdater) applyFromArchive(updatePath, execPath string) error {
 		}
 	}()
 
-	tempDir := filepath.Join(os.TempDir(), "WXChannelsDownload")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	temp_dir, err := create_update_extraction_dir()
+	if err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to create temporary extraction directory",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"temp_dir": tempDir,
-			},
-		}
+		return err
 	}
+	defer os.RemoveAll(temp_dir)
 
 	du.logger.Info().
 		Str("archive", updatePath).
-		Str("extract_to", tempDir).
+		Str("extract_to", temp_dir).
 		Msg("Starting archive extraction")
 
-	fmt.Println("DarwinUpdater.Apply before ExtractArchive", tempDir)
-	if err := du.ExtractArchive(updatePath, tempDir); err != nil {
+	fmt.Println("DarwinUpdater.Apply before ExtractArchive", temp_dir)
+	if err := du.ExtractArchive(updatePath, temp_dir); err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
 		return err
 	}
 
 	du.logger.Info().
-		Str("extract_dir", tempDir).
+		Str("extract_dir", temp_dir).
 		Msg("Archive extraction completed successfully")
 
-	newAppPath, err := du.findExtractedAppBundle(tempDir)
+	newAppPath, err := du.findExtractedAppBundle(temp_dir)
 	fmt.Println("DarwinUpdater.Apply after findExtractedAppBundle", newAppPath)
 	if err != nil {
 		du.logger.Warn().Err(err).Msg("No .app bundle found in archive, trying executable replacement")
@@ -436,34 +424,30 @@ func (du *DarwinUpdater) applyExecutableOnly(updatePath, execPath string) error 
 	}()
 
 	// Create temporary directory for extraction
-	tempDir := filepath.Join(os.TempDir(), "WXChannelsDownload")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	temp_dir, err := create_update_extraction_dir()
+	if err != nil {
 		du.restoreExecutable(backupPath, execPath)
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to create temporary extraction directory",
-			Cause:    err,
-		}
+		return err
 	}
-	// defer os.RemoveAll(tempDir) // Commented out to keep files for inspection
+	defer os.RemoveAll(temp_dir)
 
 	// Extract the update archive (executable-only mode)
 	du.logger.Info().
 		Str("archive", updatePath).
-		Str("extract_to", tempDir).
+		Str("extract_to", temp_dir).
 		Msg("Starting executable-only archive extraction")
 
-	if err := du.ExtractArchive(updatePath, tempDir); err != nil {
+	if err := du.ExtractArchive(updatePath, temp_dir); err != nil {
 		du.restoreExecutable(backupPath, execPath)
 		return err
 	}
 
 	du.logger.Info().
-		Str("extract_dir", tempDir).
+		Str("extract_dir", temp_dir).
 		Msg("Executable-only archive extraction completed successfully")
 
-	// Find the executable in the extracted files
-	newExecPath, err := du.findExecutable(tempDir)
+	// Prefer the current target name; only a single candidate may be used as fallback.
+	new_exec_path, err := find_update_executable(temp_dir, filepath.Base(execPath), true, is_platform_executable)
 	if err != nil {
 		du.restoreExecutable(backupPath, execPath)
 		return err
@@ -491,7 +475,7 @@ func (du *DarwinUpdater) applyExecutableOnly(updatePath, execPath string) error 
 	}
 
 	// Copy the new executable
-	if err := du.copyFile(newExecPath, execPath); err != nil {
+	if err := du.copyFile(new_exec_path, execPath); err != nil {
 		du.restoreExecutable(backupPath, execPath)
 		return err
 	}
@@ -530,45 +514,8 @@ func (du *DarwinUpdater) restoreExecutable(backupPath, execPath string) {
 	}
 }
 
-// findExecutable finds the executable file in the extracted directory
-func (du *DarwinUpdater) findExecutable(dir string) (string, error) {
-	var execPath string
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip .app bundles (we want the raw executable)
-		if info.IsDir() && strings.HasSuffix(info.Name(), ".app") {
-			return filepath.SkipDir
-		}
-
-		// Look for executable files
-		if !info.IsDir() && info.Mode()&0111 != 0 {
-			execPath = path
-			return filepath.SkipAll
-		}
-
-		return nil
-	})
-
-	if err != nil && err != filepath.SkipAll {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to search for executable",
-			Cause:    err,
-		}
-	}
-
-	if execPath == "" {
-		return "", &types.UpdateError{
-			Category: types.ErrCategoryValidation,
-			Message:  "no executable found in update archive",
-		}
-	}
-
-	return execPath, nil
+func is_platform_executable(_ string, info os.FileInfo) bool {
+	return info.Mode()&0111 != 0
 }
 
 // copyFile copies a file from src to dst
@@ -706,8 +653,8 @@ func (du *DarwinUpdater) ensureExecutablePermission(appPath string) error {
 	return nil
 }
 
-// VerifyCodeSignature verifies the code signature of a macOS executable or .app bundle
-// Signature failure is logged as a warning but does not block the update
+// VerifyCodeSignature verifies signed macOS code while allowing unsigned artifacts.
+// An invalid existing signature still blocks the update.
 func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 	du.logger.Info().
 		Str("path", path).
@@ -718,10 +665,18 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
+		output_text := strings.TrimSpace(string(output))
+		if is_unsigned_code_signature_output(output_text) {
+			du.logger.Warn().
+				Str("path", path).
+				Str("output", output_text).
+				Msg("Code object is unsigned; continuing update")
+			return nil
+		}
 		du.logger.Warn().
 			Err(err).
 			Str("path", path).
-			Str("output", string(output)).
+			Str("output", output_text).
 			Msg("Code signature verification failed")
 		return &types.UpdateError{
 			Category: types.ErrCategorySecurity,
@@ -729,7 +684,7 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 			Cause:    err,
 			Context: map[string]interface{}{
 				"path":   path,
-				"output": strings.TrimSpace(string(output)),
+				"output": output_text,
 			},
 		}
 	}
@@ -739,6 +694,10 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 		Msg("Code signature verified successfully")
 
 	return nil
+}
+
+func is_unsigned_code_signature_output(output string) bool {
+	return strings.Contains(strings.ToLower(output), "code object is not signed at all")
 }
 
 // newPlatformUpdaterImpl creates a macOS-specific updater

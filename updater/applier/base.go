@@ -28,6 +28,80 @@ func NewBaseApplier(logger zerolog.Logger) *BaseApplier {
 	}
 }
 
+func create_update_extraction_dir() (string, error) {
+	temp_dir, err := os.MkdirTemp("", "velo-update-*")
+	if err != nil {
+		return "", &types.UpdateError{
+			Category: types.ErrCategoryFileSystem,
+			Message:  "failed to create temporary extraction directory",
+			Cause:    err,
+		}
+	}
+	return temp_dir, nil
+}
+
+func find_update_executable(
+	directory string,
+	expected_name string,
+	skip_app_bundles bool,
+	is_candidate func(string, os.FileInfo) bool,
+) (string, error) {
+	matched_path := ""
+	candidates := make([]string, 0, 1)
+	walk_err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && skip_app_bundles && strings.HasSuffix(strings.ToLower(info.Name()), ".app") {
+			return filepath.SkipDir
+		}
+		if info.IsDir() || !is_candidate(path, info) {
+			return nil
+		}
+		candidates = append(candidates, path)
+		if expected_name != "" && strings.EqualFold(info.Name(), expected_name) {
+			matched_path = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if walk_err != nil && walk_err != filepath.SkipAll {
+		return "", &types.UpdateError{
+			Category: types.ErrCategoryFileSystem,
+			Message:  "failed to search for executable",
+			Cause:    walk_err,
+			Context: map[string]interface{}{
+				"dir": directory,
+			},
+		}
+	}
+	if matched_path != "" {
+		return matched_path, nil
+	}
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+	if len(candidates) == 0 {
+		return "", &types.UpdateError{
+			Category: types.ErrCategoryValidation,
+			Message:  "no executable found in update archive",
+			Context: map[string]interface{}{
+				"dir":           directory,
+				"expected_name": expected_name,
+			},
+		}
+	}
+	return "", &types.UpdateError{
+		Category: types.ErrCategoryValidation,
+		Message:  "multiple executable files found and none matches target",
+		Context: map[string]interface{}{
+			"dir":           directory,
+			"expected_name": expected_name,
+			"candidates":    candidates,
+		},
+	}
+}
+
 // Backup creates a backup of the current executable
 func (bu *BaseApplier) Backup(execPath, backupPath string) error {
 	bu.logger.Info().

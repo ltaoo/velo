@@ -6,11 +6,11 @@ package applier
 import (
 	"archive/tar"
 	"compress/gzip"
+	"github.com/ltaoo/velo/updater/types"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
-	"github.com/ltaoo/velo/updater/types"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -73,9 +73,9 @@ func TestUnixUpdater_FindExecutable(t *testing.T) {
 	require.NoError(t, err)
 
 	// Find the executable
-	foundPath, err := updater.findExecutable(tempDir)
+	found_path, err := find_update_executable(tempDir, "test", false, is_platform_executable)
 	require.NoError(t, err)
-	assert.Equal(t, execPath, foundPath)
+	assert.Equal(t, execPath, found_path)
 }
 
 func TestUnixUpdater_FindExecutable_NotFound(t *testing.T) {
@@ -91,7 +91,7 @@ func TestUnixUpdater_FindExecutable_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to find an executable
-	_, err = updater.findExecutable(tempDir)
+	_, err = find_update_executable(tempDir, "test", false, is_platform_executable)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no executable found")
 }
@@ -111,9 +111,9 @@ func TestUnixUpdater_FindExecutable_NestedDirectory(t *testing.T) {
 	require.NoError(t, err)
 
 	// Find the executable
-	foundPath, err := updater.findExecutable(tempDir)
+	found_path, err := find_update_executable(tempDir, "test", false, is_platform_executable)
 	require.NoError(t, err)
-	assert.Equal(t, execPath, foundPath)
+	assert.Equal(t, execPath, found_path)
 }
 
 // Helper function to create a test tar.gz archive with an executable

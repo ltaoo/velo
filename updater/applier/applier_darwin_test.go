@@ -39,15 +39,15 @@ func TestDarwinUpdater_VerifyCodeSignature_UnsignedBinary(t *testing.T) {
 	err := os.WriteFile(unsignedExec, []byte("#!/bin/sh\necho test\n"), 0755)
 	require.NoError(t, err)
 
-	// Verify code signature should fail for unsigned binary
+	// Unsigned artifacts are supported so projects without a signing identity can update.
 	err = updater.VerifyCodeSignature(unsignedExec)
-	require.Error(t, err, "Unsigned binary should fail verification")
+	require.NoError(t, err, "Unsigned binary should be accepted")
+}
 
-	// Check that it's a security error
-	updateErr, ok := err.(*types.UpdateError)
-	require.True(t, ok, "Error should be an UpdateError")
-	assert.Equal(t, types.ErrCategorySecurity, updateErr.Category, "Error should be a security error")
-	assert.Contains(t, updateErr.Message, "code signature verification failed")
+func TestIsUnsignedCodeSignatureOutput(t *testing.T) {
+	assert.True(t, is_unsigned_code_signature_output("/tmp/app: code object is not signed at all"))
+	assert.False(t, is_unsigned_code_signature_output("invalid signature (code or signature have been modified)"))
+	assert.False(t, is_unsigned_code_signature_output("No such file or directory"))
 }
 
 func TestDarwinUpdater_VerifyCodeSignature_NonExistentFile(t *testing.T) {
