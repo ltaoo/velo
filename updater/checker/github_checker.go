@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
 	"github.com/ltaoo/velo/updater/types"
 	"github.com/ltaoo/velo/updater/util"
-
 	"github.com/rs/zerolog"
 )
 
@@ -158,11 +158,11 @@ func (g *GitHubVersionChecker) CheckLatest(ctx context.Context, currentVersion s
 	}
 
 	// Validate tag_name is a valid semver format
-	normalizedTag := strings.TrimPrefix(release.TagName, "v")
-	if normalizedTag == "" || !util.IsValidSemver(normalizedTag) {
+	normalized_tag := strings.TrimPrefix(release.TagName, "v")
+	if normalized_tag == "" || !util.IsValidVersion(normalized_tag) {
 		return nil, &types.UpdateError{
 			Category: types.ErrCategoryValidation,
-			Message:  fmt.Sprintf("GitHub release tag_name '%s' is not a valid semver format", release.TagName),
+			Message:  fmt.Sprintf("GitHub release tag_name '%s' is not a supported version format", release.TagName),
 		}
 	}
 

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"golang.org/x/term"
 )
@@ -105,7 +104,7 @@ func runDev(dir string, engine string) error {
 		cmd.Dir = dir
 		cmd.Stdout = crlf
 		cmd.Stderr = crlf
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		configure_process_group(cmd)
 		if engine != "" {
 			cmd.Env = append(os.Environ(), "VELO_WEBVIEW_ENGINE="+engine)
 		}
@@ -140,12 +139,12 @@ func runDev(dir string, engine string) error {
 				switch k {
 				case 'r', 'R':
 					action = "restart"
-					syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+					terminate_process(cmd)
 					<-doneCh
 					break loop
 				case 'q', 'Q', 3: // 3 = Ctrl+C
 					action = "quit"
-					syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+					terminate_process(cmd)
 					<-doneCh
 					break loop
 				}

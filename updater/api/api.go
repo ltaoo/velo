@@ -26,8 +26,10 @@ type AppUpdater struct {
 	latestRelease                *types.ReleaseInfo
 	downloadedNewVersionFilepath string
 	checker                      *checker.UpdateChecker
-	downloader                   *downloader.UpdateDownloadManager
+	downloader                   types.UpdateDownloader
 	applier                      master.UpdateApplier
+	restart_coordinator          types.RestartCoordinator
+	request_shutdown             func()
 	cache                        *cache.CacheManager
 	logger                       *zerolog.Logger
 }
@@ -81,17 +83,22 @@ func NewUpdaterWithOptions(opts *types.UpdaterOptions, logger *zerolog.Logger) (
 		state.CurrentVersion = currentVersion
 	}
 	updateApplier := applier.NewPlatformUpdater(logger)
-	updateDownloader := downloader.NewUpdateDownloadManager(logger)
+	var update_downloader types.UpdateDownloader = opts.Downloader
+	if update_downloader == nil {
+		update_downloader = downloader.NewUpdateDownloadManager(logger)
+	}
 	return &AppUpdater{
-		checker:        updateChecker,
-		downloader:     updateDownloader,
-		applier:        updateApplier,
-		cache:          cacheManager,
-		logger:         logger,
-		cfg:            opts.Config,
-		state:          state,
-		statePath:      statePath,
-		currentVersion: currentVersion,
+		checker:             updateChecker,
+		downloader:          update_downloader,
+		applier:             updateApplier,
+		restart_coordinator: opts.RestartCoordinator,
+		request_shutdown:    opts.RequestShutdown,
+		cache:               cacheManager,
+		logger:              logger,
+		cfg:                 opts.Config,
+		state:               state,
+		statePath:           statePath,
+		currentVersion:      currentVersion,
 	}, nil
 }
 
@@ -292,7 +299,7 @@ func (u *AppUpdater) ApplyUpdateThenRestartApplication(ctx context.Context) erro
 	if err := u.ApplyUpdate(ctx, u.downloadedNewVersionFilepath); err != nil {
 		return err
 	}
-	if err := u.RestartApplication([]string{"--update"}); err != nil {
+	if err := u.RestartApplication(os.Args[1:]); err != nil {
 		return err
 	}
 	return nil
@@ -477,19 +484,32 @@ func (uo *AppUpdater) ClearSkippedVersions() error {
 	return nil
 }
 
-// RestartApplication restarts the application after an update
-// This should be called after a successful update
+// RestartApplication records a restart request and asks the host application
+// to shut down. The configured RestartCoordinator must execute the replacement
+// only after the host has released its resources.
 func (uo *AppUpdater) RestartApplication(args []string) error {
-	execPath, err := util.GetExecutablePath()
+	if uo.restart_coordinator == nil {
+		return fmt.Errorf("restart coordinator is not configured")
+	}
+	if uo.request_shutdown == nil {
+		return fmt.Errorf("restart shutdown callback is not configured")
+	}
+	executable_path, err := util.GetExecutablePath()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 	uo.logger.Info().
-		Str("exec_path", execPath).
+		Str("exec_path", executable_path).
 		Strs("args", args).
 		Msg("Restarting application")
 
-	return uo.applier.Restart(execPath, args)
+	arguments := append([]string{executable_path}, args...)
+	return uo.restart_coordinator.Request(
+		executable_path,
+		arguments,
+		os.Environ(),
+		uo.request_shutdown,
+	)
 }
 
 // DefaultUpdaterConfig returns the default updater configuration

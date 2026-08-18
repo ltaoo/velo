@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 	"unsafe"
+
 	"github.com/ltaoo/velo/updater/master"
 	"github.com/ltaoo/velo/updater/types"
-
 	"github.com/rs/zerolog"
 )
 
@@ -365,44 +364,6 @@ func (wu *WindowsUpdater) findExecutable(dir string) (string, error) {
 	}
 
 	return execPath, nil
-}
-
-// Restart restarts the application with the given arguments
-func (wu *WindowsUpdater) Restart(execPath string, args []string) error {
-	wu.logger.Info().
-		Str("exec", execPath).
-		Strs("args", args).
-		Msg("Restarting application")
-
-	// Create command
-	cmd := exec.Command(execPath, args...)
-
-	// Detach from parent process
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-	}
-
-	// Start the new process
-	if err := cmd.Start(); err != nil {
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to start new process",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"exec": execPath,
-				"args": args,
-			},
-		}
-	}
-
-	wu.logger.Info().
-		Int("pid", cmd.Process.Pid).
-		Msg("New process started")
-
-	// Exit current process
-	os.Exit(0)
-
-	return nil
 }
 
 // newPlatformUpdaterImpl creates a Windows-specific updater

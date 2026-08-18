@@ -29,6 +29,8 @@ type UpdateApplier interface {
 	// Cleanup removes backup and temporary files
 	Cleanup(paths ...string) error
 
-	// Restart restarts the application with the given arguments
-	Restart(execPath string, args []string) error
+	// Restart is retained for source compatibility. Implementations must not
+	// terminate the host application directly; callers should configure and use
+	// updater/restart.Manager instead.
+	Restart(exec_path string, arguments []string) error
 }

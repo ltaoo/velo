@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/nfnt/resize"
 )
@@ -65,8 +66,10 @@ func GenerateIcons(cfg *Config, baseDir, outDir string) error {
 	}
 
 	// macOS iconset + icns (only works on macOS with iconutil)
-	if err := generateIconset(src, resized, iconsDir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: icns generation skipped: %v\n", err)
+	if runtime.GOOS == "darwin" {
+		if err := generateIconset(src, resized, iconsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: icns generation skipped: %v\n", err)
+		}
 	}
 
 	// Generate tray icon (44x44 for macOS Retina, also works for Windows)
@@ -102,8 +105,8 @@ func generateIconset(src image.Image, resized map[int]image.Image, outDir string
 		return err
 	}
 
-	iconsetSizes := []int{16, 32, 64, 128, 256, 512}
-	for _, size := range iconsetSizes {
+	iconset_sizes := []int{16, 32, 128, 256, 512}
+	for _, size := range iconset_sizes {
 		if err := savePNG(filepath.Join(iconsetDir, fmt.Sprintf("icon_%dx%d.png", size, size)), resized[size]); err != nil {
 			return err
 		}

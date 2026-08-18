@@ -20,6 +20,60 @@
 
 ## 快速开始
 
+### 两阶段重启
+
+更新库不会直接调用 `os.Exit`。应用需要保留同一个 restart manager，在更新完成后请求退出，并在所有服务和日志完成清理后执行进程替换：
+
+```go
+restart_manager := restart.NewManager()
+
+app_updater, err := updater.NewUpdaterWithOptions(&types.UpdaterOptions{
+    Config:             update_config,
+    CurrentVersion:     current_version,
+    RestartCoordinator: restart_manager,
+    RequestShutdown:    request_shutdown,
+}, logger)
+if err != nil {
+    return err
+}
+
+// 更新应用成功后，仅登记重启并触发优雅退出。
+if err := app_updater.RestartApplication(os.Args[1:]); err != nil {
+    return err
+}
+
+// 应用主循环返回，API、代理、数据库和日志全部关闭后执行。
+_, err = restart_manager.ReplaceIfRequested()
+```
+
+macOS 和 Linux 使用 `syscall.Exec`，保留 PID、终端和原进程参数；Windows 使用附着当前终端的受监督子进程。
+
+### 自定义下载器
+
+velo 默认提供支持重试、断点续传和 SHA-256 校验的下载器。项目也可以通过 `UpdaterOptions.Downloader` 注入自己的下载引擎：
+
+```go
+type project_downloader struct{}
+
+func (d *project_downloader) DownloadUpdate(
+    ctx context.Context,
+    release *types.ReleaseInfo,
+    on_progress types.DownloadCallback,
+) (string, error) {
+    return download_with_project_engine(ctx, release, on_progress)
+}
+
+app_updater, err := updater.NewUpdaterWithOptions(&types.UpdaterOptions{
+    Config:         update_config,
+    CurrentVersion: current_version,
+    Downloader:     &project_downloader{},
+}, logger)
+```
+
+项目也可以完全自行下载，然后直接调用 `ApplyUpdate(ctx, update_path)`。
+
+macOS 项目如果自行应用二进制更新，可以复用 `updater/quarantine.Remove(path)` 清除文件或 `.app` bundle 的 `com.apple.quarantine`；其他平台调用该函数不会执行任何操作。
+
 ### 1. 安装依赖
 
 ```bash

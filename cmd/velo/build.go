@@ -223,7 +223,7 @@ func runBuild(projectPath, platform, outDir, versionOverride string) error {
 		if p == "windows" {
 			fmt.Println("running go-winres...")
 			winresDir := filepath.Join(buildDir, "winres")
-			cmd := exec.Command("go-winres", "make", "--in", filepath.Join(winresDir, "winres.json"), "--out", projectPath)
+			cmd := exec.Command("go-winres", "make", "--in", filepath.Join(winresDir, "winres.json"), "--out", filepath.Join(projectPath, "rsrc"))
 			cmd.Dir = projectPath
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -281,12 +281,17 @@ func runBuild(projectPath, platform, outDir, versionOverride string) error {
 					return fmt.Errorf("creating .app bundle: %w", err)
 				}
 				appDir := filepath.Join(distDir, fmt.Sprintf("%s_%s_%s.app", appName, "darwin", t.goarch))
-				if creds != nil {
+				has_developer_id := creds != nil
+				if has_developer_id {
 					if err := signDarwinApp(creds, appDir, appName, filepath.Join(buildDir, "entitlements.plist")); err != nil {
 						return fmt.Errorf("signing .app: %w", err)
 					}
+				} else {
+					if err := sign_darwin_app_ad_hoc(appDir, appName, filepath.Join(buildDir, "entitlements.plist")); err != nil {
+						return fmt.Errorf("ad-hoc signing .app: %w", err)
+					}
 				}
-				dmgPath, err := createDarwinDMG(cfg, projectPath, appDir, distDir, appName, version, t.goarch)
+				dmgPath, err := createDarwinDMG(cfg, projectPath, appDir, distDir, appName, version, t.goarch, has_developer_id)
 				if err != nil {
 					return fmt.Errorf("creating DMG: %w", err)
 				}
@@ -407,7 +412,25 @@ func signDarwinApp(creds *darwinCreds, appDir, appName, entitlementsPath string)
 	return nil
 }
 
-func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName, version, arch string) (string, error) {
+func sign_darwin_app_ad_hoc(app_dir, app_name, entitlements_path string) error {
+	fmt.Println("signing .app with ad-hoc identity...")
+
+	binary_path := filepath.Join(app_dir, "Contents", "MacOS", app_name)
+	if err := runCmd("codesign", "--force", "--sign", "-", "--entitlements", entitlements_path, binary_path); err != nil {
+		return fmt.Errorf("ad-hoc signing binary: %w", err)
+	}
+	if err := runCmd("codesign", "--force", "--sign", "-", "--entitlements", entitlements_path, app_dir); err != nil {
+		return fmt.Errorf("ad-hoc signing app bundle: %w", err)
+	}
+	if err := runCmd("codesign", "--verify", "--deep", "--strict", "--verbose=2", app_dir); err != nil {
+		return fmt.Errorf("verifying ad-hoc app signature: %w", err)
+	}
+
+	fmt.Println("  ✓ ad-hoc signed (not notarized)")
+	return nil
+}
+
+func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName, version, arch string, has_developer_id bool) (string, error) {
 	fmt.Println("creating DMG...")
 
 	dmgPath := filepath.Join(distDir, fmt.Sprintf("%s_%s_darwin_%s.dmg", appName, version, arch))
@@ -441,7 +464,27 @@ func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName
 	}
 
 	displayName := cfg.DisplayName()
-	appBundleName := filepath.Base(appDir)
+	appBundleName := appName + ".app"
+
+	staging_dir, err := os.MkdirTemp("", "velo-dmg-*")
+	if err != nil {
+		return "", fmt.Errorf("creating DMG staging directory: %w", err)
+	}
+	defer os.RemoveAll(staging_dir)
+
+	staged_app_dir := filepath.Join(staging_dir, appBundleName)
+	if err := runCmd("ditto", appDir, staged_app_dir); err != nil {
+		return "", fmt.Errorf("staging app bundle: %w", err)
+	}
+
+	instructions_name := "首次运行说明.txt"
+	if !has_developer_id {
+		instructions_path := filepath.Join(staging_dir, instructions_name)
+		instructions := fmt.Sprintf("%s 未使用 Apple Developer ID 签名或公证。\n\n安装步骤：\n1. 将 %s 拖到 Applications。\n2. 打开终端并执行：\n   xattr -dr com.apple.quarantine \"/Applications/%s\"\n3. 再次打开 %s。\n\n请只运行从官方发布页下载的安装包。\n", appName, appBundleName, appBundleName, appName)
+		if err := os.WriteFile(instructions_path, []byte(instructions), 0644); err != nil {
+			return "", fmt.Errorf("writing unsigned build instructions: %w", err)
+		}
+	}
 
 	args := []string{
 		"--volname", displayName,
@@ -451,6 +494,9 @@ func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName
 		"--icon", appBundleName, fmt.Sprintf("%d", appX), fmt.Sprintf("%d", appY),
 		"--hide-extension", appBundleName,
 		"--app-drop-link", fmt.Sprintf("%d", appsX), fmt.Sprintf("%d", appsY),
+	}
+	if !has_developer_id {
+		args = append(args, "--icon", instructions_name, "330", "320")
 	}
 
 	// Background image
@@ -464,7 +510,7 @@ func createDarwinDMG(cfg *buildcfg.Config, projectPath, appDir, distDir, appName
 		}
 	}
 
-	args = append(args, dmgPath, appDir)
+	args = append(args, dmgPath, staging_dir)
 
 	if err := runCmd("create-dmg", args...); err != nil {
 		return "", fmt.Errorf("create-dmg: %w", err)

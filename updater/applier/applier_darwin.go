@@ -11,16 +11,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
-	"github.com/ltaoo/velo/updater/master"
-	"github.com/ltaoo/velo/updater/types"
 
+	"github.com/ltaoo/velo/updater/master"
+	"github.com/ltaoo/velo/updater/quarantine"
+	"github.com/ltaoo/velo/updater/types"
 	"github.com/rs/zerolog"
 )
 
 // DarwinUpdater implements PlatformUpdater for macOS
 type DarwinUpdater struct {
-	logs []string
 	*BaseApplier
 }
 
@@ -141,6 +140,10 @@ func (du *DarwinUpdater) Apply(updatePath, execPath string) error {
 		du.triggerRollback(backupPath, appBundlePath)
 		return err
 	}
+	if err := quarantine.Remove(appBundlePath); err != nil {
+		du.triggerRollback(backupPath, appBundlePath)
+		return err
+	}
 
 	if err := du.VerifyCodeSignature(appBundlePath); err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
@@ -258,6 +261,10 @@ func (du *DarwinUpdater) applyFromArchive(updatePath, execPath string) error {
 	}
 
 	if err := du.ensureExecutablePermission(appBundlePath); err != nil {
+		du.triggerRollback(backupPath, appBundlePath)
+		return err
+	}
+	if err := quarantine.Remove(appBundlePath); err != nil {
 		du.triggerRollback(backupPath, appBundlePath)
 		return err
 	}
@@ -502,6 +509,10 @@ func (du *DarwinUpdater) applyExecutableOnly(updatePath, execPath string) error 
 			Cause:    err,
 		}
 	}
+	if err := quarantine.Remove(execPath); err != nil {
+		du.restoreExecutable(backupPath, execPath)
+		return err
+	}
 
 	// Verify code signature
 	if err := du.VerifyCodeSignature(execPath); err != nil {
@@ -728,149 +739,6 @@ func (du *DarwinUpdater) VerifyCodeSignature(path string) error {
 		Msg("Code signature verified successfully")
 
 	return nil
-}
-
-// Restart restarts the application
-func (du *DarwinUpdater) Restart(execPath string, args []string) error {
-	du.logger.Info().
-		Str("exec", execPath).
-		Strs("args", args).
-		Msg("Restarting application")
-	du.logs = append(du.logs, fmt.Sprintf("Restarting application: %s %v", execPath, args))
-	// Try launching via LaunchServices when inside an .app bundle
-	appBundlePath := du.findAppBundlePath(execPath)
-	du.logs = append(du.logs, fmt.Sprintf("find App bundle path: %s", appBundlePath))
-	if appBundlePath != "" {
-		du.logger.Info().
-			Str("app_bundle", appBundlePath).
-			Msg("Launching via macOS LaunchServices (open)")
-
-		// If Gatekeeper blocks, attempt ad-hoc re-sign to allow dev builds to relaunch
-		// if !du.gatekeeperOK(appBundlePath) {
-		// 	du.logger.Warn().Str("app_bundle", appBundlePath).Msg("Gatekeeper check failed, attempting ad-hoc re-sign")
-		// 	if err := du.adHocResign(appBundlePath); err != nil {
-		// 		du.logger.Warn().Err(err).Msg("Ad-hoc re-sign failed")
-		// 	}
-		// }
-		fmt.Println("[]applier  before du.tryOpenLaunch", appBundlePath)
-		du.logger.Info().
-			Str("appBundlePath", appBundlePath).
-			Msg("try open app bundle path")
-		if err := du.tryOpenLaunch(appBundlePath, args); err == nil {
-			os.Exit(0)
-			return nil
-		}
-		du.logger.Warn().Msg("LaunchServices open strategies failed, falling back to direct exec")
-	}
-
-	fmt.Println("[]applier  before exec.Command(execPath)", execPath)
-	du.logger.Info().
-		Str("appBundlePath", execPath).
-		Msg("open exec with exec.Command")
-
-	// Fallback: directly execute the binary (non-.app or open failed)
-	cmd := exec.Command(execPath, args...)
-
-	// Detach from parent process
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-
-	// Start the new process
-	if err := cmd.Start(); err != nil {
-		return &types.UpdateError{
-			Category: types.ErrCategoryFileSystem,
-			Message:  "failed to start new process",
-			Cause:    err,
-		}
-	}
-
-	du.logger.Info().
-		Int("pid", cmd.Process.Pid).
-		Msg("New process started via exec")
-
-	// Exit current process
-	os.Exit(0)
-
-	return nil
-}
-
-// gatekeeperOK checks if spctl allows execution
-func (du *DarwinUpdater) gatekeeperOK(path string) bool {
-	cmd := exec.Command("spctl", "-a", "-t", "exec", "-vv", path)
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return true
-}
-
-// adHocResign performs an ad-hoc code signing for development builds
-func (du *DarwinUpdater) adHocResign(appBundlePath string) error {
-	cmd := exec.Command("codesign", "--force", "--deep", "--sign", "-", "--options", "runtime", appBundlePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return &types.UpdateError{
-			Category: types.ErrCategorySecurity,
-			Message:  "failed to ad-hoc sign app bundle",
-			Cause:    err,
-			Context: map[string]interface{}{
-				"output": strings.TrimSpace(string(output)),
-			},
-		}
-	}
-	return nil
-}
-
-// tryOpenLaunch attempts multiple open strategies: by path, bundle id, and app name
-func (du *DarwinUpdater) tryOpenLaunch(appBundlePath string, args []string) error {
-	// Strategy 1: open by bundle path
-	if err := du.startOpen([]string{"-n", appBundlePath}, args); err == nil {
-		return nil
-	}
-	// Strategy 2: open by bundle identifier
-	if bid := du.readInfoPlistValue(appBundlePath, "CFBundleIdentifier"); bid != "" {
-		if err := du.startOpen([]string{"-n", "-b", bid}, args); err == nil {
-			return nil
-		}
-	}
-	// Strategy 3: open by app name
-	appName := du.readInfoPlistValue(appBundlePath, "CFBundleName")
-	if appName == "" {
-		appName = strings.TrimSuffix(filepath.Base(appBundlePath), ".app")
-	}
-	if appName != "" {
-		if err := du.startOpen([]string{"-n", "-a", appName}, args); err == nil {
-			return nil
-		}
-	}
-	return &types.UpdateError{
-		Category: types.ErrCategoryFileSystem,
-		Message:  "failed to start via LaunchServices",
-	}
-}
-
-// startOpen builds and starts an `open` command with optional args
-func (du *DarwinUpdater) startOpen(baseArgs []string, extraArgs []string) error {
-	final := append([]string{}, baseArgs...)
-	if len(extraArgs) > 0 {
-		final = append(final, "--args")
-		final = append(final, extraArgs...)
-	}
-	cmd := exec.Command("open", final...)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// readInfoPlistValue reads an Info.plist key using `defaults read`
-func (du *DarwinUpdater) readInfoPlistValue(appBundlePath, key string) string {
-	plist := filepath.Join(appBundlePath, "Contents", "Info.plist")
-	cmd := exec.Command("defaults", "read", plist, key)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // newPlatformUpdaterImpl creates a macOS-specific updater
