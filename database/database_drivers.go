@@ -30,5 +30,5 @@ func NewDatabase(cfg *DBConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
 	}
 
-	return openDatabase(dialector)
+	return openDatabase(dialector, cfg)
 }

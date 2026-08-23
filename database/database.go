@@ -28,6 +28,9 @@ type DBConfig struct {
 	Name     string
 	// Path is the file path for SQLite databases.
 	Path string
+	// DisableTimestampCallbacks prevents Velo from registering its formatted
+	// string created_at and updated_at callbacks. GORM's callbacks remain active.
+	DisableTimestampCallbacks bool
 }
 
 // DefaultSQLiteConfig returns a config for a SQLite database stored beside the executable.
@@ -38,13 +41,15 @@ func DefaultSQLiteConfig() *DBConfig {
 	}
 }
 
-func openDatabase(dialector gorm.Dialector) (*gorm.DB, error) {
+func openDatabase(dialector gorm.Dialector, cfg *DBConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	registerTimestampCallbacks(db)
+	if !cfg.DisableTimestampCallbacks {
+		registerTimestampCallbacks(db)
+	}
 
 	return db, nil
 }

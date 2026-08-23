@@ -49,13 +49,17 @@ func TestBoxMigrateUsesConfiguredSQLiteDatabase(t *testing.T) {
 	}
 
 	if err := app.Migrate(&velo.VeloDatabaseOpt{
-		DBType: velo.DBTypeSQLite,
-		DBPath: ":memory:",
+		DBType:                    velo.DBTypeSQLite,
+		DBPath:                    ":memory:",
+		DisableTimestampCallbacks: true,
 	}); err != nil {
 		t.Fatalf("migrate through Box: %v", err)
 	}
 	if app.DB == nil {
 		t.Fatal("expected Migrate to store the database on Box.DB")
+	}
+	if app.DB.Callback().Create().Get("set_created_at") != nil {
+		t.Fatal("expected Migrate to disable timestamp callbacks")
 	}
 
 	sqlDB, err := app.DB.DB()

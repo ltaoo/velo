@@ -21,9 +21,10 @@ type Migrator = database.Migrator
 
 // VeloDatabaseOpt configures a database initialized through Box.Migrate.
 type VeloDatabaseOpt struct {
-	DBType     DBType
-	DBPath     string
-	Migrations *embed.FS
+	DBType                    DBType
+	DBPath                    string
+	Migrations                *embed.FS
+	DisableTimestampCallbacks bool
 }
 
 const (

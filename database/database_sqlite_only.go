@@ -16,5 +16,5 @@ func NewDatabase(cfg *DBConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported database type in sqlite_only build: %s", cfg.Type)
 	}
 
-	return openDatabase(sqlite.Open(cfg.Path))
+	return openDatabase(sqlite.Open(cfg.Path), cfg)
 }

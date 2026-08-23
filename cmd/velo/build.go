@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ltaoo/velo/buildcfg"
+	"github.com/ltaoo/velo/internal/webview2loader"
 )
 
 type darwinCreds struct {
@@ -271,6 +272,17 @@ func runBuild(projectPath, platform, outDir, versionOverride string) error {
 			}
 			if header, err := os.ReadFile(outputPath); err == nil && len(header) > 8 && string(header[:8]) == "!<arch>\n" {
 				return fmt.Errorf("go build produced a library archive, not an executable — %s must contain a main package", projectPath)
+			}
+			if t.goos == "windows" {
+				loaderSource, err := webview2loader.Find(t.goarch, filepath.Dir(outputPath), projectPath)
+				if err != nil {
+					return fmt.Errorf("locating WebView2 loader for %s/%s: %w", t.goos, t.goarch, err)
+				}
+				loaderPath, err := webview2loader.CopyToDirectory(loaderSource, filepath.Dir(outputPath))
+				if err != nil {
+					return fmt.Errorf("staging WebView2 loader for %s/%s: %w", t.goos, t.goarch, err)
+				}
+				fmt.Printf("  ✓ %s\n", loaderPath)
 			}
 
 			fmt.Printf("  ✓ %s/%s\n", t.goos, t.goarch)

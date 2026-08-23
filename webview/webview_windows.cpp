@@ -55,9 +55,10 @@ typedef HRESULT (__stdcall *CreateEnvWithOptionsFunc)(
 
 static CreateEnvWithOptionsFunc pCreateCoreWebView2EnvironmentWithOptions = nullptr;
 
-static bool LoadWebView2DLL() {
+static bool LoadWebView2DLL(const wchar_t* loaderPath) {
     if (pCreateCoreWebView2EnvironmentWithOptions) return true;
-    HMODULE hDll = LoadLibraryW(L"WebView2Loader.dll");
+    const wchar_t* path = loaderPath && loaderPath[0] ? loaderPath : L"WebView2Loader.dll";
+    HMODULE hDll = LoadLibraryW(path);
     if (!hDll) return false;
     pCreateCoreWebView2EnvironmentWithOptions = (CreateEnvWithOptionsFunc)GetProcAddress(hDll, "CreateCoreWebView2EnvironmentWithOptions");
     return pCreateCoreWebView2EnvironmentWithOptions != nullptr;
@@ -646,7 +647,7 @@ void webviewTerminate() {
     PostQuitMessage(0);
 }
 
-void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden) {
+void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath) {
     g_frameless = (frameless != 0);
     g_hidden = (hidden != 0);
     HINSTANCE hInstance = GetModuleHandle(nullptr);
@@ -669,7 +670,8 @@ void webviewRunApp(const char* url, const char* injectedJS, const void* iconData
         // Icon handling could be added here
     }
 
-    if (!LoadWebView2DLL()) {
+    std::wstring loaderPathWide = loaderPath && loaderPath[0] ? ToWide(loaderPath) : L"";
+    if (!LoadWebView2DLL(loaderPathWide.c_str())) {
         MessageBoxW(nullptr, L"Failed to load WebView2Loader.dll", L"Error", MB_ICONERROR);
         return;
     }

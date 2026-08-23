@@ -514,8 +514,9 @@ func (b *Box) Migrate(opt *VeloDatabaseOpt) error {
 		return fmt.Errorf("database path is required")
 	}
 	return b.UseDatabase(&DBConfig{
-		Type: opt.DBType,
-		Path: opt.DBPath,
+		Type:                      opt.DBType,
+		Path:                      opt.DBPath,
+		DisableTimestampCallbacks: opt.DisableTimestampCallbacks,
 	}, opt.Migrations)
 }
 

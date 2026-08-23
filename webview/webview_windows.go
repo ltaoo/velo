@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/ltaoo/velo/internal/webview2loader"
 )
 
 /*
@@ -266,6 +268,12 @@ func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.c
 func open_webview(opts *BoxWebviewOptions) {
 	webview_opts = opts
 	runtime.LockOSThread()
+	loaderPath, loaderErr := webview2loader.Find(runtime.GOARCH)
+	if loaderErr != nil {
+		traceLog("WebView2 loader lookup failed: %v", loaderErr)
+	}
+	cLoaderPath := C.CString(loaderPath)
+	defer C.free(unsafe.Pointer(cLoaderPath))
 	cUrl := C.CString(opts.URL)
 	defer C.free(unsafe.Pointer(cUrl))
 	cInjectedJS := C.CString(opts.InjectedJS)
@@ -287,7 +295,7 @@ func open_webview(opts *BoxWebviewOptions) {
 	if opts.Hidden {
 		hidden = 1
 	}
-	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden)
+	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, cLoaderPath)
 }
 
 func open_window(opts *BoxWebviewOptions) {

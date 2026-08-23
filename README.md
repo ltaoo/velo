@@ -57,6 +57,25 @@ velo build -version 1.2.3
 
 The `velo build` command reads `velo.json` from the project directory, generates icons, platform configs, and compiles binaries for the target platform(s). The legacy `app-config.json` name remains supported with a deprecation warning.
 
+On Windows, Velo also locates the architecture-matched `WebView2Loader.dll`
+and copies it next to the generated executable. Lookup order is:
+
+1. `WEBVIEW2_LOADER_DLL` (an explicit DLL path).
+2. A `WebView2Loader.dll` already present in the project or output directory.
+3. `WEBVIEW2_SDK_DIR` (a WebView2 SDK/NuGet package directory).
+4. `NUGET_PACKAGES` and the default `~/.nuget/packages/microsoft.web.webview2` cache.
+
+For a downloaded SDK outside the NuGet cache, set:
+
+```powershell
+$env:WEBVIEW2_SDK_DIR = "C:\path\to\webview2-sdk"
+velo build -platform windows
+```
+
+The Loader is distinct from the Evergreen WebView2 Runtime. Production
+installers should still verify that the Runtime is installed on the target
+machine.
+
 ## Building the Example Project
 
 ```bash
