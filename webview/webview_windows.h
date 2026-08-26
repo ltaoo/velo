@@ -3,7 +3,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath);
+void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath);
+void webviewOpenWindow(const char* name, const char* url, const char* injectedJS, const char* title, int width, int height, int x, int y, int hasPosition, int frameless, int hidden, int nonActivating, int preserveStateOnFocus);
 void webviewEval(void* webview, const char* js);
 void webviewTerminate();
 void webviewSchemeTaskDidReceiveResponse(void* task, int status, const char* contentType, const char* headers);
@@ -28,6 +29,15 @@ void webviewSetAlwaysOnTop(int onTop);
 void webviewSetURL(const char* url);
 void webviewClose(void);
 void webviewStartWindowDrag(void);
+void webviewCloseWindow(void* webview);
+void webviewMinimizeWindow(void* webview);
+void webviewMaximizeWindow(void* webview);
+void webviewRestoreWindow(void* webview);
+void webviewHideWindow(void* webview);
+void webviewSetWindowSize(void* webview, int width, int height);
+void webviewGetWindowState(void* webview, int* x, int* y, int* width, int* height);
+void webviewSetWindowAlwaysOnTop(void* webview, int onTop);
+void webviewStartWindowDragFor(void* webview);
 #ifdef __cplusplus
 }
 #endif

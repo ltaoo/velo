@@ -29,6 +29,10 @@ import "C"
 var webview_opts *BoxWebviewOptions
 var globalWebview unsafe.Pointer
 
+var windowsMu sync.RWMutex
+var windowsByName = make(map[string]*BoxWebviewOptions)
+var windowsByWebview = make(map[unsafe.Pointer]*BoxWebviewOptions)
+
 var traceLogMu sync.Mutex
 var traceLogFile *os.File
 
@@ -128,9 +132,72 @@ func GoTrace(msg *C.char) {
 	traceLog("[cpp] %s", C.GoString(msg))
 }
 
+func registerWindowsOptions(opts *BoxWebviewOptions) {
+	if opts == nil {
+		return
+	}
+	name := strings.TrimSpace(opts.Name)
+	if name == "" {
+		name = "default"
+	}
+	windowsMu.Lock()
+	windowsByName[name] = opts
+	for webview, current := range windowsByWebview {
+		currentName := "default"
+		if current != nil && strings.TrimSpace(current.Name) != "" {
+			currentName = strings.TrimSpace(current.Name)
+		}
+		if currentName == name {
+			windowsByWebview[webview] = opts
+		}
+	}
+	windowsMu.Unlock()
+}
+
+func windowsOptionsForWebview(webview unsafe.Pointer) *BoxWebviewOptions {
+	windowsMu.RLock()
+	opts := windowsByWebview[webview]
+	windowsMu.RUnlock()
+	if opts != nil {
+		return opts
+	}
+	return webview_opts
+}
+
+//export GoRegisterWebview
+func GoRegisterWebview(webview unsafe.Pointer, name *C.char) {
+	windowName := strings.TrimSpace(C.GoString(name))
+	windowsMu.Lock()
+	opts := windowsByName[windowName]
+	if opts != nil {
+		windowsByWebview[webview] = opts
+	}
+	windowsMu.Unlock()
+	if globalWebview == nil {
+		globalWebview = webview
+	}
+}
+
+//export GoHandleWindowClosed
+func GoHandleWindowClosed(webview unsafe.Pointer, name *C.char) {
+	windowName := strings.TrimSpace(C.GoString(name))
+	windowsMu.Lock()
+	opts := windowsByWebview[webview]
+	if opts == nil {
+		opts = windowsByName[windowName]
+	}
+	delete(windowsByWebview, webview)
+	if windowsByName[windowName] == opts {
+		delete(windowsByName, windowName)
+	}
+	windowsMu.Unlock()
+	if opts != nil && opts.HandleClose != nil {
+		go opts.HandleClose(windowName)
+	}
+}
+
 //export GoHandleMessage
 func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
-	globalWebview = webview
 	notifyReady()
 	goMsg := C.GoString(msg)
 
@@ -142,15 +209,30 @@ func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 		Method string      `json:"method"`
 		Args   interface{} `json:"args"`
 	}
-	if json.Unmarshal([]byte(goMsg), &parsed) == nil && handleWindowControlMessage(parsed.ID, parsed.Method, parsed.Args) {
+	if json.Unmarshal([]byte(goMsg), &parsed) == nil && handleWindowControlMessage(webview, parsed.ID, parsed.Method, parsed.Args) {
 		return
 	}
 
-	if webview_opts == nil || webview_opts.HandleMessage == nil {
+	opts := windowsOptionsForWebview(webview)
+	if opts == nil || opts.HandleMessage == nil {
 		return
 	}
-	id, result := webview_opts.HandleMessage(goMsg)
+	id, result := opts.HandleMessage(goMsg)
 	if id == "" {
+		return
+	}
+	sendCallbackTo(webview, id, result)
+}
+
+func sendCallback(id, result string) {
+	if globalWebview == nil {
+		return
+	}
+	sendCallbackTo(globalWebview, id, result)
+}
+
+func sendCallbackTo(webview unsafe.Pointer, id, result string) {
+	if webview == nil {
 		return
 	}
 	js := fmt.Sprintf(
@@ -162,51 +244,86 @@ func GoHandleMessage(webview unsafe.Pointer, msg *C.char) {
 	C.webviewEval(webview, cjs)
 }
 
-func sendCallback(id, result string) {
-	if globalWebview == nil {
-		return
-	}
-	js := fmt.Sprintf(
-		"window._goCallbacks && window._goCallbacks[%q] && window._goCallbacks[%q](%q);",
-		id, id, result,
-	)
-	cjs := C.CString(js)
-	defer C.free(unsafe.Pointer(cjs))
-	C.webviewEval(globalWebview, cjs)
-}
-
-func handleWindowControlMessage(id string, method string, args interface{}) bool {
+func handleWindowControlMessage(webview unsafe.Pointer, id string, method string, args interface{}) bool {
 	if !strings.HasPrefix(method, "__velo/window/") {
 		return false
 	}
 
 	switch method {
 	case "__velo/window/start_drag":
-		C.webviewStartWindowDrag()
+		C.webviewStartWindowDragFor(webview)
 	case "__velo/window/close":
 		if id != "" {
-			sendCallback(id, `{"success":true}`)
+			sendCallbackTo(webview, id, `{"success":true}`)
 		}
-		C.webviewClose()
+		C.webviewCloseWindow(webview)
 		return true
 	case "__velo/window/minimize":
-		C.webviewMinimize()
+		C.webviewMinimizeWindow(webview)
+	case "__velo/window/hide":
+		C.webviewHideWindow(webview)
+	case "__velo/window/set_size":
+		width := intArg(args, "width")
+		height := intArg(args, "height")
+		if width > 0 && height > 0 {
+			C.webviewSetWindowSize(webview, C.int(width), C.int(height))
+		}
+	case "__velo/window/state":
+		if id != "" {
+			sendCallbackTo(webview, id, windowsWindowState(webview))
+		}
+		return true
 	case "__velo/window/toggle_maximize":
-		C.webviewMaximize()
+		C.webviewMaximizeWindow(webview)
 	case "__velo/window/maximize":
-		C.webviewMaximize()
+		C.webviewMaximizeWindow(webview)
 	case "__velo/window/restore":
-		C.webviewRestore()
+		C.webviewRestoreWindow(webview)
 	case "__velo/window/set_always_on_top":
-		setAlwaysOnTop(boolArg(args, "onTop"))
+		onTop := C.int(0)
+		if boolArg(args, "onTop") {
+			onTop = 1
+		}
+		C.webviewSetWindowAlwaysOnTop(webview, onTop)
 	default:
 		return false
 	}
 
 	if id != "" {
-		sendCallback(id, `{"success":true}`)
+		sendCallbackTo(webview, id, `{"success":true}`)
 	}
 	return true
+}
+
+func windowsWindowState(webview unsafe.Pointer) string {
+	var x, y, width, height C.int
+	C.webviewGetWindowState(webview, &x, &y, &width, &height)
+	if width <= 0 || height <= 0 {
+		return `{"success":false}`
+	}
+	return fmt.Sprintf(
+		`{"success":true,"x":%d,"y":%d,"width":%d,"height":%d}`,
+		int(x), int(y), int(width), int(height),
+	)
+}
+
+func intArg(args interface{}, key string) int {
+	values, ok := args.(map[string]interface{})
+	if !ok || values == nil {
+		return 0
+	}
+	switch value := values[key].(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 func boolArg(args interface{}, key string) bool {
@@ -231,19 +348,28 @@ func boolArg(args interface{}, key string) bool {
 }
 
 func sendMessage(payload string) bool {
-	if globalWebview == nil {
+	windowsMu.RLock()
+	targets := make([]unsafe.Pointer, 0, len(windowsByWebview))
+	for webview := range windowsByWebview {
+		targets = append(targets, webview)
+	}
+	windowsMu.RUnlock()
+	if len(targets) == 0 {
 		return false
 	}
 	js := fmt.Sprintf("window.__receiveGoMessage && window.__receiveGoMessage(%s);", payload)
 	cjs := C.CString(js)
 	defer C.free(unsafe.Pointer(cjs))
-	C.webviewEval(globalWebview, cjs)
+	for _, webview := range targets {
+		C.webviewEval(webview, cjs)
+	}
 	return true
 }
 
 //export GoHandleSchemeTask
 func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.char) {
-	if webview_opts == nil || webview_opts.Mux == nil {
+	opts := windowsOptionsForWebview(webview)
+	if opts == nil || opts.Mux == nil {
 		traceLog("GoHandleSchemeTask: no mux configured")
 		return
 	}
@@ -258,7 +384,7 @@ func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.c
 		u.Scheme = "http"
 		req, _ := http.NewRequest("GET", u.String(), nil)
 		rw := &schemeResponseWriter{task: task}
-		webview_opts.Mux.ServeHTTP(rw, req)
+		opts.Mux.ServeHTTP(rw, req)
 		rw.Finish()
 		traceLog("served %s -> status=%d, body=%d bytes, contentType=%q",
 			goUrl, rw.statusLog, rw.bytesWritten, rw.contentTypeLog)
@@ -267,6 +393,7 @@ func GoHandleSchemeTask(webview unsafe.Pointer, task unsafe.Pointer, urlPtr *C.c
 
 func open_webview(opts *BoxWebviewOptions) {
 	webview_opts = opts
+	registerWindowsOptions(opts)
 	runtime.LockOSThread()
 	loaderPath, loaderErr := webview2loader.Find(runtime.GOARCH)
 	if loaderErr != nil {
@@ -287,6 +414,8 @@ func open_webview(opts *BoxWebviewOptions) {
 	}
 	cTitle := C.CString(opts.Title)
 	defer C.free(unsafe.Pointer(cTitle))
+	cName := C.CString(opts.Name)
+	defer C.free(unsafe.Pointer(cName))
 	frameless := C.int(0)
 	if opts.Frameless {
 		frameless = 1
@@ -295,11 +424,44 @@ func open_webview(opts *BoxWebviewOptions) {
 	if opts.Hidden {
 		hidden = 1
 	}
-	C.webviewRunApp(cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, cLoaderPath)
+	C.webviewRunApp(cName, cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, cLoaderPath)
 }
 
 func open_window(opts *BoxWebviewOptions) {
-	fmt.Println("Additional webview windows are not supported on Windows yet.")
+	if opts == nil {
+		return
+	}
+	registerWindowsOptions(opts)
+	cName := C.CString(opts.Name)
+	defer C.free(unsafe.Pointer(cName))
+	cURL := C.CString(opts.URL)
+	defer C.free(unsafe.Pointer(cURL))
+	cInjectedJS := C.CString(opts.InjectedJS)
+	defer C.free(unsafe.Pointer(cInjectedJS))
+	cTitle := C.CString(opts.Title)
+	defer C.free(unsafe.Pointer(cTitle))
+	C.webviewOpenWindow(
+		cName,
+		cURL,
+		cInjectedJS,
+		cTitle,
+		C.int(opts.Width),
+		C.int(opts.Height),
+		C.int(opts.X),
+		C.int(opts.Y),
+		boolCInt(opts.HasPosition),
+		boolCInt(opts.Frameless),
+		boolCInt(opts.Hidden),
+		boolCInt(opts.NonActivating),
+		boolCInt(opts.PreserveStateOnFocus),
+	)
+}
+
+func boolCInt(value bool) C.int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func focus_window(opts *BoxWebviewOptions) bool { return false }

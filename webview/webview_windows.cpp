@@ -27,6 +27,8 @@ typedef enum {
 extern "C" {
 void GoHandleMessage(void* webview, const char* msg);
 void GoHandleSchemeTask(void* webview, void* task, const char* url);
+void GoRegisterWebview(void* webview, const char* name);
+void GoHandleWindowClosed(void* webview, const char* name);
 void GoTrace(const char* msg);
 }
 
@@ -45,6 +47,44 @@ static ICoreWebView2Controller* g_controller = nullptr;
 static ICoreWebView2* g_webview = nullptr;
 static bool g_frameless = false;
 static bool g_hidden = false;
+
+struct WindowContext {
+    std::string name;
+    std::string url;
+    std::string injectedJS;
+    std::string title;
+    HWND hwnd = nullptr;
+    ICoreWebView2Controller* controller = nullptr;
+    ICoreWebView2* webview = nullptr;
+    bool primary = false;
+    bool frameless = false;
+    bool hidden = false;
+    bool nonActivating = false;
+    bool controllerPending = false;
+    bool closed = false;
+};
+
+struct OpenWindowRequest {
+    std::string name;
+    std::string url;
+    std::string injectedJS;
+    std::string title;
+    int width = 0;
+    int height = 0;
+    int x = 0;
+    int y = 0;
+    bool hasPosition = false;
+    bool frameless = false;
+    bool hidden = false;
+    bool nonActivating = false;
+    bool preserveStateOnFocus = false;
+};
+
+static WindowContext* g_primaryWindow = nullptr;
+static std::unordered_map<HWND, WindowContext*> g_windows;
+static std::unordered_map<ICoreWebView2*, WindowContext*> g_webviewWindows;
+static std::unordered_map<std::string, WindowContext*> g_namedWindows;
+static std::vector<OpenWindowRequest*> g_pendingWindows;
 
 // Dynamic loading of WebView2Loader.dll
 typedef HRESULT (__stdcall *CreateEnvWithOptionsFunc)(
@@ -118,6 +158,9 @@ struct ComCallback : Interface {
 
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 static void DoSchemeFinishOnUIThread(SchemeTask* task);
+static void OpenSecondaryWindow(OpenWindowRequest* request);
+static void CreateControllerForWindow(WindowContext* window);
+static void CleanupSecondaryWindow(WindowContext* window);
 
 // Custom message used to marshal scheme task Finish back to the UI thread.
 // WebView2 COM objects (g_env, args, deferral) are apartment-threaded — they
@@ -125,22 +168,40 @@ static void DoSchemeFinishOnUIThread(SchemeTask* task);
 // message loop). Finish arrives from Go on a goroutine OS thread, so we
 // PostMessage(WM_APP+1, task, 0) and do the actual COM work in WndProc.
 static const UINT WM_VELO_SCHEME_FINISH = WM_APP + 1;
+static const UINT WM_VELO_OPEN_WINDOW = WM_APP + 2;
 
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    WindowContext* window = reinterpret_cast<WindowContext*>(
+        GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        CREATESTRUCTW* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        window = reinterpret_cast<WindowContext*>(create->lpCreateParams);
+        SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+        if (window) window->hwnd = hWnd;
+    }
+
     switch (message) {
     case WM_SIZE:
-        if (g_controller) {
+        if (window && window->controller) {
             RECT bounds;
             GetClientRect(hWnd, &bounds);
-            g_controller->put_Bounds(bounds);
+            window->controller->put_Bounds(bounds);
         }
         break;
     case WM_DESTROY:
-        PostQuitMessage(0);
+        if (window && !window->primary) {
+            CleanupSecondaryWindow(window);
+        } else {
+            PostQuitMessage(0);
+        }
         break;
     default:
         if (message == WM_VELO_SCHEME_FINISH) {
             DoSchemeFinishOnUIThread(reinterpret_cast<SchemeTask*>(wParam));
+            return 0;
+        }
+        if (message == WM_VELO_OPEN_WINDOW) {
+            OpenSecondaryWindow(reinterpret_cast<OpenWindowRequest*>(wParam));
             return 0;
         }
         return DefWindowProcW(hWnd, message, wParam, lParam);
@@ -166,10 +227,19 @@ static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden) {
         x = -32000;
         y = -32000;
     }
+    g_primaryWindow = new WindowContext();
+    g_primaryWindow->primary = true;
+    g_primaryWindow->frameless = frameless;
+    g_primaryWindow->hidden = hidden;
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"My App", style,
         x, y, 1024, 768,
-        nullptr, nullptr, hInstance, nullptr);
-    if (!g_hwnd) return E_FAIL;
+        nullptr, nullptr, hInstance, g_primaryWindow);
+    if (!g_hwnd) {
+        delete g_primaryWindow;
+        g_primaryWindow = nullptr;
+        return E_FAIL;
+    }
+    g_windows[g_hwnd] = g_primaryWindow;
 
     // Windows 11 rounded corners for frameless windows — DWM handles
     // anti-aliasing, shadows, DPI scaling. No-op on Windows 10/earlier
@@ -534,13 +604,206 @@ struct VeloEnvOptions : ICoreWebView2EnvironmentOptions, ICoreWebView2Environmen
     }
 };
 
+struct ControllerCompletedHandler : ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
+    ULONG m_ref = 1;
+    WindowContext* window;
+
+    explicit ControllerCompletedHandler(WindowContext* target) : window(target) {}
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG r = InterlockedDecrement(&m_ref);
+        if (r == 0) delete this;
+        return r;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler) {
+            *ppv = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(HRESULT result, ICoreWebView2Controller* controller) override {
+        if (!window) return E_FAIL;
+        window->controllerPending = false;
+        if (window->closed || !IsWindow(window->hwnd)) {
+            if (!window->primary) delete window;
+            return S_OK;
+        }
+        if (FAILED(result) || !controller) {
+            wchar_t buf[128];
+            swprintf_s(buf, L"ControllerHandler HRESULT: 0x%08X", (unsigned int)result);
+            MessageBoxW(nullptr, buf, L"WebView2 Controller Failed", MB_ICONERROR);
+            if (!window->primary) DestroyWindow(window->hwnd);
+            return E_FAIL;
+        }
+        window->controller = controller;
+        window->controller->AddRef();
+        window->controller->get_CoreWebView2(&window->webview);
+        if (!window->webview) return E_FAIL;
+
+        if (window->primary) {
+            g_controller = window->controller;
+            g_webview = window->webview;
+        }
+        g_webviewWindows[window->webview] = window;
+        GoRegisterWebview(window->webview, window->name.c_str());
+
+        EventRegistrationToken tokenMsg;
+        window->webview->add_WebMessageReceived(new WebMessageReceivedHandler(), &tokenMsg);
+
+        window->webview->AddWebResourceRequestedFilter(L"*", COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+        EventRegistrationToken tokenReq;
+        window->webview->add_WebResourceRequested(new WebResourceRequestedHandler(), &tokenReq);
+
+        EventRegistrationToken tokenNav;
+        window->webview->add_NavigationCompleted(new NavigationCompletedHandler(), &tokenNav);
+
+        if (!window->injectedJS.empty()) {
+            std::wstring script = ToWide(window->injectedJS.c_str());
+            window->webview->AddScriptToExecuteOnDocumentCreated(script.c_str(), nullptr);
+        }
+        if (!window->url.empty()) {
+            Trace("Navigate -> %s", window->url.c_str());
+            std::wstring target = ToWide(window->url.c_str());
+            HRESULT navigationResult = window->webview->Navigate(target.c_str());
+            Trace("Navigate HRESULT=0x%08X", (unsigned int)navigationResult);
+        }
+
+        RECT bounds;
+        GetClientRect(window->hwnd, &bounds);
+        window->controller->put_Bounds(bounds);
+        return S_OK;
+    }
+};
+
+static void CreateControllerForWindow(WindowContext* window) {
+    if (!window || !g_env || !IsWindow(window->hwnd)) return;
+    window->controllerPending = true;
+    HRESULT result = g_env->CreateCoreWebView2Controller(
+        window->hwnd,
+        new ControllerCompletedHandler(window));
+    if (FAILED(result)) {
+        window->controllerPending = false;
+        if (!window->primary) DestroyWindow(window->hwnd);
+    }
+}
+
+static void CleanupSecondaryWindow(WindowContext* window) {
+    if (!window || window->primary) return;
+    HWND hwnd = window->hwnd;
+    window->closed = true;
+    window->hwnd = nullptr;
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    g_windows.erase(hwnd);
+    auto named = g_namedWindows.find(window->name);
+    if (named != g_namedWindows.end() && named->second == window) {
+        g_namedWindows.erase(named);
+    }
+    if (window->webview) {
+        g_webviewWindows.erase(window->webview);
+    }
+    GoHandleWindowClosed(window->webview, window->name.c_str());
+    if (window->controller) {
+        window->controller->Close();
+    }
+    if (window->webview) {
+        window->webview->Release();
+        window->webview = nullptr;
+    }
+    if (window->controller) {
+        window->controller->Release();
+        window->controller = nullptr;
+    }
+    if (window->controllerPending) return;
+    delete window;
+}
+
+static void OpenSecondaryWindow(OpenWindowRequest* request) {
+    if (!request) return;
+    auto existing = g_namedWindows.find(request->name);
+    if (existing != g_namedWindows.end() && IsWindow(existing->second->hwnd)) {
+        WindowContext* window = existing->second;
+        if (!request->title.empty()) {
+            SetWindowTextW(window->hwnd, ToWide(request->title.c_str()).c_str());
+        }
+        if (!request->preserveStateOnFocus && !request->url.empty()) {
+            window->url = request->url;
+            if (!request->injectedJS.empty() && !window->webview) {
+                window->injectedJS = request->injectedJS;
+            }
+            if (window->webview) {
+                window->webview->Navigate(ToWide(window->url.c_str()).c_str());
+            }
+        }
+        if (IsIconic(window->hwnd)) ShowWindow(window->hwnd, SW_RESTORE);
+        ShowWindow(window->hwnd, window->nonActivating ? SW_SHOWNOACTIVATE : SW_SHOW);
+        if (!window->nonActivating) SetForegroundWindow(window->hwnd);
+        delete request;
+        return;
+    }
+    if (!g_env) {
+        g_pendingWindows.push_back(request);
+        return;
+    }
+
+    WindowContext* window = new WindowContext();
+    window->name = request->name;
+    window->url = request->url;
+    window->injectedJS = request->injectedJS;
+    window->title = request->title;
+    window->frameless = request->frameless;
+    window->hidden = request->hidden;
+    window->nonActivating = request->nonActivating;
+
+    DWORD style = (window->frameless ? WS_POPUP : WS_OVERLAPPEDWINDOW) | WS_VISIBLE;
+    DWORD extendedStyle = window->nonActivating ? WS_EX_NOACTIVATE : 0;
+    int width = request->width > 0 ? request->width : 760;
+    int height = request->height > 0 ? request->height : 640;
+    int x = request->hasPosition ? request->x : CW_USEDEFAULT;
+    int y = request->hasPosition ? request->y : CW_USEDEFAULT;
+    if (window->hidden && !request->hasPosition) {
+        x = -32000;
+        y = -32000;
+    }
+
+    HINSTANCE instance = GetModuleHandle(nullptr);
+    std::wstring title = ToWide(window->title.c_str());
+    HWND hwnd = CreateWindowExW(
+        extendedStyle,
+        L"WebView2WindowClass",
+        title.empty() ? L"Velo" : title.c_str(),
+        style,
+        x,
+        y,
+        width,
+        height,
+        nullptr,
+        nullptr,
+        instance,
+        window);
+    if (!hwnd) {
+        delete window;
+        delete request;
+        return;
+    }
+    g_windows[hwnd] = window;
+    g_namedWindows[window->name] = window;
+    if (window->frameless) {
+        int preference = DWMWCP_ROUND;
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference));
+    }
+    if (window->hidden) ShowWindow(hwnd, SW_HIDE);
+    CreateControllerForWindow(window);
+    delete request;
+}
+
 // Raw COM implementation of ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
 struct EnvCompletedHandler : ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
     ULONG m_ref = 1;
-    const char* injectedJS;
-    const char* url;
-
-    EnvCompletedHandler(const char* js, const char* u) : injectedJS(js), url(u) {}
 
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
     ULONG STDMETHODCALLTYPE Release() override {
@@ -567,78 +830,10 @@ struct EnvCompletedHandler : ICoreWebView2CreateCoreWebView2EnvironmentCompleted
         }
         g_env = env;
         g_env->AddRef();
-
-        // Controller completed handler
-        struct ControllerHandler : ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
-            ULONG m_ref = 1;
-            const char* injectedJS;
-            const char* url;
-
-            ControllerHandler(const char* js, const char* u) : injectedJS(js), url(u) {}
-
-            ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
-            ULONG STDMETHODCALLTYPE Release() override {
-                ULONG r = InterlockedDecrement(&m_ref);
-                if (r == 0) delete this;
-                return r;
-            }
-            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
-                if (!ppv) return E_POINTER;
-                if (riid == IID_IUnknown || riid == IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler) {
-                    *ppv = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
-                    AddRef();
-                    return S_OK;
-                }
-                *ppv = nullptr;
-                return E_NOINTERFACE;
-            }
-            HRESULT STDMETHODCALLTYPE Invoke(HRESULT res, ICoreWebView2Controller* controller) override {
-                if (FAILED(res) || !controller) {
-                    wchar_t buf[128];
-                    swprintf_s(buf, L"ControllerHandler HRESULT: 0x%08X", (unsigned int)res);
-                    MessageBoxW(nullptr, buf, L"WebView2 Controller Failed", MB_ICONERROR);
-                    return E_FAIL;
-                }
-                g_controller = controller;
-                g_controller->AddRef();
-                g_controller->get_CoreWebView2(&g_webview);
-                if (!g_webview) return E_FAIL;
-
-                // Setup message handler
-                EventRegistrationToken tokenMsg;
-                g_webview->add_WebMessageReceived(new WebMessageReceivedHandler(), &tokenMsg);
-
-                // Setup resource request handler
-                g_webview->AddWebResourceRequestedFilter(L"*", COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
-                EventRegistrationToken tokenReq;
-                g_webview->add_WebResourceRequested(new WebResourceRequestedHandler(), &tokenReq);
-
-                // Setup navigation completed handler (diagnostic)
-                EventRegistrationToken tokenNav;
-                g_webview->add_NavigationCompleted(new NavigationCompletedHandler(), &tokenNav);
-
-                // Inject JS
-                if (injectedJS && injectedJS[0]) {
-                    std::wstring wjs = ToWide(injectedJS);
-                    g_webview->AddScriptToExecuteOnDocumentCreated(wjs.c_str(), nullptr);
-                }
-
-                // Navigate
-                if (url && url[0]) {
-                    Trace("Navigate -> %s", url);
-                    std::wstring wurl = ToWide(url);
-                    HRESULT navHr = g_webview->Navigate(wurl.c_str());
-                    Trace("Navigate HRESULT=0x%08X", (unsigned int)navHr);
-                }
-
-                RECT bounds;
-                GetClientRect(g_hwnd, &bounds);
-                g_controller->put_Bounds(bounds);
-                return S_OK;
-            }
-        };
-
-        g_env->CreateCoreWebView2Controller(g_hwnd, new ControllerHandler(injectedJS, url));
+        CreateControllerForWindow(g_primaryWindow);
+        std::vector<OpenWindowRequest*> pending;
+        pending.swap(g_pendingWindows);
+        for (OpenWindowRequest* request : pending) OpenSecondaryWindow(request);
         return S_OK;
     }
 };
@@ -647,12 +842,17 @@ void webviewTerminate() {
     PostQuitMessage(0);
 }
 
-void webviewRunApp(const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath) {
+void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath) {
     g_frameless = (frameless != 0);
     g_hidden = (hidden != 0);
     HINSTANCE hInstance = GetModuleHandle(nullptr);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(InitWindow(hInstance, g_frameless, g_hidden))) return;
+    g_primaryWindow->name = name ? name : "default";
+    g_primaryWindow->url = url ? url : "";
+    g_primaryWindow->injectedJS = injectedJS ? injectedJS : "";
+    g_primaryWindow->title = title ? title : "";
+    g_namedWindows[g_primaryWindow->name] = g_primaryWindow;
 
     if (title) {
         webviewSetTitle(title);
@@ -688,7 +888,7 @@ void webviewRunApp(const char* url, const char* injectedJS, const void* iconData
 
     HRESULT hr = pCreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr,
         static_cast<ICoreWebView2EnvironmentOptions*>(envOptions),
-        new EnvCompletedHandler(injectedJS, url));
+        new EnvCompletedHandler());
     if (FAILED(hr)) {
         wchar_t buf[128];
         swprintf_s(buf, L"CreateCoreWebView2EnvironmentWithOptions sync HRESULT: 0x%08X", (unsigned int)hr);
@@ -703,9 +903,120 @@ void webviewRunApp(const char* url, const char* injectedJS, const void* iconData
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-    if (g_webview) { g_webview->Release(); g_webview = nullptr; }
+    std::vector<HWND> secondaryWindows;
+    for (const auto& entry : g_windows) {
+        if (entry.second && !entry.second->primary) secondaryWindows.push_back(entry.first);
+    }
+    for (HWND hwnd : secondaryWindows) {
+        if (IsWindow(hwnd)) DestroyWindow(hwnd);
+    }
+    if (g_webview) {
+        g_webviewWindows.erase(g_webview);
+        g_webview->Release();
+        g_webview = nullptr;
+    }
     if (g_controller) { g_controller->Release(); g_controller = nullptr; }
     if (g_env) { g_env->Release(); g_env = nullptr; }
+    for (OpenWindowRequest* request : g_pendingWindows) delete request;
+    g_pendingWindows.clear();
+    if (g_primaryWindow) {
+        g_namedWindows.erase(g_primaryWindow->name);
+        g_windows.erase(g_primaryWindow->hwnd);
+        delete g_primaryWindow;
+        g_primaryWindow = nullptr;
+    }
+    g_hwnd = nullptr;
+}
+
+static WindowContext* FindWindowForWebview(void* webview) {
+    ICoreWebView2* target = reinterpret_cast<ICoreWebView2*>(webview);
+    auto found = g_webviewWindows.find(target);
+    return found == g_webviewWindows.end() ? nullptr : found->second;
+}
+
+void webviewOpenWindow(const char* name, const char* url, const char* injectedJS,
+    const char* title, int width, int height, int x, int y, int hasPosition,
+    int frameless, int hidden, int nonActivating, int preserveStateOnFocus) {
+    OpenWindowRequest* request = new OpenWindowRequest();
+    request->name = name && name[0] ? name : "app-window";
+    request->url = url ? url : "";
+    request->injectedJS = injectedJS ? injectedJS : "";
+    request->title = title ? title : "";
+    request->width = width;
+    request->height = height;
+    request->x = x;
+    request->y = y;
+    request->hasPosition = hasPosition != 0;
+    request->frameless = frameless != 0;
+    request->hidden = hidden != 0;
+    request->nonActivating = nonActivating != 0;
+    request->preserveStateOnFocus = preserveStateOnFocus != 0;
+    if (!g_hwnd || !PostMessageW(g_hwnd, WM_VELO_OPEN_WINDOW, reinterpret_cast<WPARAM>(request), 0)) {
+        delete request;
+    }
+}
+
+void webviewCloseWindow(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (!window || !window->hwnd) return;
+    PostMessageW(window->hwnd, WM_CLOSE, 0, 0);
+}
+
+void webviewMinimizeWindow(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (window && window->hwnd) ShowWindow(window->hwnd, SW_MINIMIZE);
+}
+
+void webviewMaximizeWindow(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (window && window->hwnd) ShowWindow(window->hwnd, SW_MAXIMIZE);
+}
+
+void webviewRestoreWindow(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (window && window->hwnd) ShowWindow(window->hwnd, SW_RESTORE);
+}
+
+void webviewHideWindow(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (window && window->hwnd) ShowWindow(window->hwnd, SW_HIDE);
+}
+
+void webviewSetWindowSize(void* webview, int width, int height) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (!window || !window->hwnd || width <= 0 || height <= 0) return;
+    RECT rect;
+    GetWindowRect(window->hwnd, &rect);
+    MoveWindow(window->hwnd, rect.left, rect.top, width, height, TRUE);
+}
+
+void webviewGetWindowState(void* webview, int* x, int* y, int* width, int* height) {
+    if (x) *x = 0;
+    if (y) *y = 0;
+    if (width) *width = 0;
+    if (height) *height = 0;
+    WindowContext* window = FindWindowForWebview(webview);
+    if (!window || !window->hwnd) return;
+    RECT rect;
+    GetWindowRect(window->hwnd, &rect);
+    if (x) *x = rect.left;
+    if (y) *y = rect.top;
+    if (width) *width = rect.right - rect.left;
+    if (height) *height = rect.bottom - rect.top;
+}
+
+void webviewSetWindowAlwaysOnTop(void* webview, int onTop) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (!window || !window->hwnd) return;
+    SetWindowPos(window->hwnd, onTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE);
+}
+
+void webviewStartWindowDragFor(void* webview) {
+    WindowContext* window = FindWindowForWebview(webview);
+    if (!window || !window->hwnd) return;
+    ReleaseCapture();
+    PostMessageW(window->hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
 }
 
 void webviewSetTitle(const char* title) {
