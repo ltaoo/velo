@@ -526,6 +526,6 @@ func setURL(url string) {
 	C.webviewSetURL(cu)
 }
 
-func close_webview() {
+func close_window(_ string) {
 	C.webviewClose()
 }

@@ -284,7 +284,7 @@ func setURL(url string) {
 		wkWebView.Send(uikit.RegisterName("loadRequest:"), req)
 	}
 }
-func close_webview() {}
+func close_window(_ string) {}
 func sendCallback(id, result string) {
 	if wkWebView == 0 {
 		return

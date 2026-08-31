@@ -14,8 +14,8 @@ func open_window(opts *BoxWebviewOptions) {
 
 func focus_window(opts *BoxWebviewOptions) bool { return false }
 
-func sendCallback(id, result string)    {}
-func sendMessage(payload string) bool   { return false }
+func sendCallback(id, result string)  {}
+func sendMessage(payload string) bool { return false }
 
 func Terminate()                   {}
 func setTitle(title string)        {}
@@ -34,4 +34,4 @@ func unFullscreen()                {}
 func restore()                     {}
 func setAlwaysOnTop(onTop bool)    {}
 func setURL(url string)            {}
-func close_webview()               {}
+func close_window(_ string)        {}

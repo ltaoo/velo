@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4/database"
-	sqlitemigrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 )
 
 func newMigrateDriver(cfg *DBConfig, db *sql.DB) (database.Driver, string, error) {
@@ -18,6 +17,6 @@ func newMigrateDriver(cfg *DBConfig, db *sql.DB) (database.Driver, string, error
 		)
 	}
 
-	driver, err := sqlitemigrate.WithInstance(db, &sqlitemigrate.Config{})
-	return driver, "sqlite3", err
+	driver, err := new_sqlite_migration_driver(db)
+	return driver, "sqlite", err
 }

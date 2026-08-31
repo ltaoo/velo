@@ -107,7 +107,7 @@ func (nativeBackend) OpenWebview(opts *BoxWebviewOptions) *Webview {
 
 func (nativeBackend) OpenWindow(opts *BoxWebviewOptions) *Webview {
 	open_window(opts)
-	return nil
+	return NewHandle(opts.Name, opts.Engine)
 }
 
 func (nativeBackend) FocusWindow(opts *BoxWebviewOptions) bool  { return focus_window(opts) }
@@ -129,7 +129,7 @@ func (nativeBackend) UnFullscreen(name string)                  { unFullscreen()
 func (nativeBackend) Restore(name string)                       { restore() }
 func (nativeBackend) SetAlwaysOnTop(name string, onTop bool)    { setAlwaysOnTop(onTop) }
 func (nativeBackend) SetURL(name, url string)                   { setURL(url) }
-func (nativeBackend) Close(name string)                         { close_webview() }
+func (nativeBackend) Close(name string)                         { close_window(name) }
 
 var (
 	backendMu       sync.Mutex

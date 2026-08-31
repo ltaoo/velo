@@ -1099,11 +1099,21 @@ func loadURLInWebView(wkWebView cocoa.ID, rawURL string) {
 	wkWebView.Send(cocoa.RegisterName("loadRequest:"), req)
 }
 
-func close_webview() {
+func close_window(name string) {
+	window := window_by_name(name)
+	if window == 0 {
+		return
+	}
 	cocoa.DispatchMain(func() {
-		nsApp := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
-		nsApp.Send(cocoa.RegisterName("terminate:"), 0)
+		window.Send(cocoa.RegisterName("performClose:"), 0)
 	})
+}
+
+func window_by_name(name string) cocoa.ID {
+	mapLock.RLock()
+	defer mapLock.RUnlock()
+	webview := namedWebViewMap[strings.TrimSpace(name)]
+	return nsWindowMap[uintptr(webview)]
 }
 
 func setTitle(title string) {

@@ -31,4 +31,4 @@ func unFullscreen()                {}
 func restore()                     {}
 func setAlwaysOnTop(onTop bool)    {}
 func setURL(url string)            {}
-func close_webview()               {}
+func close_window(_ string)        {}
