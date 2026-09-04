@@ -42,30 +42,38 @@ type electronAppConfig struct {
 	ControlURL             string                 `json:"control_url"`
 	HTTPBase               string                 `json:"http_base"`
 	QuitOnLastWindowClosed bool                   `json:"quit_on_last_window_closed"`
+	HideDockIcon           bool                   `json:"hide_dock_icon"`
 	Windows                []electronWindowConfig `json:"windows"`
 }
 
 type electronWindowConfig struct {
-	ID                   string `json:"id"`
-	Name                 string `json:"name"`
-	URL                  string `json:"url"`
-	Pathname             string `json:"pathname"`
-	Title                string `json:"title"`
-	Width                int    `json:"width"`
-	Height               int    `json:"height"`
-	DisableResize        bool   `json:"disable_resize"`
-	DisableMinimize      bool   `json:"disable_minimize"`
-	DisableMaximize      bool   `json:"disable_maximize"`
-	X                    int    `json:"x"`
-	Y                    int    `json:"y"`
-	HasPosition          bool   `json:"has_position"`
-	Frameless            bool   `json:"frameless"`
-	Hidden               bool   `json:"hidden"`
-	HideTrafficLights    bool   `json:"hide_traffic_lights"`
-	NonActivating        bool   `json:"non_activating"`
-	PreserveStateOnFocus bool   `json:"preserve_state_on_focus"`
-	HideOnClose          bool   `json:"hide_on_close"`
-	RuntimeJSON          string `json:"runtime_json"`
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	URL                    string `json:"url"`
+	Pathname               string `json:"pathname"`
+	Title                  string `json:"title"`
+	Width                  int    `json:"width"`
+	Height                 int    `json:"height"`
+	DisableResize          bool   `json:"disable_resize"`
+	DisableMinimize        bool   `json:"disable_minimize"`
+	DisableMaximize        bool   `json:"disable_maximize"`
+	DisableZoom            bool   `json:"disable_zoom"`
+	ReloadContextMenu      bool   `json:"reload_context_menu"`
+	BackgroundColor        *RGBA  `json:"background_color,omitempty"`
+	MacBackdropTranslucent bool   `json:"mac_backdrop_translucent"`
+	MacTitleBarHeight      int    `json:"mac_titlebar_height"`
+	MacTitleBarInset       bool   `json:"mac_titlebar_inset"`
+	HiddenOnTaskbar        bool   `json:"hidden_on_taskbar"`
+	X                      int    `json:"x"`
+	Y                      int    `json:"y"`
+	HasPosition            bool   `json:"has_position"`
+	Frameless              bool   `json:"frameless"`
+	Hidden                 bool   `json:"hidden"`
+	HideTrafficLights      bool   `json:"hide_traffic_lights"`
+	NonActivating          bool   `json:"non_activating"`
+	PreserveStateOnFocus   bool   `json:"preserve_state_on_focus"`
+	HideOnClose            bool   `json:"hide_on_close"`
+	RuntimeJSON            string `json:"runtime_json"`
 }
 
 func newElectronBackend() *electronBackend {
@@ -325,6 +333,7 @@ func (b *electronBackend) start(opts *BoxWebviewOptions) error {
 		ControlURL:             b.controlURL,
 		HTTPBase:               electronHTTPBase(opts.URL),
 		QuitOnLastWindowClosed: opts.QuitOnLastWindowClosed,
+		HideDockIcon:           opts.HideDockIcon,
 		Windows:                []electronWindowConfig{newElectronWindowConfig(opts)},
 	}
 	configPath := filepath.Join(configDir, "config.json")
@@ -502,26 +511,33 @@ func newElectronWindowConfig(opts *BoxWebviewOptions) electronWindowConfig {
 		return electronWindowConfig{Name: "default"}
 	}
 	return electronWindowConfig{
-		ID:                   opts.ID,
-		Name:                 normalizeWindowName(opts.Name),
-		URL:                  opts.URL,
-		Pathname:             opts.Pathname,
-		Title:                opts.Title,
-		Width:                opts.Width,
-		Height:               opts.Height,
-		DisableResize:        opts.DisableResize,
-		DisableMinimize:      opts.DisableMinimize,
-		DisableMaximize:      opts.DisableMaximize,
-		X:                    opts.X,
-		Y:                    opts.Y,
-		HasPosition:          opts.HasPosition,
-		Frameless:            opts.Frameless,
-		Hidden:               opts.Hidden,
-		HideTrafficLights:    opts.HideTrafficLights,
-		NonActivating:        opts.NonActivating,
-		PreserveStateOnFocus: opts.PreserveStateOnFocus,
-		HideOnClose:          opts.HideOnClose,
-		RuntimeJSON:          opts.RuntimeJSON,
+		ID:                     opts.ID,
+		Name:                   normalizeWindowName(opts.Name),
+		URL:                    opts.URL,
+		Pathname:               opts.Pathname,
+		Title:                  opts.Title,
+		Width:                  opts.Width,
+		Height:                 opts.Height,
+		DisableResize:          opts.DisableResize,
+		DisableMinimize:        opts.DisableMinimize,
+		DisableMaximize:        opts.DisableMaximize,
+		DisableZoom:            opts.DisableZoom,
+		ReloadContextMenu:      opts.ReloadContextMenu,
+		BackgroundColor:        opts.BackgroundColor,
+		MacBackdropTranslucent: opts.MacBackdropTranslucent,
+		MacTitleBarHeight:      opts.MacTitleBarHeight,
+		MacTitleBarInset:       opts.MacTitleBarInset,
+		HiddenOnTaskbar:        opts.HiddenOnTaskbar,
+		X:                      opts.X,
+		Y:                      opts.Y,
+		HasPosition:            opts.HasPosition,
+		Frameless:              opts.Frameless,
+		Hidden:                 opts.Hidden,
+		HideTrafficLights:      opts.HideTrafficLights,
+		NonActivating:          opts.NonActivating,
+		PreserveStateOnFocus:   opts.PreserveStateOnFocus,
+		HideOnClose:            opts.HideOnClose,
+		RuntimeJSON:            opts.RuntimeJSON,
 	}
 }
 
@@ -592,7 +608,7 @@ func writeJSON(path string, value interface{}) error {
 const electronPackageJSON = `{"name":"velo-electron-host","version":"0.0.0","private":true,"main":"main.js"}`
 
 const electronMainJS = `
-const { app, BrowserWindow, ipcMain, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, protocol } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
@@ -739,11 +755,44 @@ function createWindow(windowConfig) {
   if (windowConfig.hide_traffic_lights) {
     options.titleBarStyle = "hidden";
   }
+  if (windowConfig.mac_titlebar_height > 0 && process.platform === "darwin") {
+    options.titleBarStyle = "hidden";
+  }
+  if (windowConfig.mac_titlebar_inset && process.platform === "darwin") {
+    options.titleBarStyle = "hiddenInset";
+  }
+  if (windowConfig.background_color) {
+    const color = windowConfig.background_color;
+    options.backgroundColor = "rgba(" + color.red + "," + color.green + "," + color.blue + "," + (color.alpha / 255) + ")";
+  }
+  if (windowConfig.mac_backdrop_translucent && process.platform === "darwin") {
+    options.transparent = true;
+    options.vibrancy = "under-window";
+    options.visualEffectState = "active";
+  }
+  if (windowConfig.hidden_on_taskbar && process.platform === "win32") {
+    options.skipTaskbar = true;
+  }
   if (windowConfig.non_activating) {
     options.focusable = false;
   }
 
   const win = new BrowserWindow(options);
+  if (windowConfig.disable_zoom) {
+    win.webContents.setVisualZoomLevelLimits(1, 1);
+    win.webContents.on("before-input-event", (event, input) => {
+      if ((input.control || input.meta) && ["+", "=", "-", "0"].includes(input.key)) event.preventDefault();
+    });
+  }
+  if (windowConfig.reload_context_menu) {
+    win.webContents.on("context-menu", () => {
+      Menu.buildFromTemplate([{
+        label: process.platform === "darwin" ? "Reload" : "Refresh",
+        accelerator: "CmdOrCtrl+R",
+        click: () => win.reload()
+      }]).popup({ window: win });
+    });
+  }
   windowsByName.set(name, win);
   namesByWebContents.set(win.webContents.id, name);
 
@@ -906,6 +955,9 @@ app.on("activate", () => {
 });
 
 app.whenReady().then(() => {
+  if (config.hide_dock_icon && process.platform === "darwin" && app.dock) {
+    app.dock.hide();
+  }
   protocol.handle("velo", async (request) => {
     const requestURL = new URL(request.url);
     const target = (config.http_base || "http://127.0.0.1:8080") + requestURL.pathname + requestURL.search;

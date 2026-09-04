@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -281,16 +282,17 @@ type veloRuntimeConfig struct {
 }
 
 type veloRuntimeWindowInfo struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Pathname          string `json:"pathname"`
-	URL               string `json:"url"`
-	Title             string `json:"title"`
-	Width             int    `json:"width"`
-	Height            int    `json:"height"`
-	Frameless         bool   `json:"frameless"`
-	Hidden            bool   `json:"hidden"`
-	HideTrafficLights bool   `json:"hideTrafficLights"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Pathname                string `json:"pathname"`
+	URL                     string `json:"url"`
+	Title                   string `json:"title"`
+	Width                   int    `json:"width"`
+	Height                  int    `json:"height"`
+	Frameless               bool   `json:"frameless"`
+	Hidden                  bool   `json:"hidden"`
+	HideTrafficLights       bool   `json:"hideTrafficLights"`
+	InvisibleTitleBarHeight int    `json:"invisible_titlebar_height"`
 }
 
 type veloRuntimeInfo struct {
@@ -322,6 +324,7 @@ type Box struct {
 	iconData               []byte
 	appConfig              *AppConfig
 	quitOnLastWindowClosed bool
+	hide_dock_icon         bool
 	webviewEngine          webview.Engine
 }
 
@@ -336,6 +339,7 @@ type VeloAppOpt struct {
 	// and window state persistence APIs.
 	EnableLocalStorage     bool
 	QuitOnLastWindowClosed *bool
+	HideDockIcon           bool
 }
 
 func NewApp(o *VeloAppOpt) *Box {
@@ -351,6 +355,7 @@ func NewApp(o *VeloAppOpt) *Box {
 		appName:                appConfig.displayName(),
 		appConfig:              appConfig,
 		quitOnLastWindowClosed: true,
+		hide_dock_icon:         o.HideDockIcon,
 		webviewEngine:          resolveWebviewEngine(appConfig, o.WebviewEngine),
 	}
 	b.mode = o.Mode
@@ -589,16 +594,17 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	windowURL := b.webviewURL(opt.URL, pathname)
 	windowInfo := &veloRuntimeWindowInfo{
-		ID:                id,
-		Name:              windowName,
-		Pathname:          pathname,
-		URL:               windowURL,
-		Title:             title,
-		Width:             width,
-		Height:            height,
-		Frameless:         opt.Frameless,
-		Hidden:            opt.Hidden,
-		HideTrafficLights: opt.HideTrafficLights,
+		ID:                      id,
+		Name:                    windowName,
+		Pathname:                pathname,
+		URL:                     windowURL,
+		Title:                   title,
+		Width:                   width,
+		Height:                  height,
+		Frameless:               opt.Frameless,
+		Hidden:                  opt.Hidden,
+		HideTrafficLights:       opt.HideTrafficLights,
+		InvisibleTitleBarHeight: mac_titlebar_height(opt.MacTitleBarHeight),
 	}
 
 	opts := &webview.BoxWebviewOptions{
@@ -615,6 +621,13 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		DisableResize:          opt.DisableResize,
 		DisableMinimize:        opt.DisableMinimize,
 		DisableMaximize:        opt.DisableMaximize,
+		DisableZoom:            opt.DisableZoom,
+		ReloadContextMenu:      opt.ReloadContextMenu,
+		BackgroundColor:        opt.BackgroundColor,
+		MacBackdropTranslucent: opt.MacBackdropTranslucent,
+		MacTitleBarHeight:      opt.MacTitleBarHeight,
+		MacTitleBarInset:       opt.MacTitleBarInset,
+		HiddenOnTaskbar:        opt.HiddenOnTaskbar,
 		X:                      x,
 		Y:                      y,
 		HasPosition:            hasPosition,
@@ -625,6 +638,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HandleReopen:           opt.OnReopen,
 		HandleClose:            opt.OnClose,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		HideDockIcon:           b.hide_dock_icon,
 		Engine:                 b.webviewEngine,
 		ElectronCommand:        b.appConfig.Desktop.Electron.Command,
 		Frameless:              opt.Frameless,
@@ -913,28 +927,48 @@ func (box *Box) Quit() {
 	webview.Quit()
 }
 
+type RGBA = webview.RGBA
+
+func NewRGB(red, green, blue uint8) *RGBA {
+	return &RGBA{Red: red, Green: green, Blue: blue, Alpha: 255}
+}
+
+func mac_titlebar_height(height int) int {
+	if runtime.GOOS == "darwin" {
+		return height
+	}
+	return 0
+}
+
 type VeloWebviewOpt struct {
-	Name                 string // window name used as storage key for position/size persistence
-	Pathname             string
-	Title                string
-	Width                int
-	Height               int
-	DisableResize        bool
-	DisableMinimize      bool
-	DisableMaximize      bool
-	Frameless            bool
-	Hidden               bool
-	HideTrafficLights    bool
-	NonActivating        bool
-	PreserveStateOnFocus bool
-	HideOnClose          bool
-	FrontendDir          string
-	FrontendFS           fs.FS
-	EntryPage            string
-	OnDragDrop           func(event string, payload string)
-	OnReopen             func()
-	OnClose              func(name string)
-	URL                  string
+	Name                   string // window name used as storage key for position/size persistence
+	Pathname               string
+	Title                  string
+	Width                  int
+	Height                 int
+	DisableResize          bool
+	DisableMinimize        bool
+	DisableMaximize        bool
+	DisableZoom            bool
+	ReloadContextMenu      bool
+	BackgroundColor        *RGBA
+	MacBackdropTranslucent bool
+	MacTitleBarHeight      int
+	MacTitleBarInset       bool
+	HiddenOnTaskbar        bool
+	Frameless              bool
+	Hidden                 bool
+	HideTrafficLights      bool
+	NonActivating          bool
+	PreserveStateOnFocus   bool
+	HideOnClose            bool
+	FrontendDir            string
+	FrontendFS             fs.FS
+	EntryPage              string
+	OnDragDrop             func(event string, payload string)
+	OnReopen               func()
+	OnClose                func(name string)
+	URL                    string
 }
 
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
@@ -989,16 +1023,17 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	}
 	windowURL := b.webviewURL(opt.URL, pathname)
 	windowInfo := &veloRuntimeWindowInfo{
-		ID:                id,
-		Name:              windowName,
-		Pathname:          pathname,
-		URL:               windowURL,
-		Title:             title,
-		Width:             width,
-		Height:            height,
-		Frameless:         opt.Frameless,
-		Hidden:            opt.Hidden,
-		HideTrafficLights: opt.HideTrafficLights,
+		ID:                      id,
+		Name:                    windowName,
+		Pathname:                pathname,
+		URL:                     windowURL,
+		Title:                   title,
+		Width:                   width,
+		Height:                  height,
+		Frameless:               opt.Frameless,
+		Hidden:                  opt.Hidden,
+		HideTrafficLights:       opt.HideTrafficLights,
+		InvisibleTitleBarHeight: mac_titlebar_height(opt.MacTitleBarHeight),
 	}
 	opts := &webview.BoxWebviewOptions{
 		ID:                     id,
@@ -1014,6 +1049,13 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		DisableResize:          opt.DisableResize,
 		DisableMinimize:        opt.DisableMinimize,
 		DisableMaximize:        opt.DisableMaximize,
+		DisableZoom:            opt.DisableZoom,
+		ReloadContextMenu:      opt.ReloadContextMenu,
+		BackgroundColor:        opt.BackgroundColor,
+		MacBackdropTranslucent: opt.MacBackdropTranslucent,
+		MacTitleBarHeight:      opt.MacTitleBarHeight,
+		MacTitleBarInset:       opt.MacTitleBarInset,
+		HiddenOnTaskbar:        opt.HiddenOnTaskbar,
 		X:                      x,
 		Y:                      y,
 		HasPosition:            hasPosition,
@@ -1024,6 +1066,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HandleReopen:           opt.OnReopen,
 		HandleClose:            opt.OnClose,
 		QuitOnLastWindowClosed: b.quitOnLastWindowClosed,
+		HideDockIcon:           b.hide_dock_icon,
 		Engine:                 b.webviewEngine,
 		ElectronCommand:        b.appConfig.Desktop.Electron.Command,
 		Frameless:              opt.Frameless,

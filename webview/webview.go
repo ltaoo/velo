@@ -28,6 +28,13 @@ type DragDropHandler func(event string, payload string)
 type ReopenHandler func()
 type CloseHandler func(name string)
 
+type RGBA struct {
+	Red   uint8 `json:"red"`
+	Green uint8 `json:"green"`
+	Blue  uint8 `json:"blue"`
+	Alpha uint8 `json:"alpha"`
+}
+
 type BoxWebviewOptions struct {
 	ID                     string
 	Name                   string
@@ -42,6 +49,13 @@ type BoxWebviewOptions struct {
 	DisableResize          bool
 	DisableMinimize        bool
 	DisableMaximize        bool
+	DisableZoom            bool
+	ReloadContextMenu      bool
+	BackgroundColor        *RGBA
+	MacBackdropTranslucent bool
+	MacTitleBarHeight      int
+	MacTitleBarInset       bool
+	HiddenOnTaskbar        bool
 	X                      int
 	Y                      int
 	HasPosition            bool
@@ -52,6 +66,7 @@ type BoxWebviewOptions struct {
 	HandleReopen           ReopenHandler
 	HandleClose            CloseHandler
 	QuitOnLastWindowClosed bool
+	HideDockIcon           bool
 	Engine                 Engine
 	ElectronCommand        string
 	RuntimeJSON            string

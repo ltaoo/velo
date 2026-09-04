@@ -64,6 +64,11 @@ struct WindowContext {
     bool disableResize = false;
     bool disableMinimize = false;
     bool disableMaximize = false;
+    bool disableZoom = false;
+    bool reloadContextMenu = false;
+    bool hiddenOnTaskbar = false;
+    bool hasBackgroundColor = false;
+    unsigned int backgroundColor = 0;
     bool controllerPending = false;
     bool closed = false;
 };
@@ -86,6 +91,11 @@ struct OpenWindowRequest {
     bool disableResize = false;
     bool disableMinimize = false;
     bool disableMaximize = false;
+    bool disableZoom = false;
+    bool reloadContextMenu = false;
+    bool hiddenOnTaskbar = false;
+    bool hasBackgroundColor = false;
+    unsigned int backgroundColor = 0;
 };
 
 static WindowContext* g_primaryWindow = nullptr;
@@ -233,7 +243,9 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
 }
 
 static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden,
-    bool disableResize, bool disableMinimize, bool disableMaximize) {
+    bool hiddenOnTaskbar, bool disableResize, bool disableMinimize,
+    bool disableMaximize, bool disableZoom, unsigned int backgroundColor,
+    bool hasBackgroundColor) {
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
@@ -258,7 +270,12 @@ static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden,
     g_primaryWindow->disableResize = disableResize;
     g_primaryWindow->disableMinimize = disableMinimize;
     g_primaryWindow->disableMaximize = disableMaximize;
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"My App", style,
+    g_primaryWindow->disableZoom = disableZoom;
+    g_primaryWindow->hiddenOnTaskbar = hiddenOnTaskbar;
+    g_primaryWindow->backgroundColor = backgroundColor;
+    g_primaryWindow->hasBackgroundColor = hasBackgroundColor;
+    DWORD extendedStyle = hiddenOnTaskbar ? WS_EX_TOOLWINDOW : 0;
+    g_hwnd = CreateWindowExW(extendedStyle, wc.lpszClassName, L"My App", style,
         x, y, 1024, 768,
         nullptr, nullptr, hInstance, g_primaryWindow);
     if (!g_hwnd) {
@@ -472,6 +489,48 @@ struct NavigationCompletedHandler : ICoreWebView2NavigationCompletedEventHandler
     }
 };
 
+struct ContextMenuRequestedHandler : ICoreWebView2ContextMenuRequestedEventHandler {
+    ULONG m_ref = 1;
+    WindowContext* window;
+
+    explicit ContextMenuRequestedHandler(WindowContext* target) : window(target) {}
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG result = InterlockedDecrement(&m_ref);
+        if (result == 0) delete this;
+        return result;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** value) override {
+        if (!value) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_ICoreWebView2ContextMenuRequestedEventHandler) {
+            *value = static_cast<ICoreWebView2ContextMenuRequestedEventHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *value = nullptr;
+        return E_NOINTERFACE;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2*, ICoreWebView2ContextMenuRequestedEventArgs* args) override {
+        if (!window || !window->hwnd || !window->webview || !args) return E_FAIL;
+        POINT location = {};
+        if (FAILED(args->get_Location(&location))) return S_OK;
+        args->put_Handled(TRUE);
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu) return S_OK;
+        AppendMenuW(menu, MF_STRING, 1, L"Refresh\tCtrl+R");
+        ClientToScreen(window->hwnd, &location);
+        SetForegroundWindow(window->hwnd);
+        UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            location.x, location.y, 0, window->hwnd, nullptr);
+        DestroyMenu(menu);
+        PostMessageW(window->hwnd, WM_NULL, 0, 0);
+        if (command == 1) window->webview->Reload();
+        return S_OK;
+    }
+};
+
 // Raw COM implementation of ICoreWebView2CustomSchemeRegistration.
 // Needed so WebView2 intercepts velo:// URIs (custom schemes are NOT matched
 // by AddWebResourceRequestedFilter unless registered here).
@@ -672,6 +731,24 @@ struct ControllerCompletedHandler : ICoreWebView2CreateCoreWebView2ControllerCom
         window->controller->get_CoreWebView2(&window->webview);
         if (!window->webview) return E_FAIL;
 
+        ICoreWebView2Settings* settings = nullptr;
+        if (SUCCEEDED(window->webview->get_Settings(&settings)) && settings) {
+            settings->put_IsZoomControlEnabled(window->disableZoom ? FALSE : TRUE);
+            settings->Release();
+        }
+        if (window->hasBackgroundColor) {
+            ICoreWebView2Controller2* controller2 = nullptr;
+            if (SUCCEEDED(window->controller->QueryInterface(IID_ICoreWebView2Controller2, reinterpret_cast<void**>(&controller2))) && controller2) {
+                COREWEBVIEW2_COLOR color = {};
+                color.A = (window->backgroundColor >> 24) & 0xff;
+                color.R = (window->backgroundColor >> 16) & 0xff;
+                color.G = (window->backgroundColor >> 8) & 0xff;
+                color.B = window->backgroundColor & 0xff;
+                controller2->put_DefaultBackgroundColor(color);
+                controller2->Release();
+            }
+        }
+
         if (window->primary) {
             g_controller = window->controller;
             g_webview = window->webview;
@@ -688,6 +765,18 @@ struct ControllerCompletedHandler : ICoreWebView2CreateCoreWebView2ControllerCom
 
         EventRegistrationToken tokenNav;
         window->webview->add_NavigationCompleted(new NavigationCompletedHandler(), &tokenNav);
+
+        if (window->reloadContextMenu) {
+            ICoreWebView2_11* webview11 = nullptr;
+            if (SUCCEEDED(window->webview->QueryInterface(IID_ICoreWebView2_11,
+                reinterpret_cast<void**>(&webview11))) && webview11) {
+                EventRegistrationToken tokenContextMenu;
+                auto* handler = new ContextMenuRequestedHandler(window);
+                webview11->add_ContextMenuRequested(handler, &tokenContextMenu);
+                handler->Release();
+                webview11->Release();
+            }
+        }
 
         if (!window->injectedJS.empty()) {
             std::wstring script = ToWide(window->injectedJS.c_str());
@@ -769,9 +858,17 @@ static void OpenSecondaryWindow(OpenWindowRequest* request) {
         window->disableResize = request->disableResize;
         window->disableMinimize = request->disableMinimize;
         window->disableMaximize = request->disableMaximize;
+        window->disableZoom = request->disableZoom;
+        window->reloadContextMenu = request->reloadContextMenu;
+        window->hiddenOnTaskbar = request->hiddenOnTaskbar;
+        window->backgroundColor = request->backgroundColor;
+        window->hasBackgroundColor = request->hasBackgroundColor;
         SetWindowLongPtrW(window->hwnd, GWL_STYLE, WindowStyle(
             request->frameless, request->disableResize,
             request->disableMinimize, request->disableMaximize));
+        LONG_PTR extendedStyle = GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE);
+        extendedStyle = request->hiddenOnTaskbar ? extendedStyle | WS_EX_TOOLWINDOW : extendedStyle & ~WS_EX_TOOLWINDOW;
+        SetWindowLongPtrW(window->hwnd, GWL_EXSTYLE, extendedStyle);
         SetWindowPos(window->hwnd, nullptr, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         if (IsIconic(window->hwnd)) ShowWindow(window->hwnd, SW_RESTORE);
@@ -797,10 +894,16 @@ static void OpenSecondaryWindow(OpenWindowRequest* request) {
     window->disableResize = request->disableResize;
     window->disableMinimize = request->disableMinimize;
     window->disableMaximize = request->disableMaximize;
+    window->disableZoom = request->disableZoom;
+    window->reloadContextMenu = request->reloadContextMenu;
+    window->hiddenOnTaskbar = request->hiddenOnTaskbar;
+    window->backgroundColor = request->backgroundColor;
+    window->hasBackgroundColor = request->hasBackgroundColor;
 
     DWORD style = WindowStyle(window->frameless, window->disableResize,
         window->disableMinimize, window->disableMaximize);
     DWORD extendedStyle = window->nonActivating ? WS_EX_NOACTIVATE : 0;
+    if (window->hiddenOnTaskbar) extendedStyle |= WS_EX_TOOLWINDOW;
     int width = request->width > 0 ? request->width : 760;
     int height = request->height > 0 ? request->height : 640;
     int x = request->hasPosition ? request->x : CW_USEDEFAULT;
@@ -882,18 +985,21 @@ void webviewTerminate() {
     PostQuitMessage(0);
 }
 
-void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, int hideOnClose, int disableResize, int disableMinimize, int disableMaximize, const char* loaderPath) {
+void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, int hideOnClose, int hiddenOnTaskbar, int disableResize, int disableMinimize, int disableMaximize, int disableZoom, int reloadContextMenu, unsigned int backgroundColor, int hasBackgroundColor, const char* loaderPath) {
     g_frameless = (frameless != 0);
     g_hidden = (hidden != 0);
     HINSTANCE hInstance = GetModuleHandle(nullptr);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(InitWindow(hInstance, g_frameless, g_hidden,
-        disableResize != 0, disableMinimize != 0, disableMaximize != 0))) return;
+        hiddenOnTaskbar != 0, disableResize != 0, disableMinimize != 0,
+        disableMaximize != 0, disableZoom != 0, backgroundColor,
+        hasBackgroundColor != 0))) return;
     g_primaryWindow->name = name ? name : "default";
     g_primaryWindow->url = url ? url : "";
     g_primaryWindow->injectedJS = injectedJS ? injectedJS : "";
     g_primaryWindow->title = title ? title : "";
     g_primaryWindow->hideOnClose = hideOnClose != 0;
+    g_primaryWindow->reloadContextMenu = reloadContextMenu != 0;
     g_namedWindows[g_primaryWindow->name] = g_primaryWindow;
 
     if (title) {
@@ -979,7 +1085,9 @@ static WindowContext* FindWindowForWebview(void* webview) {
 void webviewOpenWindow(const char* name, const char* url, const char* injectedJS,
     const char* title, int width, int height, int x, int y, int hasPosition,
     int frameless, int hidden, int nonActivating, int preserveStateOnFocus,
-    int hideOnClose, int disableResize, int disableMinimize, int disableMaximize) {
+    int hideOnClose, int disableResize, int disableMinimize, int disableMaximize,
+    int disableZoom, int reloadContextMenu, int hiddenOnTaskbar, unsigned int backgroundColor,
+    int hasBackgroundColor) {
     OpenWindowRequest* request = new OpenWindowRequest();
     request->name = name && name[0] ? name : "app-window";
     request->url = url ? url : "";
@@ -998,6 +1106,11 @@ void webviewOpenWindow(const char* name, const char* url, const char* injectedJS
     request->disableResize = disableResize != 0;
     request->disableMinimize = disableMinimize != 0;
     request->disableMaximize = disableMaximize != 0;
+    request->disableZoom = disableZoom != 0;
+    request->reloadContextMenu = reloadContextMenu != 0;
+    request->hiddenOnTaskbar = hiddenOnTaskbar != 0;
+    request->backgroundColor = backgroundColor;
+    request->hasBackgroundColor = hasBackgroundColor != 0;
     if (!g_hwnd || !PostMessageW(g_hwnd, WM_VELO_OPEN_WINDOW, reinterpret_cast<WPARAM>(request), 0)) {
         delete request;
     }

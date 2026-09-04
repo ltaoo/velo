@@ -425,7 +425,8 @@ func open_webview(opts *BoxWebviewOptions) {
 		hidden = 1
 	}
 	hide_on_close := boolCInt(opts.HideOnClose)
-	C.webviewRunApp(cName, cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, hide_on_close, boolCInt(opts.DisableResize), boolCInt(opts.DisableMinimize), boolCInt(opts.DisableMaximize), cLoaderPath)
+	background_color, has_background_color := pack_color(opts.BackgroundColor)
+	C.webviewRunApp(cName, cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, hide_on_close, boolCInt(opts.HiddenOnTaskbar), boolCInt(opts.DisableResize), boolCInt(opts.DisableMinimize), boolCInt(opts.DisableMaximize), boolCInt(opts.DisableZoom), boolCInt(opts.ReloadContextMenu), background_color, has_background_color, cLoaderPath)
 }
 
 func open_window(opts *BoxWebviewOptions) {
@@ -441,6 +442,7 @@ func open_window(opts *BoxWebviewOptions) {
 	defer C.free(unsafe.Pointer(cInjectedJS))
 	cTitle := C.CString(opts.Title)
 	defer C.free(unsafe.Pointer(cTitle))
+	background_color, has_background_color := pack_color(opts.BackgroundColor)
 	C.webviewOpenWindow(
 		cName,
 		cURL,
@@ -459,6 +461,11 @@ func open_window(opts *BoxWebviewOptions) {
 		boolCInt(opts.DisableResize),
 		boolCInt(opts.DisableMinimize),
 		boolCInt(opts.DisableMaximize),
+		boolCInt(opts.DisableZoom),
+		boolCInt(opts.ReloadContextMenu),
+		boolCInt(opts.HiddenOnTaskbar),
+		background_color,
+		has_background_color,
 	)
 }
 
@@ -467,6 +474,14 @@ func boolCInt(value bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+func pack_color(color *RGBA) (C.uint, C.int) {
+	if color == nil {
+		return 0, 0
+	}
+	value := uint32(color.Alpha)<<24 | uint32(color.Red)<<16 | uint32(color.Green)<<8 | uint32(color.Blue)
+	return C.uint(value), 1
 }
 
 func focus_window(opts *BoxWebviewOptions) bool { return false }

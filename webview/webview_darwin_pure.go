@@ -97,6 +97,12 @@ func registerNativeClasses() {
 		cocoa.AddMethod(webViewClass, cocoa.RegisterName("performDragOperation:"), veloWebViewPerformDragOperation, "B@:@")
 		cocoa.RegisterClassPair(webViewClass)
 		debugln("DEBUG: VeloWebView registered")
+
+		context_menu_webview_class := cocoa.AllocateClassPair(webViewClass, "VeloContextMenuWebView", 0)
+		cocoa.AddMethod(context_menu_webview_class, cocoa.RegisterName("menuForEvent:"), velo_webview_menu_for_event, "@@:@")
+		cocoa.AddMethod(context_menu_webview_class, cocoa.RegisterName("veloReload:"), velo_webview_reload, "v@:@")
+		cocoa.RegisterClassPair(context_menu_webview_class)
+		debugln("DEBUG: VeloContextMenuWebView registered")
 	})
 }
 
@@ -172,6 +178,14 @@ func emitWindowFocusEvent(nsWindow cocoa.ID, focused bool) {
 
 func veloWebViewAcceptsFirstMouse(self, _cmd, event uintptr) uintptr {
 	return 1
+}
+
+func velo_webview_menu_for_event(self, _cmd, event uintptr) uintptr {
+	return uintptr(cocoa.ID(self).Send(cocoa.RegisterName("menu")))
+}
+
+func velo_webview_reload(self, _cmd, sender uintptr) {
+	cocoa.ID(self).Send(cocoa.RegisterName("reload"))
 }
 
 func veloPanelCanBecomeKeyWindow(self, _cmd uintptr) uintptr {
@@ -567,8 +581,11 @@ func open_webview(opts *BoxWebviewOptions) {
 		pInfo.Send(cocoa.RegisterName("setProcessName:"), cocoa.StringToNSString(opts.AppName))
 	}
 
-	// Set activation policy to Regular
-	nsApp.Send(cocoa.RegisterName("setActivationPolicy:"), cocoa.NSApplicationActivationPolicyRegular)
+	activation_policy := cocoa.NSApplicationActivationPolicyRegular
+	if opts.HideDockIcon {
+		activation_policy = cocoa.NSApplicationActivationPolicyAccessory
+	}
+	nsApp.Send(cocoa.RegisterName("setActivationPolicy:"), activation_policy)
 	installStandardApplicationMenu(nsApp, opts.AppName)
 	nsApp.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
 
@@ -613,6 +630,15 @@ func installStandardApplicationMenu(nsApp cocoa.ID, appName string) {
 	)
 	appMenu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Quit "+appName, "terminate:", "q"))
 	appMenuItem.Send(cocoa.RegisterName("setSubmenu:"), appMenu)
+
+	file_menu_item := newMenuItem("", "", "")
+	mainMenu.Send(cocoa.RegisterName("addItem:"), file_menu_item)
+	file_menu := cocoa.GetClass("NSMenu").Send(cocoa.RegisterName("alloc")).Send(
+		cocoa.RegisterName("initWithTitle:"),
+		cocoa.StringToNSString("File"),
+	)
+	file_menu.Send(cocoa.RegisterName("addItem:"), newMenuItem("Close Window", "performClose:", "w"))
+	file_menu_item.Send(cocoa.RegisterName("setSubmenu:"), file_menu)
 
 	editMenuItem := newMenuItem("", "", "")
 	mainMenu.Send(cocoa.RegisterName("addItem:"), editMenuItem)
@@ -906,7 +932,7 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		style_mask |= cocoa.NSWindowStyleMaskResizable
 	}
 
-	if opts.Frameless {
+	if opts.Frameless || opts.MacTitleBarHeight > 0 || opts.MacTitleBarInset {
 		style_mask |= cocoa.NSWindowStyleMaskFullSizeContentView
 	}
 	if opts.NonActivating {
@@ -931,7 +957,7 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		nsWindow.Send(cocoa.RegisterName("setLevel:"), cocoa.NSFloatingWindowLevel)
 	}
 
-	if opts.Frameless {
+	if opts.Frameless || opts.MacTitleBarHeight > 0 || opts.MacTitleBarInset {
 		nsWindow.Send(cocoa.RegisterName("setTitlebarAppearsTransparent:"), true)
 		nsWindow.Send(cocoa.RegisterName("setTitleVisibility:"), 1) // NSWindowTitleHidden
 
@@ -940,6 +966,15 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"),
 			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("windowBackgroundColor")))
 		nsWindow.Send(cocoa.RegisterName("setOpaque:"), true)
+	}
+	if opts.MacTitleBarInset {
+		toolbar := cocoa.GetClass("NSToolbar").Send(cocoa.RegisterName("alloc")).Send(
+			cocoa.RegisterName("initWithIdentifier:"), cocoa.StringToNSString("velo.toolbar"))
+		toolbar.Send(cocoa.RegisterName("setShowsBaselineSeparator:"), false)
+		nsWindow.Send(cocoa.RegisterName("setToolbar:"), toolbar)
+	}
+	if opts.BackgroundColor != nil {
+		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"), rgba_to_ns_color(opts.BackgroundColor))
 	}
 	if opts.HideTrafficLights {
 		hideTrafficLights(nsWindow)
@@ -1047,11 +1082,24 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	userContentController.Send(cocoa.RegisterName("addUserScript:"), wkUserScript)
 
 	// Create VeloWebView (WKWebView subclass with drag-drop support)
-	wkWebView := cocoa.GetClass("VeloWebView").Send(cocoa.RegisterName("alloc")).SendRect(
+	webview_class := cocoa.GetClass("VeloWebView")
+	if opts.ReloadContextMenu {
+		webview_class = cocoa.GetClass("VeloContextMenuWebView")
+	}
+	wkWebView := webview_class.Send(cocoa.RegisterName("alloc")).SendRect(
 		cocoa.RegisterName("initWithFrame:configuration:"),
 		rect,
 		uintptr(config),
 	)
+	wkWebView.Send(cocoa.RegisterName("setAllowsMagnification:"), !opts.DisableZoom)
+	if opts.ReloadContextMenu {
+		context_menu := cocoa.GetClass("NSMenu").Send(cocoa.RegisterName("alloc")).Send(
+			cocoa.RegisterName("initWithTitle:"), cocoa.StringToNSString(""))
+		reload_item := newMenuItem("Reload", "veloReload:", "r")
+		reload_item.Send(cocoa.RegisterName("setTarget:"), wkWebView)
+		context_menu.Send(cocoa.RegisterName("addItem:"), reload_item)
+		wkWebView.Send(cocoa.RegisterName("setMenu:"), context_menu)
+	}
 
 	// Register for file drag-and-drop
 	if opts.HandleDragDrop != nil {
@@ -1076,19 +1124,43 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	}
 	mapLock.Unlock()
 
-	// Set as content view
-	nsWindow.Send(cocoa.RegisterName("setContentView:"), wkWebView)
-
-	// Transparent WKWebView background for frameless mode
-	if opts.Frameless {
+	// Transparent WKWebView background for frameless and translucent windows.
+	if opts.Frameless || opts.MacBackdropTranslucent {
 		wkWebView.Send(cocoa.RegisterName("setUnderPageBackgroundColor:"),
 			cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
+	} else if opts.BackgroundColor != nil {
+		wkWebView.Send(cocoa.RegisterName("setUnderPageBackgroundColor:"), rgba_to_ns_color(opts.BackgroundColor))
+	}
+
+	if opts.MacBackdropTranslucent {
+		nsWindow.Send(cocoa.RegisterName("setBackgroundColor:"), cocoa.GetClass("NSColor").Send(cocoa.RegisterName("clearColor")))
+		nsWindow.Send(cocoa.RegisterName("setOpaque:"), false)
+		effect_view := cocoa.GetClass("NSVisualEffectView").Send(cocoa.RegisterName("alloc")).SendRectOnly(cocoa.RegisterName("initWithFrame:"), rect)
+		effect_view.Send(cocoa.RegisterName("setMaterial:"), cocoa.NSVisualEffectMaterialUnderWindowBackground)
+		effect_view.Send(cocoa.RegisterName("setBlendingMode:"), cocoa.NSVisualEffectBlendingModeBehindWindow)
+		effect_view.Send(cocoa.RegisterName("setState:"), cocoa.NSVisualEffectStateActive)
+		effect_view.Send(cocoa.RegisterName("setAutoresizingMask:"), cocoa.NSViewWidthSizable|cocoa.NSViewHeightSizable)
+		wkWebView.Send(cocoa.RegisterName("setAutoresizingMask:"), cocoa.NSViewWidthSizable|cocoa.NSViewHeightSizable)
+		effect_view.Send(cocoa.RegisterName("addSubview:"), wkWebView)
+		nsWindow.Send(cocoa.RegisterName("setContentView:"), effect_view)
+	} else {
+		nsWindow.Send(cocoa.RegisterName("setContentView:"), wkWebView)
 	}
 
 	// Load URL
 	debugf("DEBUG: Loading URL: %s\n", opts.URL)
 	loadURLInWebView(wkWebView, opts.URL)
 	debugln("DEBUG: URL request loaded (sent)")
+}
+
+func rgba_to_ns_color(color *RGBA) cocoa.ID {
+	return cocoa.GetClass("NSColor").SendCGFloat4(
+		cocoa.RegisterName("colorWithSRGBRed:green:blue:alpha:"),
+		float64(color.Red)/255,
+		float64(color.Green)/255,
+		float64(color.Blue)/255,
+		float64(color.Alpha)/255,
+	)
 }
 
 func hideTrafficLights(nsWindow cocoa.ID) {

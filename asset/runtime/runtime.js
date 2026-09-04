@@ -403,7 +403,12 @@
         try {
           if (e.button !== 0) return;
           var el = e.target;
-          if (el && typeof el.closest === "function" && el.closest("[data-velo-drag], .velo-drag") && !el.closest("[data-velo-no-drag], .velo-no-drag")) {
+          var titlebar_height = Number(window.__VELO__ && window.__VELO__.window && window.__VELO__.window.invisible_titlebar_height) || 0;
+          var in_titlebar = titlebar_height > 0 && e.clientY >= 0 && e.clientY <= titlebar_height;
+          var drag_handle = el && typeof el.closest === "function" && el.closest("[data-velo-drag], .velo-drag");
+          var interactive = el && typeof el.closest === "function" && el.closest("a, button, input, select, textarea, [contenteditable='true']");
+          var no_drag = el && typeof el.closest === "function" && el.closest("[data-velo-no-drag], .velo-no-drag");
+          if ((drag_handle || (in_titlebar && !interactive)) && !no_drag) {
             e.preventDefault();
             post_message_to_go({
               id: "drag_" + String(Date.now()) + Math.random().toString(16).slice(2),

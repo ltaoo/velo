@@ -65,6 +65,8 @@ var (
 	// Specialized msgSend for struct args (needed because purego/SyscallN doesn't handle structs/floats correctly on arm64)
 	objc_msgSend_Rect_uint_uint_bool func(id, sel uintptr, r CGRect, style, backing uintptr, defer_ bool) uintptr
 	objc_msgSend_Rect_ptr            func(id, sel uintptr, r CGRect, ptr uintptr) uintptr
+	objc_msg_send_rect               func(id, sel uintptr, r CGRect) uintptr
+	objc_msg_send_cgfloat4           func(id, sel uintptr, a, b, c, d float64) uintptr
 	objc_msgSend_Size                func(id, sel uintptr, s CGSize) uintptr
 	objc_msgSend_Point               func(id, sel uintptr, p CGPoint) uintptr
 	objc_msgSend_PointReturn         func(id, sel uintptr) CGPoint
@@ -90,6 +92,8 @@ func initObjcRuntime() {
 	// Note: We register the SAME symbol "objc_msgSend" but with different Go signatures
 	purego.RegisterLibFunc(&objc_msgSend_Rect_uint_uint_bool, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_Rect_ptr, objc, "objc_msgSend")
+	purego.RegisterLibFunc(&objc_msg_send_rect, objc, "objc_msgSend")
+	purego.RegisterLibFunc(&objc_msg_send_cgfloat4, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_Size, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_Point, objc, "objc_msgSend")
 	purego.RegisterLibFunc(&objc_msgSend_PointReturn, objc, "objc_msgSend")
@@ -220,6 +224,14 @@ func (cls Class) SendRect(sel Selector, r CGRect, ptr uintptr) ID {
 	return ID(objc_msgSend_Rect_ptr(uintptr(cls), uintptr(sel), r, ptr))
 }
 
+func (id ID) SendRectOnly(sel Selector, r CGRect) ID {
+	return ID(objc_msg_send_rect(uintptr(id), uintptr(sel), r))
+}
+
+func (cls Class) SendCGFloat4(sel Selector, a, b, c, d float64) ID {
+	return ID(objc_msg_send_cgfloat4(uintptr(cls), uintptr(sel), a, b, c, d))
+}
+
 func (id ID) SendRectStyle(sel Selector, r CGRect, style, backing uintptr, defer_ bool) ID {
 	return ID(objc_msgSend_Rect_uint_uint_bool(uintptr(id), uintptr(sel), r, style, backing, defer_))
 }
@@ -341,8 +353,16 @@ const (
 
 	NSBackingStoreBuffered = 2
 
-	NSApplicationActivationPolicyRegular = 0
+	NSApplicationActivationPolicyRegular   = 0
+	NSApplicationActivationPolicyAccessory = 1
 
 	NSFloatingWindowLevel = 3
 	NSNormalWindowLevel   = 0
+
+	NSViewWidthSizable  = 1 << 1
+	NSViewHeightSizable = 1 << 4
+
+	NSVisualEffectMaterialUnderWindowBackground = 21
+	NSVisualEffectBlendingModeBehindWindow      = 0
+	NSVisualEffectStateActive                   = 1
 )
