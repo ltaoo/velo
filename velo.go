@@ -315,6 +315,8 @@ type Box struct {
 	wsHub                  *veloWSHub
 	mode                   Mode
 	frontendDir            string
+	frontend_fs            fs.FS
+	entry_page             string
 	appName                string
 	title                  string
 	iconData               []byte
@@ -544,7 +546,15 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		pathname = "/"
 	}
 
-	mux := b.setupMux(opt.FrontendFS, opt.EntryPage)
+	frontend_fs := opt.FrontendFS
+	if frontend_fs == nil {
+		frontend_fs = b.frontend_fs
+	}
+	entry_page := opt.EntryPage
+	if entry_page == "" {
+		entry_page = b.entry_page
+	}
+	mux := b.setupMux(frontend_fs, entry_page)
 	id := generateID()
 
 	title := opt.Title
@@ -602,11 +612,14 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		Title:                  title,
 		Width:                  width,
 		Height:                 height,
+		DisableResize:          opt.DisableResize,
+		DisableMinimize:        opt.DisableMinimize,
+		DisableMaximize:        opt.DisableMaximize,
 		X:                      x,
 		Y:                      y,
 		HasPosition:            hasPosition,
 		Mux:                    mux,
-		FrontendFS:             opt.FrontendFS,
+		FrontendFS:             frontend_fs,
 		HandleMessage:          b.handleMessage,
 		HandleDragDrop:         opt.OnDragDrop,
 		HandleReopen:           opt.OnReopen,
@@ -619,6 +632,7 @@ func (b *Box) OpenWindow(opt *VeloWebviewOpt) *webview.Webview {
 		HideTrafficLights:      opt.HideTrafficLights,
 		NonActivating:          opt.NonActivating,
 		PreserveStateOnFocus:   opt.PreserveStateOnFocus,
+		HideOnClose:            opt.HideOnClose,
 		URL:                    windowURL,
 	}
 	return webview.OpenWindow(opts)
@@ -895,17 +909,25 @@ func (box *Box) Run() {
 	}
 }
 
+func (box *Box) Quit() {
+	webview.Quit()
+}
+
 type VeloWebviewOpt struct {
 	Name                 string // window name used as storage key for position/size persistence
 	Pathname             string
 	Title                string
 	Width                int
 	Height               int
+	DisableResize        bool
+	DisableMinimize      bool
+	DisableMaximize      bool
 	Frameless            bool
 	Hidden               bool
 	HideTrafficLights    bool
 	NonActivating        bool
 	PreserveStateOnFocus bool
+	HideOnClose          bool
 	FrontendDir          string
 	FrontendFS           fs.FS
 	EntryPage            string
@@ -918,6 +940,12 @@ type VeloWebviewOpt struct {
 func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 	if opt.FrontendDir != "" {
 		b.frontendDir = opt.FrontendDir
+	}
+	if opt.FrontendFS != nil {
+		b.frontend_fs = opt.FrontendFS
+	}
+	if opt.EntryPage != "" {
+		b.entry_page = opt.EntryPage
 	}
 
 	// Restore saved window size from storage
@@ -983,6 +1011,9 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		Title:                  title,
 		Width:                  width,
 		Height:                 height,
+		DisableResize:          opt.DisableResize,
+		DisableMinimize:        opt.DisableMinimize,
+		DisableMaximize:        opt.DisableMaximize,
 		X:                      x,
 		Y:                      y,
 		HasPosition:            hasPosition,
@@ -1000,6 +1031,7 @@ func (b *Box) NewWebview(opt *VeloWebviewOpt) *webview.Webview {
 		HideTrafficLights:      opt.HideTrafficLights,
 		NonActivating:          opt.NonActivating,
 		PreserveStateOnFocus:   opt.PreserveStateOnFocus,
+		HideOnClose:            opt.HideOnClose,
 		URL:                    windowURL,
 	}
 	b.webviews = append(b.webviews, opts)

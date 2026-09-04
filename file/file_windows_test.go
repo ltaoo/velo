@@ -10,30 +10,30 @@ import (
 )
 
 func TestWindowsFileTypePatterns(t *testing.T) {
-	got := windowsFileTypePatterns([]string{"png", ".jpg", "*.gif", " PNG ", "", "bad/type", "*"})
+	got := windows_file_type_patterns([]string{"png", ".jpg", "*.gif", " PNG ", "", "bad/type", "*"})
 	want := []string{"*.png", "*.jpg", "*.gif"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("windowsFileTypePatterns() = %#v, want %#v", got, want)
+		t.Fatalf("windows_file_type_patterns() = %#v, want %#v", got, want)
 	}
 }
 
 func TestWindowsFileDialogFilter(t *testing.T) {
-	got := decodeWindowsFileDialogFilter(windowsFileDialogFilter([]string{"png", "jpg"}))
+	got := decode_windows_file_dialog_filter(windows_file_dialog_filter([]string{"png", "jpg"}))
 	want := []string{"Supported files (*.png;*.jpg)", "*.png;*.jpg"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("windowsFileDialogFilter() = %#v, want %#v", got, want)
+		t.Fatalf("windows_file_dialog_filter() = %#v, want %#v", got, want)
 	}
 }
 
 func TestWindowsFileDialogFilterDefaultsToAllFiles(t *testing.T) {
-	got := decodeWindowsFileDialogFilter(windowsFileDialogFilter(nil))
+	got := decode_windows_file_dialog_filter(windows_file_dialog_filter(nil))
 	want := []string{"All files (*.*)", "*.*"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("windowsFileDialogFilter(nil) = %#v, want %#v", got, want)
+		t.Fatalf("windows_file_dialog_filter(nil) = %#v, want %#v", got, want)
 	}
 }
 
-func decodeWindowsFileDialogFilter(encoded []uint16) []string {
+func decode_windows_file_dialog_filter(encoded []uint16) []string {
 	parts := make([]string, 0, 2)
 	start := 0
 	for i, value := range encoded {

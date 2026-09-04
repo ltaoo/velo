@@ -39,6 +39,9 @@ type BoxWebviewOptions struct {
 	Title                  string
 	Width                  int
 	Height                 int
+	DisableResize          bool
+	DisableMinimize        bool
+	DisableMaximize        bool
 	X                      int
 	Y                      int
 	HasPosition            bool
@@ -57,6 +60,7 @@ type BoxWebviewOptions struct {
 	HideTrafficLights      bool
 	NonActivating          bool
 	PreserveStateOnFocus   bool
+	HideOnClose            bool
 }
 
 type backend interface {
@@ -74,6 +78,9 @@ type backend interface {
 	GetSize(name string) (int, int)
 	Show(name string)
 	Hide(name string)
+	Focus(name string)
+	IsVisible(name string) bool
+	IsFocused(name string) bool
 	Minimize(name string)
 	Maximize(name string)
 	Fullscreen(name string)
@@ -82,6 +89,7 @@ type backend interface {
 	SetAlwaysOnTop(name string, onTop bool)
 	SetURL(name, url string)
 	Close(name string)
+	Quit()
 }
 
 type Webview struct {
@@ -122,6 +130,9 @@ func (nativeBackend) GetPosition(name string) (int, int)        { return getPosi
 func (nativeBackend) GetSize(name string) (int, int)            { return getSize() }
 func (nativeBackend) Show(name string)                          { show() }
 func (nativeBackend) Hide(name string)                          { hide() }
+func (nativeBackend) Focus(name string)                         { focus(name) }
+func (nativeBackend) IsVisible(name string) bool                { return is_visible(name) }
+func (nativeBackend) IsFocused(name string) bool                { return is_focused(name) }
 func (nativeBackend) Minimize(name string)                      { minimize() }
 func (nativeBackend) Maximize(name string)                      { maximize() }
 func (nativeBackend) Fullscreen(name string)                    { fullscreen() }
@@ -130,6 +141,7 @@ func (nativeBackend) Restore(name string)                       { restore() }
 func (nativeBackend) SetAlwaysOnTop(name string, onTop bool)    { setAlwaysOnTop(onTop) }
 func (nativeBackend) SetURL(name, url string)                   { setURL(url) }
 func (nativeBackend) Close(name string)                         { close_window(name) }
+func (nativeBackend) Quit()                                     { Terminate() }
 
 var (
 	backendMu       sync.Mutex
@@ -212,18 +224,23 @@ func (w *Webview) GetPosition() (int, int) {
 func (w *Webview) GetSize() (int, int) {
 	return w.webviewBackend().GetSize(w.windowName())
 }
-func (w *Webview) Show()         { w.webviewBackend().Show(w.windowName()) }
-func (w *Webview) Hide()         { w.webviewBackend().Hide(w.windowName()) }
-func (w *Webview) Minimize()     { w.webviewBackend().Minimize(w.windowName()) }
-func (w *Webview) Maximize()     { w.webviewBackend().Maximize(w.windowName()) }
-func (w *Webview) Fullscreen()   { w.webviewBackend().Fullscreen(w.windowName()) }
-func (w *Webview) UnFullscreen() { w.webviewBackend().UnFullscreen(w.windowName()) }
-func (w *Webview) Restore()      { w.webviewBackend().Restore(w.windowName()) }
+func (w *Webview) Show()           { w.webviewBackend().Show(w.windowName()) }
+func (w *Webview) Hide()           { w.webviewBackend().Hide(w.windowName()) }
+func (w *Webview) Focus()          { w.webviewBackend().Focus(w.windowName()) }
+func (w *Webview) IsVisible() bool { return w.webviewBackend().IsVisible(w.windowName()) }
+func (w *Webview) IsFocused() bool { return w.webviewBackend().IsFocused(w.windowName()) }
+func (w *Webview) Minimize()       { w.webviewBackend().Minimize(w.windowName()) }
+func (w *Webview) Maximize()       { w.webviewBackend().Maximize(w.windowName()) }
+func (w *Webview) Fullscreen()     { w.webviewBackend().Fullscreen(w.windowName()) }
+func (w *Webview) UnFullscreen()   { w.webviewBackend().UnFullscreen(w.windowName()) }
+func (w *Webview) Restore()        { w.webviewBackend().Restore(w.windowName()) }
 func (w *Webview) SetAlwaysOnTop(onTop bool) {
 	w.webviewBackend().SetAlwaysOnTop(w.windowName(), onTop)
 }
 func (w *Webview) SetURL(url string) { w.webviewBackend().SetURL(w.windowName(), url) }
 func (w *Webview) Close()            { w.webviewBackend().Close(w.windowName()) }
+
+func Quit() { currentBackend().Quit() }
 
 func SendCallback(id, result string) {
 	currentBackend().SendCallback(id, result)

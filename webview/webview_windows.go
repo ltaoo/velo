@@ -424,7 +424,8 @@ func open_webview(opts *BoxWebviewOptions) {
 	if opts.Hidden {
 		hidden = 1
 	}
-	C.webviewRunApp(cName, cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, cLoaderPath)
+	hide_on_close := boolCInt(opts.HideOnClose)
+	C.webviewRunApp(cName, cUrl, cInjectedJS, cIcon, cIconLen, cTitle, C.int(opts.Width), C.int(opts.Height), frameless, hidden, hide_on_close, boolCInt(opts.DisableResize), boolCInt(opts.DisableMinimize), boolCInt(opts.DisableMaximize), cLoaderPath)
 }
 
 func open_window(opts *BoxWebviewOptions) {
@@ -454,6 +455,10 @@ func open_window(opts *BoxWebviewOptions) {
 		boolCInt(opts.Hidden),
 		boolCInt(opts.NonActivating),
 		boolCInt(opts.PreserveStateOnFocus),
+		boolCInt(opts.HideOnClose),
+		boolCInt(opts.DisableResize),
+		boolCInt(opts.DisableMinimize),
+		boolCInt(opts.DisableMaximize),
 	)
 }
 
@@ -504,13 +509,16 @@ func getSize() (int, int) {
 	return int(w), int(h)
 }
 
-func show()         { C.webviewShow() }
-func hide()         { C.webviewHide() }
-func minimize()     { C.webviewMinimize() }
-func maximize()     { C.webviewMaximize() }
-func fullscreen()   { C.webviewFullscreen() }
-func unFullscreen() { C.webviewUnFullscreen() }
-func restore()      { C.webviewRestore() }
+func show()                    { C.webviewShow() }
+func hide()                    { C.webviewHide() }
+func focus(_ string)           { C.webviewFocus() }
+func is_visible(_ string) bool { return C.webviewIsVisible() != 0 }
+func is_focused(_ string) bool { return C.webviewIsFocused() != 0 }
+func minimize()                { C.webviewMinimize() }
+func maximize()                { C.webviewMaximize() }
+func fullscreen()              { C.webviewFullscreen() }
+func unFullscreen()            { C.webviewUnFullscreen() }
+func restore()                 { C.webviewRestore() }
 
 func setAlwaysOnTop(onTop bool) {
 	v := C.int(0)

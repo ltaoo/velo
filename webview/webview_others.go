@@ -24,6 +24,9 @@ func getPosition() (int, int)      { return 0, 0 }
 func getSize() (int, int)          { return 0, 0 }
 func show()                        {}
 func hide()                        {}
+func focus(_ string)               {}
+func is_visible(_ string) bool     { return false }
+func is_focused(_ string) bool     { return false }
 func minimize()                    {}
 func maximize()                    {}
 func fullscreen()                  {}

@@ -74,6 +74,7 @@ func registerNativeClasses() {
 		// Register VeloWindowDelegate class for named-window cleanup on close and focus/blur events.
 		windowDelegateClass := cocoa.AllocateClassPair(cocoa.GetClass("NSObject"), "VeloWindowDelegate", 0)
 		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowWillClose:"), windowWillClose, "v@:@")
+		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowShouldClose:"), window_should_close, "B@:@")
 		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidBecomeKey:"), windowDidBecomeKey, "v@:@")
 		cocoa.AddMethod(windowDelegateClass, cocoa.RegisterName("windowDidResignKey:"), windowDidResignKey, "v@:@")
 		cocoa.RegisterClassPair(windowDelegateClass)
@@ -125,6 +126,19 @@ func applicationShouldHandleReopen(self, _cmd, app, hasVisibleWindows uintptr) u
 func windowWillClose(self, _cmd, notification uintptr) {
 	nsWindow := cocoa.ID(notification).Send(cocoa.RegisterName("object"))
 	cleanupWindow(nsWindow)
+}
+
+func window_should_close(self, _cmd, sender uintptr) uintptr {
+	ns_window := cocoa.ID(sender)
+	mapLock.RLock()
+	wk_webview := windowWebViewMap[uintptr(ns_window)]
+	opts := webviewMap[uintptr(wk_webview)]
+	mapLock.RUnlock()
+	if opts != nil && opts.HideOnClose {
+		ns_window.Send(cocoa.RegisterName("orderOut:"), 0)
+		return 0
+	}
+	return 1
 }
 
 func windowDidBecomeKey(self, _cmd, notification uintptr) {
@@ -884,16 +898,19 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 		Height: cocoa.CGFloat(opts.Height),
 	}
 
-	styleMask := cocoa.NSWindowStyleMaskTitled |
-		cocoa.NSWindowStyleMaskClosable |
-		cocoa.NSWindowStyleMaskMiniaturizable |
-		cocoa.NSWindowStyleMaskResizable
+	style_mask := cocoa.NSWindowStyleMaskTitled | cocoa.NSWindowStyleMaskClosable
+	if !opts.DisableMinimize {
+		style_mask |= cocoa.NSWindowStyleMaskMiniaturizable
+	}
+	if !opts.DisableResize {
+		style_mask |= cocoa.NSWindowStyleMaskResizable
+	}
 
 	if opts.Frameless {
-		styleMask |= cocoa.NSWindowStyleMaskFullSizeContentView
+		style_mask |= cocoa.NSWindowStyleMaskFullSizeContentView
 	}
 	if opts.NonActivating {
-		styleMask |= cocoa.NSWindowStyleMaskNonactivatingPanel
+		style_mask |= cocoa.NSWindowStyleMaskNonactivatingPanel
 	}
 
 	windowClass := cocoa.GetClass("NSWindow")
@@ -903,7 +920,7 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	nsWindow := windowClass.Send(cocoa.RegisterName("alloc")).SendRectStyle(
 		cocoa.RegisterName("initWithContentRect:styleMask:backing:defer:"),
 		rect,
-		uintptr(styleMask),
+		uintptr(style_mask),
 		cocoa.NSBackingStoreBuffered,
 		false, // defer
 	)
@@ -926,6 +943,20 @@ func createWindow(opts *BoxWebviewOptions, isMain bool) {
 	}
 	if opts.HideTrafficLights {
 		hideTrafficLights(nsWindow)
+	}
+	if opts.DisableMinimize {
+		minimize_button := nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 1)
+		if minimize_button != 0 {
+			minimize_button.Send(cocoa.RegisterName("setEnabled:"), false)
+		}
+	}
+	if opts.DisableMaximize {
+		maximize_button := nsWindow.Send(cocoa.RegisterName("standardWindowButton:"), 2)
+		if maximize_button != 0 {
+			maximize_button.Send(cocoa.RegisterName("setEnabled:"), false)
+		}
+		collection_behavior := nsWindow.Send(cocoa.RegisterName("collectionBehavior"))
+		nsWindow.Send(cocoa.RegisterName("setCollectionBehavior:"), uintptr(collection_behavior)|cocoa.NSWindowCollectionBehaviorFullScreenNone)
 	}
 
 	// Set Title
@@ -1256,7 +1287,55 @@ func hide() {
 	})
 }
 
+func focus(name string) {
+	window := window_by_name(name)
+	if window == 0 {
+		window = globalWindow
+	}
+	cocoa.DispatchMain(func() {
+		if window != 0 {
+			ns_app := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+			ns_app.Send(cocoa.RegisterName("activateIgnoringOtherApps:"), true)
+			window.Send(cocoa.RegisterName("makeKeyAndOrderFront:"), 0)
+		}
+	})
+}
+
+func is_visible(name string) bool {
+	window := window_by_name(name)
+	if window == 0 {
+		window = globalWindow
+	}
+	result := make(chan bool, 1)
+	cocoa.DispatchMain(func() {
+		result <- window != 0 && window.Send(cocoa.RegisterName("isVisible")) != 0
+	})
+	return <-result
+}
+
+func is_focused(name string) bool {
+	window := window_by_name(name)
+	if window == 0 {
+		window = globalWindow
+	}
+	result := make(chan bool, 1)
+	cocoa.DispatchMain(func() {
+		result <- window != 0 && window.Send(cocoa.RegisterName("isKeyWindow")) != 0
+	})
+	return <-result
+}
+
+func Terminate() {
+	cocoa.DispatchMain(func() {
+		ns_app := cocoa.GetClass("NSApplication").Send(cocoa.RegisterName("sharedApplication"))
+		ns_app.Send(cocoa.RegisterName("terminate:"), 0)
+	})
+}
+
 func minimize() {
+	if webview_opts != nil && webview_opts.DisableMinimize {
+		return
+	}
 	cocoa.DispatchMain(func() {
 		if globalWindow != 0 {
 			globalWindow.Send(cocoa.RegisterName("miniaturize:"), 0)
@@ -1265,6 +1344,9 @@ func minimize() {
 }
 
 func maximize() {
+	if webview_opts != nil && webview_opts.DisableMaximize {
+		return
+	}
 	cocoa.DispatchMain(func() {
 		if globalWindow != 0 {
 			if globalWindow.Send(cocoa.RegisterName("isZoomed")) == 0 {
@@ -1275,6 +1357,9 @@ func maximize() {
 }
 
 func fullscreen() {
+	if webview_opts != nil && webview_opts.DisableMaximize {
+		return
+	}
 	cocoa.DispatchMain(func() {
 		if globalWindow != 0 {
 			styleMask := globalWindow.Send(cocoa.RegisterName("styleMask"))

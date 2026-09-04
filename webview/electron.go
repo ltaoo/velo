@@ -29,10 +29,12 @@ type electronBackend struct {
 }
 
 type electronWindowState struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
+	Width   int  `json:"width"`
+	Height  int  `json:"height"`
+	Visible bool `json:"visible"`
+	Focused bool `json:"focused"`
 }
 
 type electronAppConfig struct {
@@ -51,6 +53,9 @@ type electronWindowConfig struct {
 	Title                string `json:"title"`
 	Width                int    `json:"width"`
 	Height               int    `json:"height"`
+	DisableResize        bool   `json:"disable_resize"`
+	DisableMinimize      bool   `json:"disable_minimize"`
+	DisableMaximize      bool   `json:"disable_maximize"`
 	X                    int    `json:"x"`
 	Y                    int    `json:"y"`
 	HasPosition          bool   `json:"has_position"`
@@ -59,6 +64,7 @@ type electronWindowConfig struct {
 	HideTrafficLights    bool   `json:"hide_traffic_lights"`
 	NonActivating        bool   `json:"non_activating"`
 	PreserveStateOnFocus bool   `json:"preserve_state_on_focus"`
+	HideOnClose          bool   `json:"hide_on_close"`
 	RuntimeJSON          string `json:"runtime_json"`
 }
 
@@ -161,10 +167,31 @@ func (b *electronBackend) GetSize(name string) (int, int) {
 
 func (b *electronBackend) Show(name string) {
 	b.windowControl(name, "show", nil)
+	b.set_window_visibility(name, true, true)
 }
 
 func (b *electronBackend) Hide(name string) {
 	b.windowControl(name, "__velo/window/hide", nil)
+	b.set_window_visibility(name, false, false)
+}
+
+func (b *electronBackend) Focus(name string) {
+	b.windowControl(name, "show", nil)
+	b.set_window_visibility(name, true, true)
+}
+
+func (b *electronBackend) IsVisible(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state, ok := b.states[normalizeWindowName(name)]
+	return ok && state.Visible
+}
+
+func (b *electronBackend) IsFocused(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state, ok := b.states[normalizeWindowName(name)]
+	return ok && state.Focused
 }
 
 func (b *electronBackend) Minimize(name string) {
@@ -197,6 +224,22 @@ func (b *electronBackend) SetURL(name, targetURL string) {
 
 func (b *electronBackend) Close(name string) {
 	b.windowControl(name, "__velo/window/close", nil)
+}
+
+func (b *electronBackend) Quit() {
+	if err := b.sendCommand(electronCommand{Type: "quit"}); err != nil {
+		fmt.Fprintf(os.Stderr, "[velo] electron quit: %v\n", err)
+	}
+}
+
+func (b *electronBackend) set_window_visibility(name string, visible, focused bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	name = normalizeWindowName(name)
+	state := b.states[name]
+	state.Visible = visible
+	state.Focused = focused
+	b.states[name] = state
 }
 
 func (b *electronBackend) windowControl(name, method string, args interface{}) {
@@ -233,8 +276,8 @@ func (b *electronBackend) registerWindow(opts *BoxWebviewOptions) {
 	name := normalizeWindowName(opts.Name)
 	b.mu.Lock()
 	b.windows[name] = opts
+	state := b.states[name]
 	if opts.Width > 0 || opts.Height > 0 {
-		state := b.states[name]
 		if opts.Width > 0 {
 			state.Width = opts.Width
 		}
@@ -245,8 +288,9 @@ func (b *electronBackend) registerWindow(opts *BoxWebviewOptions) {
 			state.X = opts.X
 			state.Y = opts.Y
 		}
-		b.states[name] = state
 	}
+	state.Visible = !opts.Hidden
+	b.states[name] = state
 	b.mu.Unlock()
 }
 
@@ -465,6 +509,9 @@ func newElectronWindowConfig(opts *BoxWebviewOptions) electronWindowConfig {
 		Title:                opts.Title,
 		Width:                opts.Width,
 		Height:               opts.Height,
+		DisableResize:        opts.DisableResize,
+		DisableMinimize:      opts.DisableMinimize,
+		DisableMaximize:      opts.DisableMaximize,
 		X:                    opts.X,
 		Y:                    opts.Y,
 		HasPosition:          opts.HasPosition,
@@ -473,6 +520,7 @@ func newElectronWindowConfig(opts *BoxWebviewOptions) electronWindowConfig {
 		HideTrafficLights:    opts.HideTrafficLights,
 		NonActivating:        opts.NonActivating,
 		PreserveStateOnFocus: opts.PreserveStateOnFocus,
+		HideOnClose:          opts.HideOnClose,
 		RuntimeJSON:          opts.RuntimeJSON,
 	}
 }
@@ -655,6 +703,10 @@ function createWindow(windowConfig) {
     if (windowConfig.url && !windowConfig.preserve_state_on_focus) {
       existing.loadURL(windowConfig.url);
     }
+    existing.setResizable(!windowConfig.disable_resize);
+    existing.setMinimizable(!windowConfig.disable_minimize);
+    existing.setMaximizable(!windowConfig.disable_maximize);
+    if (existing.setFullScreenable) existing.setFullScreenable(!windowConfig.disable_maximize);
     existing.show();
     existing.focus();
     postWindowState(name, existing);
@@ -668,6 +720,10 @@ function createWindow(windowConfig) {
     height: windowConfig.height || 768,
     show: !windowConfig.hidden,
     frame: !windowConfig.frameless,
+    resizable: !windowConfig.disable_resize,
+    minimizable: !windowConfig.disable_minimize,
+    maximizable: !windowConfig.disable_maximize,
+    fullscreenable: !windowConfig.disable_maximize,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -700,7 +756,13 @@ function createWindow(windowConfig) {
   };
   win.on("resize", scheduleState);
   win.on("move", scheduleState);
-  win.on("close", () => postWindowState(name, win));
+  win.on("close", (event) => {
+    postWindowState(name, win);
+    if (windowConfig.hide_on_close) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
   win.on("closed", () => {
     postEvent({ type: "window_closed", name });
     windowsByName.delete(name);
@@ -734,7 +796,7 @@ function handleWindowControl(win, method, args) {
       win.close();
       return { success: true };
     case "__velo/window/minimize":
-      win.minimize();
+      if (win.isMinimizable()) win.minimize();
       break;
     case "__velo/window/hide":
       win.hide();
@@ -766,14 +828,16 @@ function handleWindowControl(win, method, args) {
       return { success: true, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
     }
     case "__velo/window/toggle_maximize":
-      if (win.isMaximized()) {
+      if (!win.isMaximizable()) {
+        break;
+      } else if (win.isMaximized()) {
         win.unmaximize();
       } else {
         win.maximize();
       }
       break;
     case "__velo/window/maximize":
-      win.maximize();
+      if (win.isMaximizable()) win.maximize();
       break;
     case "__velo/window/restore":
       if (win.isMinimized()) {
@@ -788,7 +852,7 @@ function handleWindowControl(win, method, args) {
       win.setAlwaysOnTop(!!args.onTop);
       break;
     case "fullscreen":
-      win.setFullScreen(true);
+      if (win.isMaximizable()) win.setFullScreen(true);
       break;
     case "unfullscreen":
       win.setFullScreen(false);
@@ -877,6 +941,10 @@ app.whenReady().then(() => {
     }
     if (command.type === "window_control") {
       handleWindowControl(windowForName(command.name || "default"), command.method, command.args);
+      return;
+    }
+    if (command.type === "quit") {
+      app.quit();
     }
   });
 });

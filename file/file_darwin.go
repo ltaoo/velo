@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 package file
 
@@ -12,108 +11,98 @@ package file
 #include <stdlib.h>
 #include <string.h>
 
-@interface FilePanelHelper : NSObject
-@property (nonatomic, assign) char* result;
+@interface VeloFilePanelHelper : NSObject
+@property (nonatomic, assign) BOOL save;
+@property (nonatomic, assign) BOOL chooseFiles;
+@property (nonatomic, assign) BOOL chooseDirectories;
+@property (nonatomic, assign) BOOL multiple;
 @property (nonatomic, assign) int cancelled;
-@property (nonatomic, assign) int animationType;
-@property (nonatomic, strong) NSArray<NSString*>* allowedTypes;
+@property (nonatomic, assign) char* result;
+@property (nonatomic, strong) NSString* title;
 @property (nonatomic, strong) NSString* directoryPath;
-@property (nonatomic, strong) dispatch_semaphore_t sem;
+@property (nonatomic, strong) NSString* defaultFilename;
+@property (nonatomic, strong) NSArray<NSString*>* allowedTypes;
+@property (nonatomic, strong) dispatch_semaphore_t semaphore;
 - (void)showPanel;
 @end
 
-@implementation FilePanelHelper
-- (void)showPanel {
-    NSOpenPanel* panel = [NSOpenPanel openPanel];
-    [panel setCanChooseFiles:YES];
-    [panel setCanChooseDirectories:NO];
-    [panel setAllowsMultipleSelection:NO];
-    [panel setResolvesAliases:YES];
-
-    if (self.directoryPath != nil && self.directoryPath.length > 0) {
-        NSURL* directoryURL = [NSURL fileURLWithPath:self.directoryPath isDirectory:YES];
-        if (directoryURL != nil) {
-            [panel setDirectoryURL:directoryURL];
-        }
+@implementation VeloFilePanelHelper
+- (void)configurePanel:(NSSavePanel*)panel {
+    if (self.title.length > 0) [panel setTitle:self.title];
+    if (self.directoryPath.length > 0) {
+        [panel setDirectoryURL:[NSURL fileURLWithPath:self.directoryPath isDirectory:YES]];
     }
-
-    if (self.allowedTypes != nil && self.allowedTypes.count > 0) {
+    if (self.defaultFilename.length > 0) [panel setNameFieldStringValue:self.defaultFilename];
+    [panel setCanCreateDirectories:YES];
+    if (self.allowedTypes.count > 0) {
         if (@available(macOS 11.0, *)) {
-            NSMutableArray<UTType*>* utTypes = [NSMutableArray array];
-            for (NSString* ext in self.allowedTypes) {
-                UTType* t = [UTType typeWithFilenameExtension:ext];
-                if (t != nil) {
-                    [utTypes addObject:t];
-                }
+            NSMutableArray<UTType*>* types = [NSMutableArray array];
+            for (NSString* extension in self.allowedTypes) {
+                UTType* type = [UTType typeWithFilenameExtension:extension];
+                if (type != nil) [types addObject:type];
             }
-            if (utTypes.count > 0) {
-                [panel setAllowedContentTypes:utTypes];
-            }
+            if (types.count > 0) [panel setAllowedContentTypes:types];
         } else {
             [panel setAllowedFileTypes:self.allowedTypes];
         }
     }
+}
 
-    NSWindowAnimationBehavior behavior = NSWindowAnimationBehaviorDefault;
-    switch (self.animationType) {
-        case 1: behavior = NSWindowAnimationBehaviorNone; break;
-        case 2: behavior = NSWindowAnimationBehaviorDocumentWindow; break;
-        case 3: behavior = NSWindowAnimationBehaviorUtilityWindow; break;
-        case 4: behavior = NSWindowAnimationBehaviorAlertPanel; break;
-        default: behavior = NSWindowAnimationBehaviorDefault; break;
+- (void)finishWithURLs:(NSArray<NSURL*>*)urls {
+    NSMutableArray<NSString*>* paths = [NSMutableArray arrayWithCapacity:urls.count];
+    for (NSURL* url in urls) {
+        if (url.path != nil) [paths addObject:url.path];
     }
+    NSData* data = [NSJSONSerialization dataWithJSONObject:paths options:0 error:nil];
+    if (data != nil) self.result = strndup(data.bytes, data.length);
+    dispatch_semaphore_signal(self.semaphore);
+}
 
-    if (self.animationType == 5) {
-        NSWindow* window = [NSApp keyWindow];
-        if (window) {
-            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
-                if (response == NSModalResponseOK) {
-                    NSURL* url = [[panel URLs] firstObject];
-                    if (url) {
-                        const char* path = [[url path] UTF8String];
-                        if (path) {
-                            self.result = strdup(path);
-                        }
-                    }
-                } else {
-                    self.cancelled = 1;
-                }
-                dispatch_semaphore_signal(self.sem);
-            }];
-            return;
-        }
-    }
-
-    [panel setAnimationBehavior:behavior];
+- (void)showPanel {
     [NSApp activateIgnoringOtherApps:YES];
-
-    NSModalResponse response = [panel runModal];
-    if (response == NSModalResponseOK) {
-        NSURL* url = [[panel URLs] firstObject];
-        if (url) {
-            const char* path = [[url path] UTF8String];
-            if (path) {
-                self.result = strdup(path);
-            }
+    if (self.save) {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        [self configurePanel:panel];
+        if ([panel runModal] == NSModalResponseOK && panel.URL != nil) {
+            [self finishWithURLs:@[panel.URL]];
+        } else {
+            self.cancelled = 1;
+            dispatch_semaphore_signal(self.semaphore);
         }
+        return;
+    }
+
+    NSOpenPanel* panel = [NSOpenPanel openPanel];
+    [self configurePanel:panel];
+    [panel setCanChooseFiles:self.chooseFiles];
+    [panel setCanChooseDirectories:self.chooseDirectories];
+    [panel setAllowsMultipleSelection:self.multiple];
+    [panel setResolvesAliases:YES];
+    if ([panel runModal] == NSModalResponseOK) {
+        [self finishWithURLs:panel.URLs];
     } else {
         self.cancelled = 1;
+        dispatch_semaphore_signal(self.semaphore);
     }
-
-    dispatch_semaphore_signal(self.sem);
 }
 @end
 
-static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType, const char** allowedTypes, int allowedTypesCount, const char* directoryPath) {
-    FilePanelHelper* helper = [[FilePanelHelper alloc] init];
-    helper.sem = dispatch_semaphore_create(0);
-    helper.result = NULL;
+static char* VeloFile_ShowPanel(
+    int save, int chooseFiles, int chooseDirectories, int multiple, int* cancelled,
+    const char* title, const char* directoryPath, const char* defaultFilename,
+    const char** allowedTypes, int allowedTypesCount
+) {
+    VeloFilePanelHelper* helper = [[VeloFilePanelHelper alloc] init];
+    helper.save = save != 0;
+    helper.chooseFiles = chooseFiles != 0;
+    helper.chooseDirectories = chooseDirectories != 0;
+    helper.multiple = multiple != 0;
     helper.cancelled = 0;
-    helper.animationType = animationType;
-    if (directoryPath != NULL && strlen(directoryPath) > 0) {
-        helper.directoryPath = [NSString stringWithUTF8String:directoryPath];
-    }
-
+    helper.result = NULL;
+    helper.semaphore = dispatch_semaphore_create(0);
+    if (title != NULL) helper.title = [NSString stringWithUTF8String:title];
+    if (directoryPath != NULL) helper.directoryPath = [NSString stringWithUTF8String:directoryPath];
+    if (defaultFilename != NULL) helper.defaultFilename = [NSString stringWithUTF8String:defaultFilename];
     if (allowedTypes != NULL && allowedTypesCount > 0) {
         NSMutableArray<NSString*>* types = [NSMutableArray arrayWithCapacity:allowedTypesCount];
         for (int i = 0; i < allowedTypesCount; i++) {
@@ -121,77 +110,89 @@ static char* BoxFile_ShowOpenPanel(int* cancelled, int animationType, const char
         }
         helper.allowedTypes = types;
     }
-
-    // Always dispatch to main thread.
-    // Since ShowFileSelectDialog is now called from a goroutine (via go func in HandleMessage),
-    // we are NOT on the main thread, so dispatch_semaphore_wait is safe.
     [helper performSelectorOnMainThread:@selector(showPanel) withObject:nil waitUntilDone:NO];
-    dispatch_semaphore_wait(helper.sem, DISPATCH_TIME_FOREVER);
-
+    dispatch_semaphore_wait(helper.semaphore, DISPATCH_TIME_FOREVER);
     *cancelled = helper.cancelled;
     return helper.result;
 }
 */
 import "C"
+
 import (
-	"errors"
-	"runtime"
+	"encoding/json"
+	"fmt"
 	"unsafe"
 )
 
-// ShowFileSelectDialog shows a file selection dialog and returns the selected file path.
-// animationType: "default", "none", "document", "utility", "alert", "sheet"
-func showFileSelectDialog(options FileSelectOptions) (string, error) {
-	runtime.UnlockOSThread()
+func show_open_dialog(options OpenDialogOptions) ([]string, error) {
+	return show_dialog(false, options.CanChooseFiles, options.CanChooseDirectories, options.AllowsMultipleSelection, options.Title, options.Directory, "", options.AllowedTypes)
+}
 
-	var animCode int
-	switch options.AnimationType {
-	case "default":
-		animCode = 0
-	case "none":
-		animCode = 1
-	case "document":
-		animCode = 2
-	case "utility":
-		animCode = 3
-	case "alert":
-		animCode = 4
-	case "sheet":
-		animCode = 5
-	default:
-		animCode = 0
+func show_save_dialog(options SaveDialogOptions) (string, error) {
+	paths, err := show_dialog(true, false, false, false, options.Title, options.Directory, options.DefaultFilename, options.AllowedTypes)
+	if err != nil {
+		return "", err
 	}
-
-	var cancelled C.int
-	var cStr *C.char
-	var cDirectory *C.char
-	if options.Directory != "" {
-		cDirectory = C.CString(options.Directory)
-		defer C.free(unsafe.Pointer(cDirectory))
+	if len(paths) == 0 {
+		return "", ErrCancelled
 	}
+	return paths[0], nil
+}
 
-	if len(options.AllowedTypes) > 0 {
-		cTypes := make([]*C.char, len(options.AllowedTypes))
-		for i, t := range options.AllowedTypes {
-			cTypes[i] = C.CString(t)
+func show_dialog(save, choose_files, choose_directories, multiple bool, title, directory, default_filename string, allowed_types []string) ([]string, error) {
+	c_title := optional_c_string(title)
+	c_directory := optional_c_string(directory)
+	c_filename := optional_c_string(default_filename)
+	defer free_c_string(c_title)
+	defer free_c_string(c_directory)
+	defer free_c_string(c_filename)
+
+	c_types := make([]*C.char, len(allowed_types))
+	for index, allowed_type := range allowed_types {
+		c_types[index] = C.CString(allowed_type)
+	}
+	defer func() {
+		for _, c_type := range c_types {
+			C.free(unsafe.Pointer(c_type))
 		}
-		defer func() {
-			for _, ct := range cTypes {
-				C.free(unsafe.Pointer(ct))
-			}
-		}()
-		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), &cTypes[0], C.int(len(cTypes)), cDirectory)
-	} else {
-		cStr = C.BoxFile_ShowOpenPanel(&cancelled, C.int(animCode), nil, 0, cDirectory)
-	}
+	}()
 
+	var c_types_pointer **C.char
+	if len(c_types) > 0 {
+		c_types_pointer = &c_types[0]
+	}
+	var cancelled C.int
+	result := C.VeloFile_ShowPanel(bool_int(save), bool_int(choose_files), bool_int(choose_directories), bool_int(multiple), &cancelled, c_title, c_directory, c_filename, c_types_pointer, C.int(len(c_types)))
 	if cancelled != 0 {
-		return "", errors.New("cancelled")
+		return nil, ErrCancelled
 	}
-	if cStr == nil {
-		return "", errors.New("failed to get file path")
+	if result == nil {
+		return nil, fmt.Errorf("file dialog returned no path")
 	}
-	defer C.free(unsafe.Pointer(cStr))
+	defer C.free(unsafe.Pointer(result))
+	var paths []string
+	if err := json.Unmarshal([]byte(C.GoString(result)), &paths); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
 
-	return C.GoString(cStr), nil
+func bool_int(value bool) C.int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func optional_c_string(value string) *C.char {
+	if value == "" {
+		return nil
+	}
+	return C.CString(value)
+}
+
+func free_c_string(value *C.char) {
+	if value != nil {
+		C.free(unsafe.Pointer(value))
+	}
 }

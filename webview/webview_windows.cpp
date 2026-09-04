@@ -60,6 +60,10 @@ struct WindowContext {
     bool frameless = false;
     bool hidden = false;
     bool nonActivating = false;
+    bool hideOnClose = false;
+    bool disableResize = false;
+    bool disableMinimize = false;
+    bool disableMaximize = false;
     bool controllerPending = false;
     bool closed = false;
 };
@@ -78,6 +82,10 @@ struct OpenWindowRequest {
     bool hidden = false;
     bool nonActivating = false;
     bool preserveStateOnFocus = false;
+    bool hideOnClose = false;
+    bool disableResize = false;
+    bool disableMinimize = false;
+    bool disableMaximize = false;
 };
 
 static WindowContext* g_primaryWindow = nullptr;
@@ -162,6 +170,14 @@ static void OpenSecondaryWindow(OpenWindowRequest* request);
 static void CreateControllerForWindow(WindowContext* window);
 static void CleanupSecondaryWindow(WindowContext* window);
 
+static DWORD WindowStyle(bool frameless, bool disableResize, bool disableMinimize, bool disableMaximize) {
+    DWORD style = (frameless ? WS_POPUP : WS_OVERLAPPEDWINDOW) | WS_VISIBLE;
+    if (disableResize) style &= ~WS_THICKFRAME;
+    if (disableMinimize) style &= ~WS_MINIMIZEBOX;
+    if (disableMaximize) style &= ~WS_MAXIMIZEBOX;
+    return style;
+}
+
 // Custom message used to marshal scheme task Finish back to the UI thread.
 // WebView2 COM objects (g_env, args, deferral) are apartment-threaded — they
 // MUST be called from the thread that owns them (the UI thread running the
@@ -195,6 +211,13 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
             PostQuitMessage(0);
         }
         break;
+    case WM_CLOSE:
+        if (window && window->hideOnClose) {
+            ShowWindow(hWnd, SW_HIDE);
+            return 0;
+        }
+        DestroyWindow(hWnd);
+        break;
     default:
         if (message == WM_VELO_SCHEME_FINISH) {
             DoSchemeFinishOnUIThread(reinterpret_cast<SchemeTask*>(wParam));
@@ -209,7 +232,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
     return 0;
 }
 
-static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden) {
+static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden,
+    bool disableResize, bool disableMinimize, bool disableMaximize) {
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
@@ -221,7 +245,7 @@ static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden) {
     // startup, position the window off-screen to avoid any visible flash, then
     // call ShowWindow(SW_HIDE). webviewShow() will move it back on-screen on
     // first show.
-    DWORD style = (frameless ? WS_POPUP : WS_OVERLAPPEDWINDOW) | WS_VISIBLE;
+    DWORD style = WindowStyle(frameless, disableResize, disableMinimize, disableMaximize);
     int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
     if (hidden) {
         x = -32000;
@@ -231,6 +255,9 @@ static HRESULT InitWindow(HINSTANCE hInstance, bool frameless, bool hidden) {
     g_primaryWindow->primary = true;
     g_primaryWindow->frameless = frameless;
     g_primaryWindow->hidden = hidden;
+    g_primaryWindow->disableResize = disableResize;
+    g_primaryWindow->disableMinimize = disableMinimize;
+    g_primaryWindow->disableMaximize = disableMaximize;
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"My App", style,
         x, y, 1024, 768,
         nullptr, nullptr, hInstance, g_primaryWindow);
@@ -739,6 +766,14 @@ static void OpenSecondaryWindow(OpenWindowRequest* request) {
                 window->webview->Navigate(ToWide(window->url.c_str()).c_str());
             }
         }
+        window->disableResize = request->disableResize;
+        window->disableMinimize = request->disableMinimize;
+        window->disableMaximize = request->disableMaximize;
+        SetWindowLongPtrW(window->hwnd, GWL_STYLE, WindowStyle(
+            request->frameless, request->disableResize,
+            request->disableMinimize, request->disableMaximize));
+        SetWindowPos(window->hwnd, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         if (IsIconic(window->hwnd)) ShowWindow(window->hwnd, SW_RESTORE);
         ShowWindow(window->hwnd, window->nonActivating ? SW_SHOWNOACTIVATE : SW_SHOW);
         if (!window->nonActivating) SetForegroundWindow(window->hwnd);
@@ -758,8 +793,13 @@ static void OpenSecondaryWindow(OpenWindowRequest* request) {
     window->frameless = request->frameless;
     window->hidden = request->hidden;
     window->nonActivating = request->nonActivating;
+    window->hideOnClose = request->hideOnClose;
+    window->disableResize = request->disableResize;
+    window->disableMinimize = request->disableMinimize;
+    window->disableMaximize = request->disableMaximize;
 
-    DWORD style = (window->frameless ? WS_POPUP : WS_OVERLAPPEDWINDOW) | WS_VISIBLE;
+    DWORD style = WindowStyle(window->frameless, window->disableResize,
+        window->disableMinimize, window->disableMaximize);
     DWORD extendedStyle = window->nonActivating ? WS_EX_NOACTIVATE : 0;
     int width = request->width > 0 ? request->width : 760;
     int height = request->height > 0 ? request->height : 640;
@@ -842,16 +882,18 @@ void webviewTerminate() {
     PostQuitMessage(0);
 }
 
-void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, const char* loaderPath) {
+void webviewRunApp(const char* name, const char* url, const char* injectedJS, const void* iconData, int iconLen, const char* title, int width, int height, int frameless, int hidden, int hideOnClose, int disableResize, int disableMinimize, int disableMaximize, const char* loaderPath) {
     g_frameless = (frameless != 0);
     g_hidden = (hidden != 0);
     HINSTANCE hInstance = GetModuleHandle(nullptr);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(InitWindow(hInstance, g_frameless, g_hidden))) return;
+    if (FAILED(InitWindow(hInstance, g_frameless, g_hidden,
+        disableResize != 0, disableMinimize != 0, disableMaximize != 0))) return;
     g_primaryWindow->name = name ? name : "default";
     g_primaryWindow->url = url ? url : "";
     g_primaryWindow->injectedJS = injectedJS ? injectedJS : "";
     g_primaryWindow->title = title ? title : "";
+    g_primaryWindow->hideOnClose = hideOnClose != 0;
     g_namedWindows[g_primaryWindow->name] = g_primaryWindow;
 
     if (title) {
@@ -936,7 +978,8 @@ static WindowContext* FindWindowForWebview(void* webview) {
 
 void webviewOpenWindow(const char* name, const char* url, const char* injectedJS,
     const char* title, int width, int height, int x, int y, int hasPosition,
-    int frameless, int hidden, int nonActivating, int preserveStateOnFocus) {
+    int frameless, int hidden, int nonActivating, int preserveStateOnFocus,
+    int hideOnClose, int disableResize, int disableMinimize, int disableMaximize) {
     OpenWindowRequest* request = new OpenWindowRequest();
     request->name = name && name[0] ? name : "app-window";
     request->url = url ? url : "";
@@ -951,6 +994,10 @@ void webviewOpenWindow(const char* name, const char* url, const char* injectedJS
     request->hidden = hidden != 0;
     request->nonActivating = nonActivating != 0;
     request->preserveStateOnFocus = preserveStateOnFocus != 0;
+    request->hideOnClose = hideOnClose != 0;
+    request->disableResize = disableResize != 0;
+    request->disableMinimize = disableMinimize != 0;
+    request->disableMaximize = disableMaximize != 0;
     if (!g_hwnd || !PostMessageW(g_hwnd, WM_VELO_OPEN_WINDOW, reinterpret_cast<WPARAM>(request), 0)) {
         delete request;
     }
@@ -964,12 +1011,12 @@ void webviewCloseWindow(void* webview) {
 
 void webviewMinimizeWindow(void* webview) {
     WindowContext* window = FindWindowForWebview(webview);
-    if (window && window->hwnd) ShowWindow(window->hwnd, SW_MINIMIZE);
+    if (window && window->hwnd && !window->disableMinimize) ShowWindow(window->hwnd, SW_MINIMIZE);
 }
 
 void webviewMaximizeWindow(void* webview) {
     WindowContext* window = FindWindowForWebview(webview);
-    if (window && window->hwnd) ShowWindow(window->hwnd, SW_MAXIMIZE);
+    if (window && window->hwnd && !window->disableMaximize) ShowWindow(window->hwnd, SW_MAXIMIZE);
 }
 
 void webviewRestoreWindow(void* webview) {
@@ -1092,18 +1139,32 @@ void webviewHide() {
     ShowWindow(g_hwnd, SW_HIDE);
 }
 
+void webviewFocus() {
+    if (!g_hwnd) return;
+    ShowWindow(g_hwnd, SW_SHOW);
+    SetForegroundWindow(g_hwnd);
+}
+
+int webviewIsVisible() {
+    return g_hwnd && IsWindowVisible(g_hwnd) ? 1 : 0;
+}
+
+int webviewIsFocused() {
+    return g_hwnd && GetForegroundWindow() == g_hwnd ? 1 : 0;
+}
+
 void webviewMinimize() {
-    if (g_hwnd) ShowWindow(g_hwnd, SW_MINIMIZE);
+    if (g_hwnd && (!g_primaryWindow || !g_primaryWindow->disableMinimize)) ShowWindow(g_hwnd, SW_MINIMIZE);
 }
 
 void webviewMaximize() {
-    if (g_hwnd) ShowWindow(g_hwnd, SW_MAXIMIZE);
+    if (g_hwnd && (!g_primaryWindow || !g_primaryWindow->disableMaximize)) ShowWindow(g_hwnd, SW_MAXIMIZE);
 }
 
 static DWORD g_savedStyle = 0;
 
 void webviewFullscreen() {
-    if (!g_hwnd) return;
+    if (!g_hwnd || (g_primaryWindow && g_primaryWindow->disableMaximize)) return;
     g_savedStyle = GetWindowLong(g_hwnd, GWL_STYLE);
     MONITORINFO mi = { sizeof(mi) };
     if (GetMonitorInfo(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
