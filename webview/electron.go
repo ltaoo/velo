@@ -783,6 +783,9 @@ function createWindow(windowConfig) {
     win.webContents.on("before-input-event", (event, input) => {
       if ((input.control || input.meta) && ["+", "=", "-", "0"].includes(input.key)) event.preventDefault();
     });
+    win.webContents.on("did-finish-load", () => {
+      win.webContents.executeJavaScript("document.addEventListener('wheel',function(e){if(e.ctrlKey||e.metaKey)e.preventDefault()},{passive:false})");
+    });
   }
   if (windowConfig.reload_context_menu) {
     win.webContents.on("context-menu", () => {
